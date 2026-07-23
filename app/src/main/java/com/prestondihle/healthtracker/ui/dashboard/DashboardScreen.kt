@@ -95,7 +95,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
                 state = state,
                 onAdd = {
                     viewModel.addHydration(it)
-                    toast("Logged ${Units.mlToFlOz(it).toInt()} oz")
+                    toast("Logged ${Units.mlToWholeOz(it)} oz")
                 },
             )
         }
@@ -297,13 +297,13 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
 private fun HydrationCard(state: DashboardUiState, onAdd: (Int) -> Unit) {
     DashboardCard(title = "Hydration") {
         val goalMl = state.goals.dailyWaterMlGoal ?: 2957
-        val oz = Units.mlToFlOz(state.hydrationMl)
-        val goalOz = Units.mlToFlOz(goalMl)
+        val oz = Units.mlToWholeOz(state.hydrationMl)
+        val goalOz = Units.mlToWholeOz(goalMl)
 
         Metric(
             label = "Today",
-            value = "${oz.toInt()} oz",
-            supporting = "goal ${goalOz.toInt()} oz",
+            value = "$oz oz",
+            supporting = "goal $goalOz oz",
         )
         LinearProgressIndicator(
             progress = { if (goalMl > 0) (state.hydrationMl.toFloat() / goalMl).coerceIn(0f, 1f) else 0f },
@@ -349,7 +349,12 @@ private fun MetabolicCard(
             leftAxis = AxisSpec(min = 60f, max = 200f, label = "mg/dL"),
             rightAxis =
                 AxisSpec(min = 0f, max = 5f, label = "mmol/L", format = { "%.1f".format(it) }),
-            modifier = Modifier.fillMaxWidth().height(220.dp),
+            // An empty plot does not need a full-height canvas to say so.
+            modifier =
+                Modifier.fillMaxWidth()
+                    .height(
+                        if (state.glucose.isEmpty() && state.ketones.isEmpty()) 96.dp else 220.dp
+                    ),
         )
 
         HorizontalDivider()

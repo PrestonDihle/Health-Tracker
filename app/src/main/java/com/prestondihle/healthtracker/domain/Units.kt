@@ -21,6 +21,14 @@ object Units {
 
     fun mlToFlOz(ml: Int): Float = (ml / ML_PER_FL_OZ).toFloat()
 
+    /**
+     * Millilitres as whole fluid ounces, rounded rather than truncated.
+     *
+     * The 100 oz default goal is stored as 2957 ml, which divides to 99.99 --
+     * truncating displayed that as "99 oz".
+     */
+    fun mlToWholeOz(ml: Int): Int = mlToFlOz(ml).roundToInt()
+
     fun flOzToMl(flOz: Float): Int = (flOz * ML_PER_FL_OZ).roundToInt()
 
     fun kgToLbs(kg: Float): Float = (kg / KG_PER_LB).toFloat()

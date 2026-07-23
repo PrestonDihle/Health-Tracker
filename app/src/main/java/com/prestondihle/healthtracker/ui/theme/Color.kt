@@ -31,6 +31,25 @@ val SurfaceVariantLight = Color(0xFFC8CCC4)
 val OutlineLight = Color(0xFFA8ADA2)
 val OnSurfaceVariantLight = Color(0xFF4A4F46)
 
+// Material 3 draws the navigation bar, menus and sheets from the
+// surfaceContainer family. Leaving these unset falls back to the baseline
+// purple scheme, which is why the nav bar rendered lavender.
+val SurfaceContainerLowest = Color(0xFFFFFFFF)
+val SurfaceContainerLow = Color(0xFFF5F7F2)
+val SurfaceContainer = Color(0xFFEFF1EC)
+val SurfaceContainerHigh = Color(0xFFE4E7DF)
+val SurfaceContainerHighest = Color(0xFFD9DCD6)
+val SurfaceDim = Color(0xFFC9CDC4)
+val SurfaceBright = Color(0xFFF7F9F4)
+
+/**
+ * Tonal fill for buttons, stepper arrows and the nav bar's selected pill.
+ *
+ * A tint of the primary rather than a neutral: grey tonal buttons read as
+ * disabled next to a filled one.
+ */
+val BalticTint = Color(0xFFC5D8E6)
+
 // ---------------------------------------------------------------------------
 // Chart series colors. Kept here so the dashboard and trends screens cannot
 // drift apart on what "glucose" or "ketones" look like.

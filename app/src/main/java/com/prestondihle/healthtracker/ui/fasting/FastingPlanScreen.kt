@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -170,36 +171,55 @@ private fun PlanDayRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
+        // Fixed width rather than a weight: three-letter day names never need
+        // more, and it leaves the chips enough room to stay on one line.
         Text(
             day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
             style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(0.8f),
+            maxLines = 1,
+            modifier = Modifier.width(44.dp),
         )
 
         if (day.enabled) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.weight(2.4f),
+                modifier = Modifier.weight(1f),
             ) {
-                AssistChip(
-                    onClick = onEditStart,
-                    label = { Text(TIME_FORMAT.format(day.feedingStart)) },
-                )
+                TimeChip(time = day.feedingStart, onClick = onEditStart)
                 Text("to", style = MaterialTheme.typography.labelSmall)
-                AssistChip(onClick = onEditEnd, label = { Text(TIME_FORMAT.format(day.feedingEnd)) })
+                TimeChip(time = day.feedingEnd, onClick = onEditEnd)
             }
         } else {
             Text(
                 "Unplanned",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(2.4f),
+                modifier = Modifier.weight(1f),
             )
         }
 
         Switch(checked = day.enabled, onCheckedChange = onToggle)
     }
+}
+
+/**
+ * A tappable time. [softWrap] is off because "12:00 PM" would otherwise break
+ * after the minutes and render as two stacked lines in a narrow chip.
+ */
+@Composable
+private fun TimeChip(time: LocalTime, onClick: () -> Unit) {
+    AssistChip(
+        onClick = onClick,
+        label = {
+            Text(
+                TIME_FORMAT.format(time),
+                maxLines = 1,
+                softWrap = false,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        },
+    )
 }
 
 @Composable

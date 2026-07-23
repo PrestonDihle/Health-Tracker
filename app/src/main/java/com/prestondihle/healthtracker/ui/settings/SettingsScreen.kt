@@ -78,7 +78,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 HorizontalDivider()
                 IntStepper(
                     label = "Water",
-                    value = Units.mlToFlOz(state.goals.dailyWaterMlGoal ?: 2957).toInt(),
+                    value = Units.mlToWholeOz(state.goals.dailyWaterMlGoal ?: 2957),
                     onValueChange = {
                         viewModel.saveGoals(
                             state.goals.copy(dailyWaterMlGoal = Units.flOzToMl(it.toFloat()))

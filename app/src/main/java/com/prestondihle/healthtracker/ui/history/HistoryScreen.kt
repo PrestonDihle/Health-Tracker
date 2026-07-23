@@ -102,7 +102,7 @@ fun HistoryScreen(viewModel: HistoryViewModel) {
 
         item {
             HistoryCard(title = "Logged that day") {
-                ReadOnlyRow("Hydration", "${Units.mlToFlOz(state.hydrationMl).toInt()} oz")
+                ReadOnlyRow("Hydration", "${Units.mlToWholeOz(state.hydrationMl)} oz")
                 ReadOnlyRow("Pushups", state.reps(MovementType.PUSHUP).toString())
                 ReadOnlyRow("Air squats", state.reps(MovementType.AIR_SQUAT).toString())
                 ReadOnlyRow(
