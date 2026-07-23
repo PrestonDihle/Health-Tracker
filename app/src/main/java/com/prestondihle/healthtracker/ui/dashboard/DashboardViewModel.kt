@@ -40,6 +40,9 @@ private const val DEFAULT_WAIST_CM = 106.68f
 
 private const val GLUCOSE_WINDOW_HOURS = 24L
 
+/** Used only when the plan has no fast scheduled near now. */
+private const val DEFAULT_GOAL_MINUTES = 16 * 60
+
 data class DashboardUiState(
     val today: LocalDate = LocalDate.now(),
     val now: Instant = Instant.now(),
@@ -299,16 +302,26 @@ class DashboardViewModel(
         viewModelScope.launch { repository.addExerciseSet(movement, reps) }
     }
 
-    fun startFast(type: FastingType) {
-        val goalMinutes =
-            when (type) {
-                FastingType.OMAD -> 23 * 60
-                FastingType.EXTENDED_24 -> 24 * 60
-                FastingType.EXTENDED_36 -> 36 * 60
-                FastingType.EXTENDED_48 -> 48 * 60
-                FastingType.CUSTOM -> 16 * 60
-            }
-        viewModelScope.launch { repository.startFast(type, goalMinutes) }
+    /**
+     * Starts a fast whose goal comes from the weekly plan rather than from a
+     * choice made here -- the Fasting screen is where the schedule is set.
+     *
+     * Falls back to 16 hours only when the plan has nothing scheduled nearby.
+     */
+    fun startFast() {
+        viewModelScope.launch {
+            val plan = repository.getFastingPlan().first()
+            val now = Instant.now()
+            val extended =
+                repository
+                    .getPlannedExtendedFasts(now.minus(Duration.ofDays(2)), now.plus(Duration.ofDays(3)))
+                    .first()
+
+            val goalMinutes =
+                FastingAdherence.plannedGoalMinutesAt(plan, extended, now, zoneId)
+                    ?: DEFAULT_GOAL_MINUTES
+            repository.startFast(FastingAdherence.typeForMinutes(goalMinutes), goalMinutes, now)
+        }
     }
 
     fun endFast() {

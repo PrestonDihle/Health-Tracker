@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -34,28 +35,33 @@ data class FastingPlanUiState(
             val byDay = days.associateBy { it.dayOfWeek }
             return DayOfWeek.values().toList().map {
                 byDay[it]
-                    ?: FastingPlanDay(it, LocalTime.of(12, 0), LocalTime.of(20, 0), enabled = true)
+                    ?: FastingPlanDay(
+                        it,
+                        LocalTime.of(12, 0),
+                        LocalTime.of(20, 0),
+                        hasFeedingWindow = true,
+                    )
             }
         }
 
     /** Planned fasting hours per week, for the summary line. */
     val plannedHoursPerWeek: Int
         get() =
-            orderedDays.sumOf { day ->
-                if (!day.enabled) 0L
-                else {
-                    val feedingMinutes =
-                        if (day.feedingEnd.isAfter(day.feedingStart)) {
-                            java.time.Duration.between(day.feedingStart, day.feedingEnd).toMinutes()
-                        } else {
-                            24 * 60 -
-                                java.time.Duration.between(day.feedingEnd, day.feedingStart)
-                                    .toMinutes()
-                        }
-                    (24 * 60 - feedingMinutes)
+            orderedDays
+                .sumOf { day ->
+                    // A no-eating day is a full 24 hours of planned fast.
+                    if (!day.hasFeedingWindow) 24L * 60
+                    else 24L * 60 - feedingMinutes(day)
                 }
-            }
                 .toInt() / 60
+
+    private fun feedingMinutes(day: FastingPlanDay): Long =
+        if (day.feedingEnd.isAfter(day.feedingStart)) {
+            Duration.between(day.feedingStart, day.feedingEnd).toMinutes()
+        } else {
+            // Window wraps past midnight.
+            24L * 60 - Duration.between(day.feedingEnd, day.feedingStart).toMinutes()
+        }
 }
 
 class FastingPlanViewModel(
@@ -121,10 +127,11 @@ class FastingPlanViewModel(
         }
     }
 
-    fun setDayEnabled(day: DayOfWeek, enabled: Boolean) {
+    /** Off means no eating that day: the full 24 hours become a planned fast. */
+    fun setHasFeedingWindow(day: DayOfWeek, hasWindow: Boolean) {
         viewModelScope.launch {
             val existing = uiState.value.orderedDays.first { it.dayOfWeek == day }
-            repository.upsertFastingPlanDay(existing.copy(enabled = enabled))
+            repository.upsertFastingPlanDay(existing.copy(hasFeedingWindow = hasWindow))
         }
     }
 

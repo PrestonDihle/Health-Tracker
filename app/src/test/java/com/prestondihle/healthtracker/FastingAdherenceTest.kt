@@ -33,7 +33,7 @@ class FastingAdherenceTest {
     /** Eating noon to 20:00 every day, so 16 fasting hours per day. */
     private fun sixteenEightPlan() =
         DayOfWeek.values().toList().map {
-            FastingPlanDay(it, LocalTime.of(12, 0), LocalTime.of(20, 0), enabled = true)
+            FastingPlanDay(it, LocalTime.of(12, 0), LocalTime.of(20, 0), hasFeedingWindow = true)
         }
 
     private fun instantAt(dayOffset: Long, hour: Int) =
@@ -141,10 +141,10 @@ class FastingAdherenceTest {
     }
 
     @Test
-    fun `disabled days contribute no planned fasting time`() {
+    fun `a no-eating day is a full 24 hours of planned fast`() {
         val plan =
             sixteenEightPlan().map {
-                if (it.dayOfWeek == DayOfWeek.MONDAY) it.copy(enabled = false) else it
+                if (it.dayOfWeek == DayOfWeek.MONDAY) it.copy(hasFeedingWindow = false) else it
             }
 
         val planned =
@@ -155,7 +155,53 @@ class FastingAdherenceTest {
                 zoneId = zone,
             )
 
+        assertEquals(24 * 3600L, planned.totalSeconds)
+    }
+
+    @Test
+    fun `a day missing from the plan is not scored`() {
+        // Defensive: a gap must not fabricate a 24h fast that was never planned.
+        val plan = sixteenEightPlan().filterNot { it.dayOfWeek == DayOfWeek.MONDAY }
+
+        val planned =
+            FastingAdherence.plannedFastIntervals(
+                plan = plan,
+                extendedFasts = emptyList(),
+                window = Interval(weekStart, instantAt(1, 0)),
+                zoneId = zone,
+            )
+
         assertEquals(0L, planned.totalSeconds)
+    }
+
+    @Test
+    fun `goal length is taken from the planned fast containing now`() {
+        // 06:00 Monday sits inside the 20:00 Sun to 12:00 Mon planned fast,
+        // which runs 16 hours.
+        val minutes =
+            FastingAdherence.plannedGoalMinutesAt(
+                plan = sixteenEightPlan(),
+                extendedFasts = emptyList(),
+                now = instantAt(0, 6),
+                zoneId = zone,
+            )
+
+        assertEquals(16 * 60, minutes)
+    }
+
+    @Test
+    fun `goal length looks ahead when inside a feeding window`() {
+        // 13:00 Monday is mid-feeding, so the next planned fast is 20:00 Mon to
+        // 12:00 Tue: 16 hours.
+        val minutes =
+            FastingAdherence.plannedGoalMinutesAt(
+                plan = sixteenEightPlan(),
+                extendedFasts = emptyList(),
+                now = instantAt(0, 13),
+                zoneId = zone,
+            )
+
+        assertEquals(16 * 60, minutes)
     }
 
     @Test
@@ -187,7 +233,7 @@ class FastingAdherenceTest {
         // Eating 20:00 to 02:00 leaves 18 fasting hours per day.
         val plan =
             DayOfWeek.values().toList().map {
-                FastingPlanDay(it, LocalTime.of(20, 0), LocalTime.of(2, 0), enabled = true)
+                FastingPlanDay(it, LocalTime.of(20, 0), LocalTime.of(2, 0), hasFeedingWindow = true)
             }
 
         val planned =

@@ -1,5 +1,6 @@
 package com.prestondihle.healthtracker.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -124,8 +125,14 @@ data class FastingPlanDay(
     @PrimaryKey val dayOfWeek: DayOfWeek,
     val feedingStart: LocalTime,
     val feedingEnd: LocalTime,
-    /** When false the day is unplanned -- no fast is expected and it is excluded from scoring. */
-    val enabled: Boolean = true,
+    /**
+     * False means no eating at all that day -- the full 24 hours are a planned
+     * fast and the window times are ignored.
+     *
+     * Mapped to the pre-existing `enabled` column so this rename needs no
+     * schema migration and no loss of already-entered plans.
+     */
+    @ColumnInfo(name = "enabled") val hasFeedingWindow: Boolean = true,
 )
 
 /**

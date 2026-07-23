@@ -2,6 +2,7 @@
 
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
+import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import java.time.DayOfWeek
 import java.time.Instant
@@ -32,14 +33,22 @@ data class AdherenceResult(
  */
 object FastingAdherence {
 
-    /** Feeding windows, expanded to absolute instants and clipped to [window]. */
+    /**
+     * Splits the calendar into feeding time and unscored time.
+     *
+     * A day with [FastingPlanDay.hasFeedingWindow] false contributes no feeding
+     * interval at all, which leaves its whole 24 hours as planned fast. Only a
+     * day with no plan row is unscored -- that is a defensive case, since the
+     * plan is seeded with all seven days, and it deliberately does not
+     * fabricate a full-day fast the user never asked for.
+     */
     private fun feedingIntervals(
         plan: Map<DayOfWeek, FastingPlanDay>,
         window: Interval,
         zoneId: ZoneId,
     ): Pair<List<Interval>, List<Interval>> {
         val feeding = mutableListOf<Interval>()
-        val unplanned = mutableListOf<Interval>()
+        val unscored = mutableListOf<Interval>()
 
         // Start a day early so a window that wraps past midnight (e.g. 20:00 to
         // 02:00) still contributes its tail to the first day of the window.
@@ -48,19 +57,22 @@ object FastingAdherence {
 
         while (!date.isAfter(lastDate)) {
             val day = plan[date.dayOfWeek]
-            if (day == null || !day.enabled) {
-                unplanned.add(
-                    Interval(
-                        date.atStartOfDay(zoneId).toInstant(),
-                        date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+            when {
+                day == null ->
+                    unscored.add(
+                        Interval(
+                            date.atStartOfDay(zoneId).toInstant(),
+                            date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+                        )
                     )
-                )
-            } else {
-                feeding.add(feedingWindowOn(date, day.feedingStart, day.feedingEnd, zoneId))
+                day.hasFeedingWindow ->
+                    feeding.add(feedingWindowOn(date, day.feedingStart, day.feedingEnd, zoneId))
+                // No eating this day: add nothing, so the day stays planned fast.
+                else -> Unit
             }
             date = date.plusDays(1)
         }
-        return feeding to unplanned
+        return feeding to unscored
     }
 
     private fun feedingWindowOn(
@@ -78,9 +90,9 @@ object FastingAdherence {
     /**
      * Time the plan says should be spent fasting within [window].
      *
-     * Disabled days contribute nothing in either direction. A planned extended
-     * fast overrides both feeding windows and disabled days for the span it
-     * covers, so a 48-hour fast is scored even if it crosses a rest day.
+     * A day marked as no-eating is a full 24-hour planned fast. A planned
+     * extended fast overrides feeding windows for the span it covers, so a
+     * 48-hour fast is scored even where the weekday would normally allow food.
      */
     fun plannedFastIntervals(
         plan: List<FastingPlanDay>,
@@ -88,10 +100,10 @@ object FastingAdherence {
         window: Interval,
         zoneId: ZoneId,
     ): List<Interval> {
-        val (feeding, unplanned) = feedingIntervals(plan.associateBy { it.dayOfWeek }, window, zoneId)
+        val (feeding, unscored) = feedingIntervals(plan.associateBy { it.dayOfWeek }, window, zoneId)
 
         val fromDailyPlan =
-            listOf(window).minusIntervals(unplanned).minusIntervals(feeding)
+            listOf(window).minusIntervals(unscored).minusIntervals(feeding)
 
         val fromExtended =
             extendedFasts.mapNotNull { Interval(it.startInstant, it.endInstant).clampTo(window) }
@@ -140,7 +152,39 @@ object FastingAdherence {
                 dayOfWeek = it,
                 feedingStart = LocalTime.of(12, 0),
                 feedingEnd = LocalTime.of(20, 0),
-                enabled = true,
+                hasFeedingWindow = true,
             )
+        }
+
+    /**
+     * How long a fast started at [now] is meant to run, taken from the plan.
+     *
+     * Uses the planned fast interval containing [now], or the next one if
+     * currently inside a feeding window. Returns null when the plan has nothing
+     * scheduled in the look-ahead, leaving the caller to pick a fallback.
+     */
+    fun plannedGoalMinutesAt(
+        plan: List<FastingPlanDay>,
+        extendedFasts: List<PlannedExtendedFast>,
+        now: Instant,
+        zoneId: ZoneId,
+        lookAhead: java.time.Duration = java.time.Duration.ofDays(3),
+    ): Int? {
+        val horizon = Interval(now.minus(java.time.Duration.ofDays(2)), now.plus(lookAhead))
+        val planned = plannedFastIntervals(plan, extendedFasts, horizon, zoneId)
+
+        val current = planned.firstOrNull { !now.isBefore(it.start) && now.isBefore(it.end) }
+        val chosen = current ?: planned.firstOrNull { it.start.isAfter(now) } ?: return null
+        return (chosen.seconds / 60).toInt().takeIf { it > 0 }
+    }
+
+    /** Best-fitting [FastingType] label for a goal length. */
+    fun typeForMinutes(minutes: Int): FastingType =
+        when {
+            minutes >= 48 * 60 -> FastingType.EXTENDED_48
+            minutes >= 36 * 60 -> FastingType.EXTENDED_36
+            minutes >= 24 * 60 -> FastingType.EXTENDED_24
+            minutes >= 20 * 60 -> FastingType.OMAD
+            else -> FastingType.CUSTOM
         }
 }

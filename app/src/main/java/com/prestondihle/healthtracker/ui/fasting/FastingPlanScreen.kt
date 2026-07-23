@@ -34,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,11 +70,14 @@ fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
         item { AdherenceCard(state) }
 
         item {
-            PlanCard(title = "Weekly plan", subtitle = "Times are when eating is allowed") {
+            PlanCard(
+                title = "Weekly plan",
+                subtitle = "Times are when eating is allowed. Switch a day off for no eating at all.",
+            ) {
                 state.orderedDays.forEach { day ->
                     PlanDayRow(
                         day = day,
-                        onToggle = { viewModel.setDayEnabled(day.dayOfWeek, it) },
+                        onToggle = { viewModel.setHasFeedingWindow(day.dayOfWeek, it) },
                         onEditStart = {
                             timeEdit = TimeEdit(day.dayOfWeek, true, day.feedingStart)
                         },
@@ -180,7 +185,7 @@ private fun PlanDayRow(
             modifier = Modifier.width(44.dp),
         )
 
-        if (day.enabled) {
+        if (day.hasFeedingWindow) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -192,14 +197,22 @@ private fun PlanDayRow(
             }
         } else {
             Text(
-                "Unplanned",
+                "No eating — full day fast",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 2,
                 modifier = Modifier.weight(1f),
             )
         }
 
-        Switch(checked = day.enabled, onCheckedChange = onToggle)
+        Switch(
+            checked = day.hasFeedingWindow,
+            onCheckedChange = onToggle,
+            modifier = Modifier.semantics {
+                contentDescription =
+                    if (day.hasFeedingWindow) "Eating window on" else "No eating this day"
+            },
+        )
     }
 }
 

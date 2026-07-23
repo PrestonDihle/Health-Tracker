@@ -86,7 +86,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
             }
         }
 
-        item { FastCard(state = state, onStart = viewModel::startFast, onEnd = viewModel::endFast) }
+        item { FastCard(state = state, onStart = viewModel::startFast, onStop = viewModel::endFast) }
 
         item { ActivityCard(state = state, onRefresh = viewModel::refreshHealth) }
 
@@ -207,7 +207,7 @@ private fun HealthConnectPrompt(state: HealthPermissionState, onConnect: () -> U
 }
 
 @Composable
-private fun FastCard(state: DashboardUiState, onStart: (FastingType) -> Unit, onEnd: () -> Unit) {
+private fun FastCard(state: DashboardUiState, onStart: () -> Unit, onStop: () -> Unit) {
     DashboardCard(title = "Fasting") {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -216,6 +216,7 @@ private fun FastCard(state: DashboardUiState, onStart: (FastingType) -> Unit, on
             Metric(
                 label = "Current fast",
                 value = state.fastDuration?.let { Units.formatDuration(it) } ?: "Not fasting",
+                supporting = state.activeFast?.let { "goal ${it.goalDurationMinutes / 60}h" },
             )
             Metric(
                 label = "Adherence",
@@ -231,14 +232,12 @@ private fun FastCard(state: DashboardUiState, onStart: (FastingType) -> Unit, on
             )
         }
 
+        // The goal length comes from the weekly plan, so there is nothing to
+        // choose here -- just start and stop.
         if (state.activeFast != null) {
-            OutlinedButton(onClick = onEnd) { Text("End fast") }
+            Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Stop") }
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { onStart(FastingType.CUSTOM) }) { Text("Start 16h") }
-                FilledTonalButton(onClick = { onStart(FastingType.OMAD) }) { Text("OMAD") }
-                FilledTonalButton(onClick = { onStart(FastingType.EXTENDED_24) }) { Text("24h") }
-            }
+            Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Start") }
         }
     }
 }
