@@ -21,18 +21,15 @@ android {
   }
 
   signingConfigs {
+    // Release signing comes from the environment; nothing secret is stored here.
+    // `assembleRelease` will fail until KEYSTORE_PATH, STORE_PASSWORD and
+    // KEY_PASSWORD are set and the upload key exists.
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
     }
   }
 
@@ -43,7 +40,10 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    // Debug uses AGP's default debug keystore, which is generated on demand at
+    // ~/.android/debug.keystore. The scaffold pointed at a checked-in
+    // debug.keystore that is gitignored and therefore never present.
+    debug { isMinifyEnabled = false }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11

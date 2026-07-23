@@ -79,10 +79,33 @@ entirely.
 
 ## Building
 
-Requires Android Studio and an Android SDK. Open the project directory and let
-Gradle sync.
+```bash
+./gradlew :app:assembleDebug
+```
 
-There is no Gradle wrapper checked in; Android Studio provisions Gradle on
-import. To add one, run `gradle wrapper` with a local Gradle install.
+The Gradle wrapper is checked in, so no local Gradle install is needed. Debug
+builds use AGP's default debug keystore, generated on demand at
+`~/.android/debug.keystore` — there is nothing to set up before the first build.
 
-Minimum SDK 26, target 36.
+Requires a JDK 17+ (Android Studio's bundled JBR works) and Android SDK platform
+36. Point at the SDK with a `local.properties` containing `sdk.dir=...`, or set
+`ANDROID_HOME`. Minimum SDK 26, target 36.
+
+Release builds are **not** configured out of the box: `assembleRelease` reads
+`KEYSTORE_PATH`, `STORE_PASSWORD` and `KEY_PASSWORD` from the environment and
+needs a real upload key. No signing material is stored in this repo.
+
+### Tests
+
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+`FastingAdherenceTest` is pure JVM and covers the adherence maths, including the
+midnight-wrapping feeding window, extended fasts overriding the daily plan,
+disabled days, and the rule that future planned time is not scored.
+
+### Verified toolchain
+
+Last built green against Gradle 9.6.1, AGP 9.1.1, Kotlin 2.2.10, JDK 21,
+Android SDK platform 36.1, build-tools 36.0.0.
