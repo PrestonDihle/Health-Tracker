@@ -1,0 +1,172 @@
+package com.prestondihle.healthtracker.ui.trends
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.item
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.BarChart
+import com.prestondihle.healthtracker.ui.components.LineChart
+
+@Composable
+fun TrendsScreen(viewModel: TrendsViewModel) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
+    ) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TrendsRange.entries.forEach { option ->
+                    FilterChip(
+                        selected = state.range == option,
+                        onClick = { viewModel.setRange(option) },
+                        label = { Text(option.label) },
+                    )
+                }
+            }
+        }
+
+        item {
+            TrendCard(title = "Steps", subtitle = "from Health Connect") {
+                BarChart(
+                    dataPoints = state.snapshots.mapNotNull { it.steps?.toFloat() },
+                    goalLine = state.goals.dailyStepGoal?.toFloat(),
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Waist", subtitle = "inches") {
+                LineChart(
+                    dataPoints = state.waists.map { Units.cmToInches(it.waistCm) },
+                    goalLine = state.goals.goalWaistCm?.let { Units.cmToInches(it) },
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Weight", subtitle = "pounds") {
+                LineChart(
+                    dataPoints = state.weights.map { Units.kgToLbs(it.weightKg) },
+                    goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Resting heart rate", subtitle = "bpm") {
+                LineChart(
+                    dataPoints = state.snapshots.mapNotNull { it.restingHeartRateBpm?.toFloat() },
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Sleep", subtitle = "hours") {
+                BarChart(
+                    dataPoints = state.snapshots.mapNotNull { it.sleepMinutes?.let { m -> m / 60f } },
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Protein", subtitle = "grams, from Health Connect") {
+                BarChart(
+                    dataPoints = state.snapshots.mapNotNull { it.proteinGrams },
+                    goalLine = state.goals.dailyProteinTarget?.toFloat(),
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Pushups", subtitle = "reps per day") {
+                BarChart(
+                    dataPoints = state.repsByDay(MovementType.PUSHUP).map { it.second.toFloat() },
+                    goalLine = state.goals.dailyPushupGoal?.toFloat(),
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Air squats", subtitle = "reps per day") {
+                BarChart(
+                    dataPoints = state.repsByDay(MovementType.AIR_SQUAT).map { it.second.toFloat() },
+                    goalLine = state.goals.dailySquatGoal?.toFloat(),
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Vibe, energy, focus", subtitle = "1 to 10") {
+                LineChart(
+                    dataPoints = state.dailyLogs.mapNotNull { it.vibe?.toFloat() },
+                    minY = 1f,
+                    maxY = 10f,
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Pages read", subtitle = "per day") {
+                BarChart(
+                    dataPoints = state.dailyLogs.mapNotNull { it.bookPagesRead?.toFloat() },
+                    goalLine = state.goals.dailyPagesGoal?.toFloat(),
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrendCard(title: String, subtitle: String?, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            content()
+        }
+    }
+}

@@ -1,0 +1,328 @@
+package com.prestondihle.healthtracker.ui.dashboard
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.prestondihle.healthtracker.data.BloodPressureReading
+import com.prestondihle.healthtracker.data.BloodSugarReading
+import com.prestondihle.healthtracker.data.DailyLog
+import com.prestondihle.healthtracker.data.FastingPlanDay
+import com.prestondihle.healthtracker.data.FastingSession
+import com.prestondihle.healthtracker.data.FastingType
+import com.prestondihle.healthtracker.data.HealthDaySnapshot
+import com.prestondihle.healthtracker.data.KetoneReading
+import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.PlannedExtendedFast
+import com.prestondihle.healthtracker.data.UserGoals
+import com.prestondihle.healthtracker.domain.AdherenceResult
+import com.prestondihle.healthtracker.domain.FastingAdherence
+import com.prestondihle.healthtracker.health.HealthPermissionState
+import com.prestondihle.healthtracker.repository.TrackerRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.DayOfWeek
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
+
+/** Default waist when nothing has ever been measured: 42 inches. */
+private const val DEFAULT_WAIST_CM = 106.68f
+
+private const val GLUCOSE_WINDOW_HOURS = 24L
+
+data class DashboardUiState(
+    val today: LocalDate = LocalDate.now(),
+    val now: Instant = Instant.now(),
+    val activeFast: FastingSession? = null,
+    val adherence: AdherenceResult? = null,
+    val hasPlan: Boolean = false,
+    val snapshot: HealthDaySnapshot? = null,
+    val bestMileSeconds: Int? = null,
+    val hydrationMl: Int = 0,
+    val dailyLog: DailyLog = DailyLog(LocalDate.now()),
+    val waistCm: Float = DEFAULT_WAIST_CM,
+    val hasWaistMeasurement: Boolean = false,
+    val glucose: List<BloodSugarReading> = emptyList(),
+    val ketones: List<KetoneReading> = emptyList(),
+    val latestBloodPressure: BloodPressureReading? = null,
+    val pushupsToday: Int = 0,
+    val squatsToday: Int = 0,
+    val goals: UserGoals = UserGoals(),
+    val healthState: HealthPermissionState = HealthPermissionState.NOT_GRANTED,
+    val isSyncing: Boolean = false,
+) {
+    /** How long the current fast has been running, or null when not fasting. */
+    val fastDuration: Duration?
+        get() = activeFast?.let { Duration.between(it.startInstant, now) }
+
+    val fastGoalFraction: Float?
+        get() =
+            activeFast?.let {
+                if (it.goalDurationMinutes <= 0) null
+                else
+                    (Duration.between(it.startInstant, now).toMinutes().toFloat() /
+                            it.goalDurationMinutes)
+                        .coerceIn(0f, 1f)
+            }
+
+    val glucoseWindowStart: Instant
+        get() = now.minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
+}
+
+private data class FastingBundle(
+    val active: FastingSession?,
+    val sessions: List<FastingSession>,
+    val plan: List<FastingPlanDay>,
+    val extended: List<PlannedExtendedFast>,
+)
+
+private data class TodayBundle(
+    val log: DailyLog?,
+    val hydrationMl: Int,
+    val waistCm: Float?,
+    val bloodPressures: List<BloodPressureReading>,
+    val pushups: Int,
+    val squats: Int,
+)
+
+private data class MetabolicBundle(
+    val glucose: List<BloodSugarReading>,
+    val ketones: List<KetoneReading>,
+)
+
+class DashboardViewModel(
+    private val repository: TrackerRepository,
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+) : ViewModel() {
+
+    private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
+    private val syncing = MutableStateFlow(false)
+
+    /**
+     * Drives the fast timer. One second is fine for a clock read-out; adherence
+     * is recomputed on the same tick because the interval maths is trivial next
+     * to the recomposition it feeds.
+     */
+    private val ticker: Flow<Instant> = flow {
+        while (true) {
+            emit(Instant.now())
+            delay(1_000)
+        }
+    }
+
+    private val today: LocalDate
+        get() = LocalDate.now(zoneId)
+
+    /** Passed straight to the Health Connect permission dialog. */
+    val healthPermissions: Set<String>
+        get() = repository.healthPermissions()
+
+    private val fasting: Flow<FastingBundle>
+        get() {
+            val (weekStart, weekEnd) = weekBounds(today)
+            return combine(
+                repository.getActiveFastingSession(),
+                repository.getFastingSessionsOverlapping(weekStart, weekEnd),
+                repository.getFastingPlan(),
+                repository.getPlannedExtendedFasts(weekStart, weekEnd),
+            ) { active, sessions, plan, extended ->
+                FastingBundle(active, sessions, plan, extended)
+            }
+        }
+
+    private val todayData: Flow<TodayBundle>
+        get() {
+            val date = today
+            return combine(
+                repository.getDailyLog(date),
+                repository.getHydrationTotalMl(date),
+                repository.getLatestWaistOnOrBefore(date),
+                repository.getBloodPressureForDate(date),
+                combine(
+                    repository.getRepTotalForDate(MovementType.PUSHUP, date),
+                    repository.getRepTotalForDate(MovementType.AIR_SQUAT, date),
+                ) { pushups, squats -> pushups to squats },
+            ) { log, hydration, waist, bps, reps ->
+                TodayBundle(log, hydration, waist?.waistCm, bps, reps.first, reps.second)
+            }
+        }
+
+    private val metabolic: Flow<MetabolicBundle>
+        get() {
+            val since = Instant.now().minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
+            return combine(
+                repository.getBloodSugarSince(since),
+                repository.getKetonesSince(since),
+            ) { glucose, ketones ->
+                MetabolicBundle(glucose, ketones)
+            }
+        }
+
+    private val healthData: Flow<Pair<HealthDaySnapshot?, Int?>>
+        get() =
+            combine(repository.getHealthSnapshot(today), repository.getBestMileSecondsAllTime()) {
+                snapshot,
+                bestMile ->
+                snapshot to bestMile
+            }
+
+    val uiState: StateFlow<DashboardUiState> =
+        combine(
+                combine(fasting, ticker) { bundle, now -> bundle to now },
+                todayData,
+                metabolic,
+                healthData,
+                combine(repository.getUserGoals(), healthState, syncing) { goals, state, isSyncing ->
+                    Triple(goals, state, isSyncing)
+                },
+            ) { fastingAndNow, todayBundle, metabolicBundle, health, settings ->
+                val (fastingBundle, now) = fastingAndNow
+                val (goals, permission, isSyncing) = settings
+                val date = today
+                val (weekStart, weekEnd) = weekBounds(date)
+
+                DashboardUiState(
+                    today = date,
+                    now = now,
+                    activeFast = fastingBundle.active,
+                    adherence =
+                        FastingAdherence.score(
+                            plan = fastingBundle.plan,
+                            extendedFasts = fastingBundle.extended,
+                            sessions = fastingBundle.sessions,
+                            weekStart = weekStart,
+                            weekEnd = weekEnd,
+                            now = now,
+                            zoneId = zoneId,
+                        ),
+                    hasPlan = fastingBundle.plan.isNotEmpty(),
+                    snapshot = health.first,
+                    bestMileSeconds = health.second,
+                    hydrationMl = todayBundle.hydrationMl,
+                    dailyLog = todayBundle.log ?: DailyLog(date),
+                    waistCm = todayBundle.waistCm ?: DEFAULT_WAIST_CM,
+                    hasWaistMeasurement = todayBundle.waistCm != null,
+                    glucose = metabolicBundle.glucose,
+                    ketones = metabolicBundle.ketones,
+                    latestBloodPressure = todayBundle.bloodPressures.lastOrNull(),
+                    pushupsToday = todayBundle.pushups,
+                    squatsToday = todayBundle.squats,
+                    goals = goals ?: UserGoals(),
+                    healthState = permission,
+                    isSyncing = isSyncing,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = DashboardUiState(),
+            )
+
+    init {
+        seedPlanIfMissing()
+        refreshHealth()
+    }
+
+    /** Week runs Monday to Monday, matching the default in user settings. */
+    private fun weekBounds(date: LocalDate): Pair<Instant, Instant> {
+        val start = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        return start.atStartOfDay(zoneId).toInstant() to
+            start.plusWeeks(1).atStartOfDay(zoneId).toInstant()
+    }
+
+    /** Writes a 16:8 starting plan the first time the app runs, so adherence has a baseline. */
+    private fun seedPlanIfMissing() {
+        viewModelScope.launch {
+            if (repository.getFastingPlan().first().isEmpty()) {
+                repository.upsertFastingPlan(FastingAdherence.defaultPlan())
+            }
+        }
+    }
+
+    fun refreshHealth() {
+        viewModelScope.launch {
+            healthState.value = repository.healthPermissionState()
+            if (healthState.value == HealthPermissionState.GRANTED) {
+                syncing.value = true
+                repository.syncHealthData(today)
+                syncing.value = false
+            }
+        }
+    }
+
+    fun addHydration(milliliters: Int) {
+        viewModelScope.launch { repository.addHydration(milliliters) }
+    }
+
+    fun setPages(pages: Int) {
+        viewModelScope.launch {
+            val current = repository.getDailyLog(today).first() ?: DailyLog(today)
+            repository.upsertDailyLog(current.copy(bookPagesRead = pages))
+        }
+    }
+
+    fun submitMood(vibe: Int, energy: Int, focus: Int) {
+        viewModelScope.launch {
+            val current = repository.getDailyLog(today).first() ?: DailyLog(today)
+            repository.upsertDailyLog(current.copy(vibe = vibe, energy = energy, focus = focus))
+        }
+    }
+
+    fun setWaistCm(cm: Float) {
+        viewModelScope.launch { repository.setWaistCm(today, cm) }
+    }
+
+    fun addBloodPressure(systolic: Int, diastolic: Int) {
+        viewModelScope.launch { repository.addBloodPressure(systolic, diastolic) }
+    }
+
+    fun addKetone(mmolL: Float) {
+        viewModelScope.launch { repository.addKetone(mmolL) }
+    }
+
+    fun addBloodSugar(mgDl: Int) {
+        viewModelScope.launch { repository.addBloodSugar(mgDl) }
+    }
+
+    fun logReps(movement: MovementType, reps: Int) {
+        if (reps <= 0) return
+        viewModelScope.launch { repository.addExerciseSet(movement, reps) }
+    }
+
+    fun startFast(type: FastingType) {
+        val goalMinutes =
+            when (type) {
+                FastingType.OMAD -> 23 * 60
+                FastingType.EXTENDED_24 -> 24 * 60
+                FastingType.EXTENDED_36 -> 36 * 60
+                FastingType.EXTENDED_48 -> 48 * 60
+                FastingType.CUSTOM -> 16 * 60
+            }
+        viewModelScope.launch { repository.startFast(type, goalMinutes) }
+    }
+
+    fun endFast() {
+        viewModelScope.launch {
+            uiState.value.activeFast?.let { repository.endFast(it) }
+        }
+    }
+
+    companion object {
+        fun provideFactory(repository: TrackerRepository): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    DashboardViewModel(repository) as T
+            }
+    }
+}
