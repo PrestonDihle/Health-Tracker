@@ -67,9 +67,9 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         }
 
         item {
-            TrendCard(title = "Weight", subtitle = "pounds") {
+            TrendCard(title = "Weight", subtitle = "pounds, Health Connect and manual") {
                 LineChart(
-                    dataPoints = state.weights.map { Units.kgToLbs(it.weightKg) },
+                    dataPoints = state.weightByDay.map { Units.kgToLbs(it.second) },
                     goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )

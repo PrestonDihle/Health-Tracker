@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.BloodSugarReading
+import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
@@ -15,6 +16,8 @@ import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.domain.AdherenceResult
+import com.prestondihle.healthtracker.domain.Caffeine
+import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.FastingAdherence
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
@@ -40,6 +43,8 @@ private const val DEFAULT_WAIST_CM = 106.68f
 
 private const val GLUCOSE_WINDOW_HOURS = 24L
 
+private const val CAFFEINE_WINDOW_HOURS = 24L
+
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
 
@@ -47,6 +52,8 @@ data class DashboardUiState(
     val today: LocalDate = LocalDate.now(),
     val now: Instant = Instant.now(),
     val activeFast: FastingSession? = null,
+    /** Most recently finished fast, so a forgotten Stop can be corrected. */
+    val lastCompletedFast: FastingSession? = null,
     val adherence: AdherenceResult? = null,
     val hasPlan: Boolean = false,
     val snapshot: HealthDaySnapshot? = null,
@@ -57,12 +64,16 @@ data class DashboardUiState(
     val hasWaistMeasurement: Boolean = false,
     val glucose: List<BloodSugarReading> = emptyList(),
     val ketones: List<KetoneReading> = emptyList(),
+    val caffeine: List<CaffeineIntake> = emptyList(),
     val latestBloodPressure: BloodPressureReading? = null,
     val pushupsToday: Int = 0,
     val squatsToday: Int = 0,
     val goals: UserGoals = UserGoals(),
     val healthState: HealthPermissionState = HealthPermissionState.NOT_GRANTED,
+    /** Requested Health Connect permissions still denied, if any. */
+    val missingPermissions: Set<String> = emptySet(),
     val isSyncing: Boolean = false,
+    val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     /** How long the current fast has been running, or null when not fasting. */
     val fastDuration: Duration?
@@ -80,10 +91,31 @@ data class DashboardUiState(
 
     val glucoseWindowStart: Instant
         get() = now.minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
+
+    val caffeineWindowStart: Instant
+        get() = now.minus(Duration.ofHours(CAFFEINE_WINDOW_HOURS))
+
+    private val caffeineDoses: List<CaffeineDose>
+        get() = caffeine.map { CaffeineDose(it.timestamp, it.milligrams) }
+
+    /** Milligrams still in the body right now. */
+    val caffeineNowMg: Float
+        get() = Caffeine.levelAt(caffeineDoses, now)
+
+    /** Milligrams taken since midnight, which is the number a daily limit is set against. */
+    val caffeineTodayMg: Int
+        get() {
+            val midnight = today.atStartOfDay(zoneId).toInstant()
+            return caffeine.filter { !it.timestamp.isBefore(midnight) }.sumOf { it.milligrams }
+        }
+
+    val caffeineCurve: List<Pair<Instant, Float>>
+        get() = Caffeine.curve(caffeineDoses, caffeineWindowStart, now)
 }
 
 private data class FastingBundle(
     val active: FastingSession?,
+    val lastCompleted: FastingSession?,
     val sessions: List<FastingSession>,
     val plan: List<FastingPlanDay>,
     val extended: List<PlannedExtendedFast>,
@@ -98,9 +130,17 @@ private data class TodayBundle(
     val squats: Int,
 )
 
+private data class SettingsBundle(
+    val goals: UserGoals?,
+    val permission: HealthPermissionState,
+    val isSyncing: Boolean,
+    val missingPermissions: Set<String>,
+)
+
 private data class MetabolicBundle(
     val glucose: List<BloodSugarReading>,
     val ketones: List<KetoneReading>,
+    val caffeine: List<CaffeineIntake>,
 )
 
 class DashboardViewModel(
@@ -110,6 +150,7 @@ class DashboardViewModel(
 
     private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
     private val syncing = MutableStateFlow(false)
+    private val missingPermissions = MutableStateFlow<Set<String>>(emptySet())
 
     /**
      * Drives the fast timer. One second is fine for a clock read-out; adherence
@@ -135,11 +176,12 @@ class DashboardViewModel(
             val (weekStart, weekEnd) = weekBounds(today)
             return combine(
                 repository.getActiveFastingSession(),
+                repository.getLastCompletedFastingSession(),
                 repository.getFastingSessionsOverlapping(weekStart, weekEnd),
                 repository.getFastingPlan(),
                 repository.getPlannedExtendedFasts(weekStart, weekEnd),
-            ) { active, sessions, plan, extended ->
-                FastingBundle(active, sessions, plan, extended)
+            ) { active, lastCompleted, sessions, plan, extended ->
+                FastingBundle(active, lastCompleted, sessions, plan, extended)
             }
         }
 
@@ -162,12 +204,18 @@ class DashboardViewModel(
 
     private val metabolic: Flow<MetabolicBundle>
         get() {
-            val since = Instant.now().minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
+            val now = Instant.now()
+            val since = now.minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
+            // Caffeine reaches further back than it plots: a dose from before the
+            // window is still decaying inside it, and dropping it would start the
+            // curve at the wrong height.
+            val caffeineSince = now.minus(Duration.ofHours(Caffeine.RELEVANT_HISTORY_HOURS))
             return combine(
                 repository.getBloodSugarSince(since),
                 repository.getKetonesSince(since),
-            ) { glucose, ketones ->
-                MetabolicBundle(glucose, ketones)
+                repository.getCaffeineSince(caffeineSince),
+            ) { glucose, ketones, caffeine ->
+                MetabolicBundle(glucose, ketones, caffeine)
             }
         }
 
@@ -185,19 +233,24 @@ class DashboardViewModel(
                 todayData,
                 metabolic,
                 healthData,
-                combine(repository.getUserGoals(), healthState, syncing) { goals, state, isSyncing ->
-                    Triple(goals, state, isSyncing)
+                combine(repository.getUserGoals(), healthState, syncing, missingPermissions) {
+                    goals,
+                    state,
+                    isSyncing,
+                    missing ->
+                    SettingsBundle(goals, state, isSyncing, missing)
                 },
             ) { fastingAndNow, todayBundle, metabolicBundle, health, settings ->
                 val (fastingBundle, now) = fastingAndNow
-                val (goals, permission, isSyncing) = settings
                 val date = today
                 val (weekStart, weekEnd) = weekBounds(date)
 
                 DashboardUiState(
                     today = date,
                     now = now,
+                    zoneId = zoneId,
                     activeFast = fastingBundle.active,
+                    lastCompletedFast = fastingBundle.lastCompleted,
                     adherence =
                         FastingAdherence.score(
                             plan = fastingBundle.plan,
@@ -217,12 +270,14 @@ class DashboardViewModel(
                     hasWaistMeasurement = todayBundle.waistCm != null,
                     glucose = metabolicBundle.glucose,
                     ketones = metabolicBundle.ketones,
+                    caffeine = metabolicBundle.caffeine,
                     latestBloodPressure = todayBundle.bloodPressures.lastOrNull(),
                     pushupsToday = todayBundle.pushups,
                     squatsToday = todayBundle.squats,
-                    goals = goals ?: UserGoals(),
-                    healthState = permission,
-                    isSyncing = isSyncing,
+                    goals = settings.goals ?: UserGoals(),
+                    healthState = settings.permission,
+                    missingPermissions = settings.missingPermissions,
+                    isSyncing = settings.isSyncing,
                 )
             }
             .stateIn(
@@ -255,6 +310,7 @@ class DashboardViewModel(
     fun refreshHealth() {
         viewModelScope.launch {
             healthState.value = repository.healthPermissionState()
+            missingPermissions.value = repository.missingHealthPermissions()
             if (healthState.value == HealthPermissionState.GRANTED) {
                 syncing.value = true
                 repository.syncHealthData(today)
@@ -267,11 +323,28 @@ class DashboardViewModel(
         viewModelScope.launch { repository.addHydration(milliliters) }
     }
 
+    /** Adds to today's running total rather than replacing it, so several sittings accumulate. */
+    fun logPages(pages: Int) {
+        if (pages <= 0) return
+        viewModelScope.launch {
+            val current = repository.getDailyLog(today).first() ?: DailyLog(today)
+            repository.upsertDailyLog(
+                current.copy(bookPagesRead = (current.bookPagesRead ?: 0) + pages)
+            )
+        }
+    }
+
+    /** Overwrites the day's page count, for correcting a mis-logged total. */
     fun setPages(pages: Int) {
         viewModelScope.launch {
             val current = repository.getDailyLog(today).first() ?: DailyLog(today)
-            repository.upsertDailyLog(current.copy(bookPagesRead = pages))
+            repository.upsertDailyLog(current.copy(bookPagesRead = pages.coerceAtLeast(0)))
         }
+    }
+
+    fun logCaffeine(milligrams: Int) {
+        if (milligrams <= 0) return
+        viewModelScope.launch { repository.addCaffeine(milligrams) }
     }
 
     fun submitMood(vibe: Int, energy: Int, focus: Int) {
@@ -329,6 +402,46 @@ class DashboardViewModel(
             uiState.value.activeFast?.let { repository.endFast(it) }
         }
     }
+
+    /**
+     * Moves the running fast's start time, for a fast begun before it was logged.
+     *
+     * Clamped to now: a start in the future would produce a negative duration
+     * and score as if the fast had not begun.
+     */
+    fun setActiveFastStart(start: Instant) {
+        viewModelScope.launch {
+            val active = uiState.value.activeFast ?: return@launch
+            repository.updateFastingSession(
+                active.copy(startInstant = minOf(start, Instant.now()))
+            )
+        }
+    }
+
+    /** Ends the running fast at a chosen past time, for a Stop that was forgotten. */
+    fun stopFastAt(end: Instant) {
+        viewModelScope.launch {
+            val active = uiState.value.activeFast ?: return@launch
+            // An end before the start would invert the interval, which the
+            // adherence maths treats as empty rather than rejecting.
+            val safeEnd = minOf(end, Instant.now()).coerceAtLeastInstant(active.startInstant)
+            repository.updateFastingSession(active.copy(endInstant = safeEnd))
+        }
+    }
+
+    /** Corrects both ends of the most recently finished fast. */
+    fun updateLastFast(start: Instant, end: Instant) {
+        viewModelScope.launch {
+            val last = uiState.value.lastCompletedFast ?: return@launch
+            if (!start.isBefore(end)) return@launch
+            repository.updateFastingSession(
+                last.copy(startInstant = start, endInstant = minOf(end, Instant.now()))
+            )
+        }
+    }
+
+    private fun Instant.coerceAtLeastInstant(floor: Instant): Instant =
+        if (isBefore(floor)) floor else this
 
     companion object {
         fun provideFactory(repository: TrackerRepository): ViewModelProvider.Factory =

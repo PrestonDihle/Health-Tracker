@@ -4,18 +4,22 @@ import android.content.Context
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.aggregate.AggregateMetric
+import androidx.health.connect.client.aggregate.AggregationResult
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.BloodGlucoseRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.NutritionRecord
+import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -23,11 +27,22 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.reflect.KClass
 
 /** Metres in a statute mile. */
 private const val METRES_PER_MILE = 1609.344
 
 private const val TAG = "HealthConnect"
+
+/**
+ * Health Connect attributes the phone's own step tracking to a synthetic origin
+ * with a random suffix, so this is matched by prefix rather than equality.
+ */
+private const val HEALTH_CONNECT_PHONE_PREFIX = "com.android.healthconnect.phone"
+
+/** Package segments that identify no vendor, skipped when deriving a name. */
+private val GENERIC_PACKAGE_SEGMENTS =
+    setOf("com", "org", "net", "io", "android", "apps", "app", "mobile", "google")
 
 /**
  * Reads from Health Connect. This app never writes.
@@ -64,37 +79,179 @@ class HealthConnectDataSource(
         else HealthPermissionState.NOT_GRANTED
     }
 
-    override suspend fun readDay(date: LocalDate): HealthDay {
+    override suspend fun missingPermissions(): Set<String> {
+        val active = client ?: return emptySet()
+        val granted =
+            runCatching { active.permissionController.getGrantedPermissions() }
+                .getOrDefault(emptySet())
+        return PERMISSIONS - granted
+    }
+
+    override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
         val active = client ?: return HealthDay(date)
         val start = date.atStartOfDay(zoneId).toInstant()
         val end = date.plusDays(1).atStartOfDay(zoneId).toInstant()
         val range = TimeRangeFilter.between(start, end)
 
-        val steps = active.aggregateOrNull(StepsRecord.COUNT_TOTAL, range)?.toInt()
         val restingHr = active.aggregateOrNull(RestingHeartRateRecord.BPM_AVG, range)?.toInt()
         val avgHr = active.aggregateOrNull(HeartRateRecord.BPM_AVG, range)?.toInt()
         val sleep = active.aggregateOrNull(SleepSessionRecord.SLEEP_DURATION_TOTAL, range)
         val totalCalories = active.aggregateOrNull(TotalCaloriesBurnedRecord.ENERGY_TOTAL, range)
         val activeCalories =
             active.aggregateOrNull(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL, range)
+        val dietaryCalories = active.aggregateOrNull(NutritionRecord.ENERGY_TOTAL, range)
         val protein = active.aggregateOrNull(NutritionRecord.PROTEIN_TOTAL, range)
         val carbs = active.aggregateOrNull(NutritionRecord.TOTAL_CARBOHYDRATE_TOTAL, range)
         val fat = active.aggregateOrNull(NutritionRecord.TOTAL_FAT_TOTAL, range)
 
         return HealthDay(
             date = date,
-            steps = steps,
+            steps = active.readSteps(range, preferredStepsPackage),
             restingHeartRateBpm = restingHr,
             averageHeartRateBpm = avgHr,
             sleepMinutes = sleep?.toMinutes()?.toInt(),
             totalCalories = totalCalories?.inKilocalories?.toInt(),
             activeCalories = activeCalories?.inKilocalories?.toInt(),
+            dietaryCalories = dietaryCalories?.inKilocalories?.toInt(),
             proteinGrams = protein?.inGrams?.toFloat(),
             carbGrams = carbs?.inGrams?.toFloat(),
             fatGrams = fat?.inGrams?.toFloat(),
+            weightKg = active.readLatestWeightKg(range),
             bestMileSeconds = active.readBestMileSeconds(start, end),
             glucoseSamples = active.readGlucose(range),
         )
+    }
+
+    override suspend fun readStepSources(date: LocalDate): List<StepSource> {
+        val active = client ?: return emptyList()
+        val range =
+            TimeRangeFilter.between(
+                date.atStartOfDay(zoneId).toInstant(),
+                date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+            )
+        return active
+            .stepsByPackage(range)
+            .map { (packageName, steps) -> StepSource(packageName, appLabelFor(packageName), steps) }
+            .sortedByDescending { it.steps }
+    }
+
+    /**
+     * Steps grouped by the app that wrote them.
+     *
+     * Done with one aggregate per contributing source rather than by reading raw
+     * [StepsRecord]s. Raw reads are not survivable here: the client validates
+     * every record as it converts it, a zero-count step record is rejected with
+     * `count must not be less than 1`, and one such record from any installed
+     * app throws away the entire page. Aggregates never construct records, so
+     * they are immune. The contributing packages come from the combined
+     * aggregate's own [androidx.health.connect.client.aggregate.AggregationResult.dataOrigins].
+     */
+    private suspend fun HealthConnectClient.stepsByPackage(
+        range: TimeRangeFilter
+    ): Map<String, Int> {
+        val combined = aggregateResultOrNull(StepsRecord.COUNT_TOTAL, range) ?: return emptyMap()
+        val origins = combined.dataOrigins.map { it.packageName }.filter { it.isNotBlank() }
+
+        // A single source needs no second round trip: the combined total is it.
+        if (origins.size <= 1) {
+            val total = combined[StepsRecord.COUNT_TOTAL]?.toInt() ?: return emptyMap()
+            return origins.firstOrNull()?.let { mapOf(it to total) } ?: emptyMap()
+        }
+
+        return origins
+            .mapNotNull { packageName ->
+                val perSource =
+                    aggregateResultOrNull(
+                        StepsRecord.COUNT_TOTAL,
+                        range,
+                        setOf(DataOrigin(packageName)),
+                    )
+                perSource?.get(StepsRecord.COUNT_TOTAL)?.toInt()?.let { packageName to it }
+            }
+            .toMap()
+    }
+
+    private suspend fun HealthConnectClient.readSteps(
+        range: TimeRangeFilter,
+        preferredPackage: String?,
+    ): Int? {
+        if (preferredPackage != null) {
+            val pinned =
+                aggregateResultOrNull(
+                        StepsRecord.COUNT_TOTAL,
+                        range,
+                        setOf(DataOrigin(preferredPackage)),
+                    )
+                    ?.get(StepsRecord.COUNT_TOTAL)
+                    ?.toInt()
+            // A pinned app that wrote nothing today falls through to the
+            // combined total rather than reporting a flat zero.
+            if (pinned != null && pinned > 0) return pinned
+        }
+        return aggregateOrNull(StepsRecord.COUNT_TOTAL, range)?.toInt()
+    }
+
+    /**
+     * Reads every page of a record type.
+     *
+     * A single day of step records from a watch runs to hundreds of entries, and
+     * Health Connect returns them a page at a time -- taking only the first page
+     * would silently undercount.
+     */
+    private suspend fun <T : Record> HealthConnectClient.readAllRecords(
+        type: KClass<T>,
+        range: TimeRangeFilter,
+    ): List<T> =
+        runCatching {
+                val all = mutableListOf<T>()
+                var pageToken: String? = null
+                do {
+                    val response =
+                        readRecords(
+                            ReadRecordsRequest(
+                                recordType = type,
+                                timeRangeFilter = range,
+                                pageToken = pageToken,
+                            )
+                        )
+                    all += response.records
+                    pageToken = response.pageToken
+                } while (pageToken != null)
+                all
+            }
+            .onFailure { Log.d(TAG, "record read failed for ${type.simpleName}", it) }
+            .getOrDefault(emptyList())
+
+    /** The day's last weigh-in, which is the one a scale-synced app means by "weight". */
+    private suspend fun HealthConnectClient.readLatestWeightKg(range: TimeRangeFilter): Float? =
+        readAllRecords(WeightRecord::class, range).maxByOrNull { it.time }?.weight?.inKilograms
+            ?.toFloat()
+
+    /**
+     * A readable name for a writing app.
+     *
+     * Falls back through three stages because none of them is reliable alone:
+     * the platform label needs the app to be visible under package visibility,
+     * and Health Connect's own phone-tracked steps come from a synthetic origin
+     * with a random suffix that is not an installed package at all.
+     */
+    private fun appLabelFor(packageName: String): String {
+        if (packageName.startsWith(HEALTH_CONNECT_PHONE_PREFIX)) return "This phone"
+
+        val label =
+            runCatching {
+                    val pm = context.packageManager
+                    pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+                }
+                .getOrNull()
+        if (!label.isNullOrBlank()) return label
+
+        // Last resort: the vendor segment of the package, which is nearly always
+        // the brand -- com.garmin.android.apps.connectmobile becomes "Garmin".
+        return packageName
+            .split('.')
+            .firstOrNull { it !in GENERIC_PACKAGE_SEGMENTS }
+            ?.replaceFirstChar { it.uppercase() } ?: packageName
     }
 
     /**
@@ -104,9 +261,25 @@ class HealthConnectDataSource(
     private suspend fun <T : Any> HealthConnectClient.aggregateOrNull(
         metric: AggregateMetric<T>,
         range: TimeRangeFilter,
-    ): T? =
+    ): T? = aggregateResultOrNull(metric, range)?.get(metric)
+
+    /**
+     * The whole aggregation result, which unlike [aggregateOrNull] also carries
+     * the set of apps that contributed to it.
+     */
+    private suspend fun HealthConnectClient.aggregateResultOrNull(
+        metric: AggregateMetric<*>,
+        range: TimeRangeFilter,
+        dataOriginFilter: Set<DataOrigin> = emptySet(),
+    ): AggregationResult? =
         runCatching {
-                aggregate(AggregateRequest(metrics = setOf(metric), timeRangeFilter = range))[metric]
+                aggregate(
+                    AggregateRequest(
+                        metrics = setOf(metric),
+                        timeRangeFilter = range,
+                        dataOriginFilter = dataOriginFilter,
+                    )
+                )
             }
             .onFailure { Log.d(TAG, "aggregate failed for $metric", it) }
             .getOrNull()
@@ -185,6 +358,7 @@ class HealthConnectDataSource(
                 HealthPermission.getReadPermission(ExerciseSessionRecord::class),
                 HealthPermission.getReadPermission(DistanceRecord::class),
                 HealthPermission.getReadPermission(SpeedRecord::class),
+                HealthPermission.getReadPermission(WeightRecord::class),
             )
     }
 }

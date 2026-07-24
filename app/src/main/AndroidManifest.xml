@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_SPEED" />
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
 
     <!--
       On Android 13 and below Health Connect is a separate APK, so it must be
@@ -23,6 +24,21 @@
     -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+
+        <!--
+          Package visibility for the apps that write to Health Connect, so the
+          step-source picker can show "Garmin Connect" rather than
+          com.garmin.android.apps.connectmobile. Every app that integrates with
+          Health Connect declares this rationale action, which makes it a
+          targeted alternative to QUERY_ALL_PACKAGES.
+        -->
+        <intent>
+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+            <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+        </intent>
     </queries>
 
     <application

@@ -24,7 +24,9 @@ import com.prestondihle.healthtracker.data.WeeklyPerformance
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
+import com.prestondihle.healthtracker.health.StepSource
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -136,6 +138,15 @@ class TrackerRepository(
     fun getCaffeineForDate(date: LocalDate): Flow<List<CaffeineIntake>> =
         dao.getCaffeineIntakesBetween(startOfDayMillis(date), endOfDayMillis(date))
 
+    /**
+     * Caffeine logged since [since], for the decay curve.
+     *
+     * The curve needs doses from *before* the plotted window, since one taken
+     * last night is still in the body this morning.
+     */
+    fun getCaffeineSince(since: Instant): Flow<List<CaffeineIntake>> =
+        dao.getCaffeineIntakesBetween(since.toEpochMilli(), Long.MAX_VALUE)
+
     suspend fun addCaffeine(mg: Int, at: Instant = Instant.now()) =
         dao.insertCaffeineIntake(CaffeineIntake(timestamp = at, milligrams = mg))
 
@@ -153,6 +164,9 @@ class TrackerRepository(
 
     fun getActiveFastingSession(): Flow<FastingSession?> = dao.getActiveFastingSession()
 
+    fun getLastCompletedFastingSession(): Flow<FastingSession?> =
+        dao.getLastCompletedFastingSession()
+
     fun getFastingSessionsOverlapping(start: Instant, end: Instant): Flow<List<FastingSession>> =
         dao.getFastingSessionsOverlapping(start.toEpochMilli(), end.toEpochMilli())
 
@@ -169,6 +183,9 @@ class TrackerRepository(
 
     suspend fun endFast(session: FastingSession, at: Instant = Instant.now()) =
         dao.updateFastingSession(session.copy(endInstant = at))
+
+    /** Rewrites a session wholesale, for correcting times logged late or not at all. */
+    suspend fun updateFastingSession(session: FastingSession) = dao.updateFastingSession(session)
 
     suspend fun deleteFastingSession(session: FastingSession) = dao.deleteFastingSession(session)
 
@@ -259,6 +276,12 @@ class TrackerRepository(
 
     fun healthPermissions(): Set<String> = healthDataSource.requiredPermissions()
 
+    suspend fun missingHealthPermissions(): Set<String> = healthDataSource.missingPermissions()
+
+    /** Per-app step totals for [date], for the source picker in settings. */
+    suspend fun stepSources(date: LocalDate): List<StepSource> =
+        healthDataSource.readStepSources(date)
+
     /**
      * Pulls [date] from Health Connect into the local cache.
      *
@@ -267,7 +290,8 @@ class TrackerRepository(
      * rejected by the unique index on `externalId`.
      */
     suspend fun syncHealthData(date: LocalDate): Result<Unit> = runCatching {
-        val day = healthDataSource.readDay(date)
+        val preferredSteps = dao.getUserSettings().first()?.preferredStepsPackage
+        val day = healthDataSource.readDay(date, preferredSteps)
 
         dao.upsertHealthSnapshot(
             HealthDaySnapshot(
@@ -278,10 +302,12 @@ class TrackerRepository(
                 sleepMinutes = day.sleepMinutes,
                 totalCalories = day.totalCalories,
                 activeCalories = day.activeCalories,
+                dietaryCalories = day.dietaryCalories,
                 proteinGrams = day.proteinGrams,
                 carbGrams = day.carbGrams,
                 fatGrams = day.fatGrams,
                 bestMileSeconds = day.bestMileSeconds,
+                weightKg = day.weightKg,
                 syncedAt = Instant.now(),
             )
         )

@@ -45,6 +45,20 @@ data class TrendsUiState(
             .groupBy { it.timestamp.atZone(java.time.ZoneId.systemDefault()).toLocalDate() }
             .map { (date, sets) -> date to sets.sumOf { it.reps } }
             .sortedBy { it.first }
+
+    /**
+     * Weight per day in kilograms, oldest first, combining hand-entered values
+     * with those synced from Health Connect.
+     *
+     * A manual entry wins on any day that has both: it was typed deliberately,
+     * whereas the synced figure is whatever a scale last broadcast.
+     */
+    val weightByDay: List<Pair<LocalDate, Float>>
+        get() {
+            val synced = snapshots.mapNotNull { snap -> snap.weightKg?.let { snap.date to it } }
+            val manual = weights.map { it.date to it.weightKg }
+            return (synced + manual).toMap().toSortedMap().toList()
+        }
 }
 
 class TrendsViewModel(private val repository: TrackerRepository) : ViewModel() {

@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -27,7 +29,7 @@ import androidx.room.TypeConverters
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -38,10 +40,28 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var instance: AppDatabase? = null
 
         /**
-         * Destructive migration is intentional while the app is pre-release: the
-         * v1 schema kept steps, sleep, macros and rep counts on DailyLog, which
-         * have since moved to Health Connect and to their own tables. There is no
-         * sensible column-wise mapping, and no shipped build to migrate from.
+         * Adds dietary calories and synced weight to the Health Connect cache,
+         * and the preferred step source to settings.
+         *
+         * All three are nullable additions, so plain `ALTER TABLE` covers it and
+         * every already-logged row survives. Real fasting history and body
+         * measurements exist on device by now; dropping them to add three
+         * columns would not be a fair trade.
+         */
+        private val MIGRATION_2_3 =
+            object : Migration(2, 3) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE HealthDaySnapshot ADD COLUMN dietaryCalories INTEGER")
+                    db.execSQL("ALTER TABLE HealthDaySnapshot ADD COLUMN weightKg REAL")
+                    db.execSQL("ALTER TABLE UserSettings ADD COLUMN preferredStepsPackage TEXT")
+                }
+            }
+
+        /**
+         * Destructive fallback remains only for the v1 schema, which kept steps,
+         * sleep, macros and rep counts on DailyLog and has no sensible
+         * column-wise mapping to today's tables. Anything from v2 onward
+         * migrates properly.
          */
         fun getDatabase(context: Context): AppDatabase =
             instance
@@ -52,6 +72,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 AppDatabase::class.java,
                                 "tracker_database",
                             )
+                            .addMigrations(MIGRATION_2_3)
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()
                             .also { instance = it }

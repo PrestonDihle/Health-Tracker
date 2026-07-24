@@ -8,7 +8,7 @@ know about: fasting, hydration, waist, blood pressure, ketones, reps and reading
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, 24-hour glucose and ketone chart, waist, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
+| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, 24-hour glucose and ketone chart, waist, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan plus scheduled multi-day extended fasts, and the adherence score |
 | **Trends** | 14-day and 90-day history for steps, waist, weight, resting heart rate, sleep, protein, reps, mood and reading |
 | **History** | Backfill or correct any past day |
@@ -22,14 +22,30 @@ The app is **read-only** against Health Connect. It never writes, so no
 - Steps
 - Heart rate and resting heart rate
 - Sleep sessions
-- Total and active calories
-- Nutrition: protein, carbohydrate, fat
+- Total and active calories burned
+- Nutrition: energy eaten, protein, carbohydrate, fat
+- Weight
 - Blood glucose (CGM)
 - Exercise sessions, distance and speed, for mile pace
 
 Each metric is fetched independently and failures degrade to a blank field, so
 granting only some permissions still produces a working dashboard. Results are
 cached per day in `HealthDaySnapshot` so trends and history survive offline.
+
+### Steps and the source picker
+
+More than one app usually writes steps — a watch's companion app and the phone's
+own health app both counting the same walk. Health Connect's aggregate sums
+them, which double-counts. The app instead reads raw step records grouped by the
+app that wrote them, and **Settings → Step source** shows the per-app totals for
+today so one can be pinned as the one that counts.
+
+### Calories
+
+Two different numbers, kept apart because they are easy to confuse:
+
+- **Eaten** comes from nutrition records and sits with the macros.
+- **Burned** comes from total and active calories burned, shown separately.
 
 ### Best mile time
 
@@ -57,6 +73,25 @@ that is going perfectly would read near zero on Monday morning.
 
 The interval algebra behind this lives in `domain/Interval.kt`; the scoring is in
 `domain/FastingAdherence.kt` and is covered by `FastingAdherenceTest`.
+
+Fasts logged late can be corrected after the fact: the running fast's start can
+be moved, it can be stopped at a past time, and the most recently finished fast
+can have either end adjusted.
+
+## Caffeine
+
+Caffeine is eliminated first-order with a **5-hour half-life**, so each dose
+decays on its own and doses add together:
+
+```
+level(t) = Σ dose_i × 0.5 ^ ((t − t_i) / 5h)
+```
+
+The chart samples that curve every 10 minutes over a rolling 24 hours, which is
+what gives it a smooth exponential shape rather than straight lines between
+doses. Doses from before the window are still loaded, because one taken last
+night is still in the body this morning. The maths is in `domain/Caffeine.kt`
+and covered by `CaffeineTest`.
 
 ## Units
 

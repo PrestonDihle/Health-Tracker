@@ -1,5 +1,6 @@
 ﻿package com.prestondihle.healthtracker.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +15,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -63,6 +65,51 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        item {
+            SettingsCard(title = "Step source") {
+                Text(
+                    "Several apps can write steps to Health Connect at once, and their totals " +
+                        "get summed — which counts the same walk twice. Pick the one to trust.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val preferred = state.settings.preferredStepsPackage
+
+                StepSourceRow(
+                    label = "Sum every source",
+                    supporting =
+                        if (state.stepSources.size > 1) {
+                            "${state.stepSources.sumOf { it.steps }} steps today, combined"
+                        } else null,
+                    selected = preferred == null,
+                    onClick = { viewModel.setPreferredStepsPackage(null) },
+                )
+
+                state.stepSources.forEach { source ->
+                    StepSourceRow(
+                        label = source.appLabel,
+                        supporting = "${source.steps} steps today",
+                        selected = preferred == source.packageName,
+                        onClick = { viewModel.setPreferredStepsPackage(source.packageName) },
+                    )
+                }
+
+                if (state.stepSources.isEmpty()) {
+                    Text(
+                        if (state.isLoadingStepSources) "Checking…"
+                        else "No step data in Health Connect today.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // A source that has not written anything yet today is invisible
+                // here, so this needs to be re-runnable rather than load-once.
+                TextButton(onClick = viewModel::refreshStepSources) { Text("Refresh sources") }
             }
         }
 
@@ -149,6 +196,31 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     step = 1f,
                     range = 80f..400f,
                     valueFormatter = { "${it.toInt()} lb" },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepSourceRow(
+    label: String,
+    supporting: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Column {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (supporting != null) {
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

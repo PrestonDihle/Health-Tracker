@@ -50,11 +50,26 @@ data class HealthDaySnapshot(
     val sleepMinutes: Int? = null,
     val totalCalories: Int? = null,
     val activeCalories: Int? = null,
+    /**
+     * Calories *eaten*, from nutrition records -- not the same number as
+     * [totalCalories], which is energy burned. Kept apart because the dashboard
+     * shows this one next to the macros, where a burn figure would misread as
+     * intake.
+     */
+    val dietaryCalories: Int? = null,
     val proteinGrams: Float? = null,
     val carbGrams: Float? = null,
     val fatGrams: Float? = null,
     /** Best average mile pace across runs of at least a mile on this date. */
     val bestMileSeconds: Int? = null,
+    /**
+     * Latest weigh-in read from Health Connect on this date.
+     *
+     * Weight lives here rather than on [WeightEntry] because that table is the
+     * manual record; a synced value must not overwrite something typed by hand.
+     * Readers merge the two, preferring the manual entry.
+     */
+    val weightKg: Float? = null,
     val syncedAt: Instant,
 )
 
@@ -213,4 +228,14 @@ data class UserSettings(
     @PrimaryKey val id: Int = 1,
     val unitSystem: UnitSystemEnum = UnitSystemEnum.IMPERIAL,
     val weekStartsOn: DayOfWeek = DayOfWeek.MONDAY,
+    /**
+     * Package name of the app whose step records are trusted, or null to sum
+     * every source.
+     *
+     * Several apps commonly write steps to Health Connect at once -- a watch's
+     * companion app and the phone's own health app both counting the same walk
+     * -- and summing them double-counts. Pinning one source is the only way to
+     * match what the watch itself reports.
+     */
+    val preferredStepsPackage: String? = null,
 )

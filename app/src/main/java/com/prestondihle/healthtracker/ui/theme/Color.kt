@@ -58,3 +58,6 @@ val BalticTint = Color(0xFFC5D8E6)
 val GlucoseSeries = BalticBlue
 val KetoneSeries = OliveBark
 val ThresholdLine = Inferno
+
+/** Caffeine decay curve. Yale Blue keeps it in-palette and distinct from glucose. */
+val CaffeineSeries = YaleBlue

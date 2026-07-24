@@ -17,7 +17,9 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
 
     override suspend fun permissionState(): HealthPermissionState = HealthPermissionState.GRANTED
 
-    override suspend fun readDay(date: LocalDate): HealthDay {
+    override suspend fun missingPermissions(): Set<String> = emptySet()
+
+    override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
         val random = Random(date.toEpochDay())
         val startOfDay = date.atStartOfDay(zoneId).toInstant()
 
@@ -44,11 +46,23 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
             sleepMinutes = random.nextInt(320, 480),
             totalCalories = random.nextInt(2_100, 2_900),
             activeCalories = random.nextInt(300, 900),
+            dietaryCalories = random.nextInt(1_400, 2_400),
             proteinGrams = random.nextInt(110, 190).toFloat(),
             carbGrams = random.nextInt(20, 120).toFloat(),
             fatGrams = random.nextInt(90, 170).toFloat(),
+            weightKg = 82f + random.nextInt(-15, 16) / 10f,
             bestMileSeconds = random.nextInt(7 * 60, 11 * 60),
             glucoseSamples = samples,
+        )
+    }
+
+    /** Two sources that disagree, which is the situation the picker exists to resolve. */
+    override suspend fun readStepSources(date: LocalDate): List<StepSource> {
+        val random = Random(date.toEpochDay())
+        val watch = random.nextInt(3_000, 14_000)
+        return listOf(
+            StepSource("com.garmin.android.apps.connectmobile", "Garmin Connect", watch),
+            StepSource("com.sec.android.app.shealth", "Samsung Health", (watch * 0.8f).toInt()),
         )
     }
 }

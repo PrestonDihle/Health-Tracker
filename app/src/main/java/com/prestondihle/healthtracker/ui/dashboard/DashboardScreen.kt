@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -26,10 +27,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -39,7 +42,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
@@ -47,13 +49,17 @@ import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.InstantPickerDialog
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.LabeledSlider
 import com.prestondihle.healthtracker.ui.components.ScaleDescriptors
 import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.components.TimePoint
+import com.prestondihle.healthtracker.ui.theme.CaffeineSeries
 import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
 import com.prestondihle.healthtracker.ui.theme.KetoneSeries
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 @Composable
@@ -73,9 +79,9 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = CardGap),
+        verticalArrangement = Arrangement.spacedBy(CardGap),
+        contentPadding = PaddingValues(vertical = CardGap),
     ) {
         if (state.healthState != HealthPermissionState.GRANTED) {
             item {
@@ -84,9 +90,33 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
                     onConnect = { permissionLauncher.launch(viewModel.healthPermissions) },
                 )
             }
+        } else if (state.missingPermissions.isNotEmpty()) {
+            // Connected, but something added in a later version was never
+            // granted. Without this the metric just reads blank forever.
+            item {
+                MissingPermissionsPrompt(
+                    missing = state.missingPermissions,
+                    onGrant = { permissionLauncher.launch(state.missingPermissions) },
+                )
+            }
         }
 
-        item { FastCard(state = state, onStart = viewModel::startFast, onStop = viewModel::endFast) }
+        item {
+            FastCard(
+                state = state,
+                onStart = viewModel::startFast,
+                onStop = viewModel::endFast,
+                onSetStart = viewModel::setActiveFastStart,
+                onStopAt = {
+                    viewModel.stopFastAt(it)
+                    toast("Fast ended ${it.asShortDateTime(state)}")
+                },
+                onUpdateLast = { start, end ->
+                    viewModel.updateLastFast(start, end)
+                    toast("Corrected last fast")
+                },
+            )
+        }
 
         item { ActivityCard(state = state, onRefresh = viewModel::refreshHealth) }
 
@@ -95,7 +125,17 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
                 state = state,
                 onAdd = {
                     viewModel.addHydration(it)
-                    toast("Logged ${Units.mlToWholeOz(it)} oz")
+                    toast("Logged $it ml")
+                },
+            )
+        }
+
+        item {
+            CaffeineCard(
+                state = state,
+                onLog = {
+                    viewModel.logCaffeine(it)
+                    toast("Logged $it mg caffeine")
                 },
             )
         }
@@ -147,11 +187,38 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
             )
         }
 
-        item { ReadingCard(state = state, onPagesChange = viewModel::setPages) }
+        item {
+            ReadingCard(
+                state = state,
+                onLogPages = {
+                    viewModel.logPages(it)
+                    toast("Logged $it pages")
+                },
+                onSetPages = viewModel::setPages,
+            )
+        }
 
-        item { Spacer(Modifier.height(24.dp)) }
+        item { Spacer(Modifier.height(8.dp)) }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Layout scale
+//
+// Deliberately tighter than Material's defaults: this screen is a dense
+// read-out of a dozen metrics, and the stock 16dp card padding pushed half of
+// them below the fold.
+// ---------------------------------------------------------------------------
+
+private val CardGap = 8.dp
+private val CardPadding = 10.dp
+private val CardSpacing = 6.dp
+private val ChartHeight = 170.dp
+private val EmptyChartHeight = 72.dp
+private val BarHeight = 5.dp
+
+/** Buttons at stock size waste a lot of vertical space when a card has three of them. */
+private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
 // ---------------------------------------------------------------------------
 // Cards
@@ -167,7 +234,10 @@ private fun DashboardCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(CardPadding),
+            verticalArrangement = Arrangement.spacedBy(CardSpacing),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -175,7 +245,7 @@ private fun DashboardCard(
             ) {
                 Text(
                     title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 action?.invoke()
@@ -199,15 +269,48 @@ private fun HealthConnectPrompt(state: HealthPermissionState, onConnect: () -> U
                     "Connect to pull in steps, heart rate, sleep, calories, macros, glucose and " +
                         "run times. This app only reads; it never writes."
             }
-        Text(message, style = MaterialTheme.typography.bodyMedium)
+        Text(message, style = MaterialTheme.typography.bodySmall)
         if (state == HealthPermissionState.NOT_GRANTED) {
-            Button(onClick = onConnect) { Text("Connect") }
+            Button(onClick = onConnect, contentPadding = CompactButtonPadding) { Text("Connect") }
         }
     }
 }
 
+/** Which retroactive edit the picker is currently collecting a time for. */
+private enum class FastEdit {
+    START_OF_ACTIVE,
+    END_OF_ACTIVE,
+    START_OF_LAST,
+    END_OF_LAST,
+}
+
+/** Turns `android.permission.health.READ_WEIGHT` into `weight`. */
+private fun String.asPermissionLabel(): String =
+    substringAfterLast('.').removePrefix("READ_").lowercase().replace('_', ' ')
+
 @Composable
-private fun FastCard(state: DashboardUiState, onStart: () -> Unit, onStop: () -> Unit) {
+private fun MissingPermissionsPrompt(missing: Set<String>, onGrant: () -> Unit) {
+    DashboardCard(title = "Health Connect") {
+        Text(
+            "Not yet allowed to read: ${missing.joinToString { it.asPermissionLabel() }}. " +
+                "Those metrics stay blank until granted.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Button(onClick = onGrant, contentPadding = CompactButtonPadding) { Text("Grant") }
+    }
+}
+
+@Composable
+private fun FastCard(
+    state: DashboardUiState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onSetStart: (Instant) -> Unit,
+    onStopAt: (Instant) -> Unit,
+    onUpdateLast: (Instant, Instant) -> Unit,
+) {
+    var editing by remember { mutableStateOf<FastEdit?>(null) }
+
     DashboardCard(title = "Fasting") {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -216,7 +319,10 @@ private fun FastCard(state: DashboardUiState, onStart: () -> Unit, onStop: () ->
             Metric(
                 label = "Current fast",
                 value = state.fastDuration?.let { Units.formatDuration(it) } ?: "Not fasting",
-                supporting = state.activeFast?.let { "goal ${it.goalDurationMinutes / 60}h" },
+                supporting =
+                    state.activeFast?.let {
+                        "since ${it.startInstant.asShortDateTime(state)}, goal ${it.goalDurationMinutes / 60}h"
+                    },
             )
             Metric(
                 label = "Adherence",
@@ -228,17 +334,101 @@ private fun FastCard(state: DashboardUiState, onStart: () -> Unit, onStop: () ->
         state.fastGoalFraction?.let { fraction ->
             LinearProgressIndicator(
                 progress = { fraction },
-                modifier = Modifier.fillMaxWidth().height(6.dp),
+                modifier = Modifier.fillMaxWidth().height(BarHeight),
             )
         }
 
         // The goal length comes from the weekly plan, so there is nothing to
         // choose here -- just start and stop.
         if (state.activeFast != null) {
-            Button(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Stop") }
+            Button(
+                onClick = onStop,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("Stop")
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = { editing = FastEdit.START_OF_ACTIVE },
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text("Edit start")
+                }
+                TextButton(
+                    onClick = { editing = FastEdit.END_OF_ACTIVE },
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text("Stop at past time")
+                }
+            }
         } else {
-            Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Start") }
+            Button(
+                onClick = onStart,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("Start")
+            }
+            // Correcting the previous fast is only meaningful once one has
+            // finished, and only when nothing is currently running.
+            state.lastCompletedFast?.let { last ->
+                Text(
+                    "Last: ${last.startInstant.asShortDateTime(state)} to " +
+                        "${last.endInstant?.asShortDateTime(state) ?: "--"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = { editing = FastEdit.START_OF_LAST },
+                        contentPadding = CompactButtonPadding,
+                    ) {
+                        Text("Edit last start")
+                    }
+                    TextButton(
+                        onClick = { editing = FastEdit.END_OF_LAST },
+                        contentPadding = CompactButtonPadding,
+                    ) {
+                        Text("Edit last end")
+                    }
+                }
+            }
         }
+    }
+
+    editing?.let { edit ->
+        val last = state.lastCompletedFast
+        val initial =
+            when (edit) {
+                FastEdit.START_OF_ACTIVE -> state.activeFast?.startInstant
+                FastEdit.END_OF_ACTIVE -> state.now
+                FastEdit.START_OF_LAST -> last?.startInstant
+                FastEdit.END_OF_LAST -> last?.endInstant
+            } ?: state.now
+
+        InstantPickerDialog(
+            title =
+                when (edit) {
+                    FastEdit.START_OF_ACTIVE -> "Fast started"
+                    FastEdit.END_OF_ACTIVE -> "Fast ended"
+                    FastEdit.START_OF_LAST -> "Last fast started"
+                    FastEdit.END_OF_LAST -> "Last fast ended"
+                },
+            initial = initial,
+            zoneId = state.zoneId,
+            onDismiss = { editing = null },
+            onConfirm = { chosen ->
+                when (edit) {
+                    FastEdit.START_OF_ACTIVE -> onSetStart(chosen)
+                    FastEdit.END_OF_ACTIVE -> onStopAt(chosen)
+                    FastEdit.START_OF_LAST ->
+                        last?.endInstant?.let { onUpdateLast(chosen, it) }
+                    FastEdit.END_OF_LAST -> last?.let { onUpdateLast(it.startInstant, chosen) }
+                }
+                editing = null
+            },
+        )
     }
 }
 
@@ -271,23 +461,43 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
 
         HorizontalDivider()
 
+        // Eaten, not burned. These four are all intake, so they belong on one
+        // row; the burn figure sits apart below so the two cannot be confused.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Metric(label = "Calories", value = snapshot?.totalCalories?.toString() ?: "--")
+            Metric(
+                label = "Eaten",
+                value = snapshot?.dietaryCalories?.toString() ?: "--",
+                supporting = "kcal",
+            )
             Metric(label = "Protein", value = snapshot?.proteinGrams?.let { "${it.toInt()} g" } ?: "--")
             Metric(label = "Carbs", value = snapshot?.carbGrams?.let { "${it.toInt()} g" } ?: "--")
             Metric(label = "Fat", value = snapshot?.fatGrams?.let { "${it.toInt()} g" } ?: "--")
         }
 
-        state.bestMileSeconds?.let {
+        if (snapshot?.totalCalories != null || state.bestMileSeconds != null) {
             HorizontalDivider()
-            Metric(
-                label = "Best mile",
-                value = Units.formatPace(it),
-                supporting = "average pace, runs over a mile",
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                snapshot?.totalCalories?.let {
+                    Metric(
+                        label = "Burned",
+                        value = it.toString(),
+                        supporting = snapshot.activeCalories?.let { active -> "$active active" },
+                    )
+                }
+                state.bestMileSeconds?.let {
+                    Metric(
+                        label = "Best mile",
+                        value = Units.formatPace(it),
+                        supporting = "average pace",
+                    )
+                }
+            }
         }
     }
 }
@@ -302,18 +512,82 @@ private fun HydrationCard(state: DashboardUiState, onAdd: (Int) -> Unit) {
         Metric(
             label = "Today",
             value = "$oz oz",
-            supporting = "goal $goalOz oz",
+            supporting = "${state.hydrationMl} ml, goal $goalOz oz",
         )
         LinearProgressIndicator(
             progress = { if (goalMl > 0) (state.hydrationMl.toFloat() / goalMl).coerceIn(0f, 1f) else 0f },
-            modifier = Modifier.fillMaxWidth().height(6.dp),
+            modifier = Modifier.fillMaxWidth().height(BarHeight),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(8, 16, 32).forEach { ounces ->
-                FilledTonalButton(onClick = { onAdd(Units.flOzToMl(ounces.toFloat())) }) {
-                    Text("+$ounces oz")
-                }
+        // Two sizes only, one imperial and one metric, matching the two vessels
+        // actually drunk from. A row of five buttons was more choice than the
+        // decision deserves.
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(
+                onClick = { onAdd(Units.flOzToMl(4f)) },
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("+4 oz")
             }
+            FilledTonalButton(onClick = { onAdd(100) }, contentPadding = CompactButtonPadding) {
+                Text("+100 ml")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CaffeineCard(state: DashboardUiState, onLog: (Int) -> Unit) {
+    DashboardCard(title = "Caffeine") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Metric(
+                label = "In body now",
+                value = "${state.caffeineNowMg.toInt()} mg",
+                supporting = "5h half-life",
+            )
+            Metric(label = "Taken today", value = "${state.caffeineTodayMg} mg")
+        }
+
+        DualAxisTimeChart(
+            windowStart = state.caffeineWindowStart,
+            windowEnd = state.now,
+            series =
+                listOf(
+                    ChartSeries(
+                        label = "Caffeine",
+                        points = state.caffeineCurve.map { TimePoint(it.first, it.second) },
+                        color = CaffeineSeries,
+                        axis = ChartAxis.LEFT,
+                        // The curve is a dense sampling of a continuous function,
+                        // so dots would obscure the shape they are drawn from.
+                        showPoints = false,
+                    )
+                ),
+            leftAxis = AxisSpec(min = 0f, max = 200f, label = "mg"),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .height(if (state.caffeine.isEmpty()) EmptyChartHeight else ChartHeight),
+        )
+
+        HorizontalDivider()
+
+        var mg by remember { mutableIntStateOf(95) }
+        IntStepper(
+            label = "Caffeine",
+            value = mg,
+            onValueChange = { mg = it },
+            step = 5,
+            range = 0..1_000,
+            supportingText = "mg",
+        )
+        Button(
+            onClick = { onLog(mg) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
+        ) {
+            Text("Log caffeine")
         }
     }
 }
@@ -352,7 +626,8 @@ private fun MetabolicCard(
             modifier =
                 Modifier.fillMaxWidth()
                     .height(
-                        if (state.glucose.isEmpty() && state.ketones.isEmpty()) 96.dp else 220.dp
+                        if (state.glucose.isEmpty() && state.ketones.isEmpty()) EmptyChartHeight
+                        else ChartHeight
                     ),
         )
 
@@ -368,7 +643,11 @@ private fun MetabolicCard(
             valueFormatter = { "%.1f".format(it) },
             supportingText = "mmol/L",
         )
-        Button(onClick = { onAddKetone(ketone) }, modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = { onAddKetone(ketone) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
+        ) {
             Text("Log ketones")
         }
 
@@ -381,7 +660,11 @@ private fun MetabolicCard(
             range = 20..500,
             supportingText = "mg/dL, for manual fingersticks",
         )
-        OutlinedButton(onClick = { onAddGlucose(glucose) }, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { onAddGlucose(glucose) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
+        ) {
             Text("Log blood sugar")
         }
     }
@@ -423,7 +706,11 @@ private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> U
             onValueChange = { diastolic = it },
             range = 30..160,
         )
-        Button(onClick = { onSubmit(systolic, diastolic) }, modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = { onSubmit(systolic, diastolic) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
+        ) {
             Text("Log blood pressure")
         }
 
@@ -449,7 +736,11 @@ private fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit)
         LabeledSlider("Energy", energy, { energy = it }, ScaleDescriptors.Energy)
         LabeledSlider("Focus", focus, { focus = it }, ScaleDescriptors.Focus)
 
-        Button(onClick = { onSubmit(vibe, energy, focus) }, modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = { onSubmit(vibe, energy, focus) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
+        ) {
             Text("Submit")
         }
     }
@@ -472,6 +763,7 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
         Button(
             onClick = { onLog(MovementType.PUSHUP, pushups) },
             modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
         ) {
             Text("Log pushups")
         }
@@ -489,6 +781,7 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
         Button(
             onClick = { onLog(MovementType.AIR_SQUAT, squats) },
             modifier = Modifier.fillMaxWidth(),
+            contentPadding = CompactButtonPadding,
         ) {
             Text("Log air squats")
         }
@@ -496,17 +789,61 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
 }
 
 @Composable
-private fun ReadingCard(state: DashboardUiState, onPagesChange: (Int) -> Unit) {
+private fun ReadingCard(
+    state: DashboardUiState,
+    onLogPages: (Int) -> Unit,
+    onSetPages: (Int) -> Unit,
+) {
     DashboardCard(title = "Reading") {
-        IntStepper(
-            label = "Pages read today",
-            value = state.dailyLog.bookPagesRead ?: 0,
-            onValueChange = onPagesChange,
-            range = 0..2_000,
-            supportingText = state.goals.dailyPagesGoal?.let { "goal $it" },
+        val readToday = state.dailyLog.bookPagesRead ?: 0
+        val goal = state.goals.dailyPagesGoal
+
+        Metric(
+            label = "Pages today",
+            value = readToday.toString(),
+            supporting = goal?.let { "goal $it" },
         )
+        if (goal != null && goal > 0) {
+            LinearProgressIndicator(
+                progress = { (readToday.toFloat() / goal).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(BarHeight),
+            )
+        }
+
+        // The stepper holds the size of *this* sitting, which Log then adds to
+        // the day. Editing the running total directly made every tap a write and
+        // left no way to say "I just read 30 more".
+        var pages by remember { mutableIntStateOf(10) }
+        IntStepper(
+            label = "Add pages",
+            value = pages,
+            onValueChange = { pages = it },
+            step = 5,
+            range = 0..2_000,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { onLogPages(pages) },
+                modifier = Modifier.weight(1f),
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("Log pages")
+            }
+            if (readToday > 0) {
+                OutlinedButton(
+                    onClick = { onSetPages(0) },
+                    contentPadding = CompactButtonPadding,
+                ) {
+                    Text("Reset")
+                }
+            }
+        }
     }
 }
+
+/** `Mon 14:05`, for showing when a fast started without spending a whole line on it. */
+private fun Instant.asShortDateTime(state: DashboardUiState): String =
+    DateTimeFormatter.ofPattern("EEE h:mm a").format(atZone(state.zoneId))
 
 // ---------------------------------------------------------------------------
 
@@ -515,10 +852,10 @@ private fun Metric(label: String, value: String, supporting: String? = null) {
     Column {
         Text(
             label,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         if (supporting != null) {
             Text(
                 supporting,

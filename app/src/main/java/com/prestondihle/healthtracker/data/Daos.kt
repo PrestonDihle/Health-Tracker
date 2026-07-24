@@ -120,6 +120,12 @@ interface TrackerDao {
     @Query("SELECT * FROM FastingSession WHERE endInstant IS NULL ORDER BY startInstant DESC LIMIT 1")
     fun getActiveFastingSession(): Flow<FastingSession?>
 
+    /** The fast most recently finished, so a forgotten Stop can be corrected after the fact. */
+    @Query(
+        "SELECT * FROM FastingSession WHERE endInstant IS NOT NULL ORDER BY endInstant DESC LIMIT 1"
+    )
+    fun getLastCompletedFastingSession(): Flow<FastingSession?>
+
     /**
      * Every session overlapping the window, including one still open. Adherence
      * needs sessions that *straddle* the window edges, not just those contained
