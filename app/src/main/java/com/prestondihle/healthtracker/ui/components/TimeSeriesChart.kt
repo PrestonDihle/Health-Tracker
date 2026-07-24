@@ -48,6 +48,8 @@ data class ChartSeries(
     val axis: ChartAxis = ChartAxis.LEFT,
     /** Off for dense series such as CGM, where dots become a smear. */
     val showPoints: Boolean = true,
+    /** Dashed marks a projection rather than something measured. */
+    val dashed: Boolean = false,
 )
 
 /**
@@ -82,6 +84,8 @@ fun DualAxisTimeChart(
     modifier: Modifier = Modifier,
     rightAxis: AxisSpec? = null,
     zoneId: ZoneId = ZoneId.systemDefault(),
+    /** Draws a vertical rule, used to separate measured past from projected future. */
+    markerTime: Instant? = null,
 ) {
     val textMeasurer = rememberTextMeasurer()
     val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -110,6 +114,7 @@ fun DualAxisTimeChart(
                         gridColor = gridColor,
                         axisTextColor = axisTextColor,
                         zoneId = zoneId,
+                        markerTime = markerTime,
                     )
                 }
             }
@@ -172,6 +177,7 @@ private fun DrawScope.drawChart(
     gridColor: Color,
     axisTextColor: Color,
     zoneId: ZoneId,
+    markerTime: Instant? = null,
 ) {
     val leftGutter = 36.dp.toPx()
     val rightGutter = if (rightAxis != null) 36.dp.toPx() else 8.dp.toPx()
@@ -235,10 +241,21 @@ private fun DrawScope.drawChart(
         }
     }
 
-    // Time ticks every six hours, anchored to the window end.
-    val formatter = DateTimeFormatter.ofPattern("h a")
+    // Tick spacing scales with the window, anchored to its end.
+    //
+    // A fixed six-hour tick reads well across a day and turns into an illegible
+    // smear across a fortnight -- fifty-odd labels drawn on top of each other.
+    // Both the interval and the format have to widen together: "3 PM" means
+    // nothing on a chart spanning three months.
     val totalHours = Duration.between(windowStart, windowEnd).toHours()
-    val tickHours = if (totalHours <= 12) 3L else 6L
+    val (tickHours, formatter) =
+        when {
+            totalHours <= 12 -> 3L to DateTimeFormatter.ofPattern("h a")
+            totalHours <= 36 -> 6L to DateTimeFormatter.ofPattern("h a")
+            totalHours <= 24 * 4 -> 24L to DateTimeFormatter.ofPattern("EEE")
+            totalHours <= 24 * 20 -> 24L * 3 to DateTimeFormatter.ofPattern("d MMM")
+            else -> 24L * 14 to DateTimeFormatter.ofPattern("d MMM")
+        }
     var tick = windowEnd
     while (!tick.isBefore(windowStart)) {
         val x = xFor(tick)
@@ -260,6 +277,19 @@ private fun DrawScope.drawChart(
     // Threshold lines, drawn under the data.
     leftAxis.threshold?.let { drawThreshold(yFor(it, leftAxis), plotLeft, plotRight) }
     rightAxis?.threshold?.let { drawThreshold(yFor(it, rightAxis), plotLeft, plotRight) }
+
+    markerTime?.let {
+        val x = xFor(it)
+        if (x in plotLeft..plotRight) {
+            drawLine(
+                color = axisTextColor,
+                start = androidx.compose.ui.geometry.Offset(x, plotTop),
+                end = androidx.compose.ui.geometry.Offset(x, plotBottom),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f),
+            )
+        }
+    }
 
     for (item in series) {
         val axis = if (item.axis == ChartAxis.LEFT) leftAxis else rightAxis ?: leftAxis
@@ -292,7 +322,14 @@ private fun DrawScope.drawChart(
         drawPath(
             path = path,
             color = item.color,
-            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+            style =
+                Stroke(
+                    width = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect =
+                        if (item.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                        else null,
+                ),
         )
 
         if (item.showPoints) {

@@ -10,7 +10,7 @@ know about: fasting, hydration, waist, blood pressure, ketones, reps and reading
 | --- | --- |
 | **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, 24-hour glucose and ketone chart, waist, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
-| **Trends** | 14-day and 90-day history for steps, waist, weight, resting heart rate, sleep, stacked macros, reps, mood and reading |
+| **Trends** | 14-day and 90-day history for steps, waist, weight, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading |
 | **History** | Backfill or correct any past day |
 | **Settings** | Units, daily goals, body targets |
 
@@ -112,8 +112,14 @@ level(t) = Σ dose_i × 0.5 ^ ((t − t_i) / 5h)
 The chart samples that curve every 10 minutes over a rolling 24 hours, which is
 what gives it a smooth exponential shape rather than straight lines between
 doses. Doses from before the window are still loaded, because one taken last
-night is still in the body this morning. The maths is in `domain/Caffeine.kt`
-and covered by `CaffeineTest`.
+night is still in the body this morning.
+
+It then projects **six hours forward** — a little over one half-life, which is
+the horizon that answers whether what is in the body now will have cleared by
+bedtime. The projection is drawn dashed, past a dotted rule at the current time,
+so it is never mistaken for a measurement.
+
+The maths is in `domain/Caffeine.kt` and covered by `CaffeineTest`.
 
 ## Units
 

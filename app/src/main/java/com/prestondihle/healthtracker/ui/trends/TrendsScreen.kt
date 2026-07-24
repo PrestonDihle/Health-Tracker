@@ -27,13 +27,20 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.BarChart
+import com.prestondihle.healthtracker.ui.components.ChartSeries
+import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.LineChart
 import com.prestondihle.healthtracker.ui.components.StackedBar
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
+import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.CarbSeries
+import com.prestondihle.healthtracker.ui.theme.DiastolicSeries
 import com.prestondihle.healthtracker.ui.theme.FatSeries
 import com.prestondihle.healthtracker.ui.theme.ProteinSeries
+import com.prestondihle.healthtracker.ui.theme.SystolicSeries
+import java.time.ZoneId
 
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel) {
@@ -82,6 +89,41 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                     dataPoints = state.weightByDay.map { Units.kgToLbs(it.second) },
                     goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Blood pressure", subtitle = "mmHg") {
+                // Plotted against real timestamps rather than an index: readings
+                // are taken irregularly, and evenly spacing them would imply a
+                // cadence that is not there.
+                DualAxisTimeChart(
+                    windowStart = state.startDate.atStartOfDay(ZoneId.systemDefault()).toInstant(),
+                    windowEnd =
+                        state.endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant(),
+                    series =
+                        listOf(
+                            ChartSeries(
+                                label = "Systolic",
+                                points =
+                                    state.bloodPressure.map {
+                                        TimePoint(it.timestamp, it.systolic.toFloat())
+                                    },
+                                color = SystolicSeries,
+                            ),
+                            ChartSeries(
+                                label = "Diastolic",
+                                points =
+                                    state.bloodPressure.map {
+                                        TimePoint(it.timestamp, it.diastolic.toFloat())
+                                    },
+                                color = DiastolicSeries,
+                            ),
+                        ),
+                    // 120/80 is the reference both lines are read against.
+                    leftAxis = AxisSpec(min = 60f, max = 140f, label = "mmHg", threshold = 120f),
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
                 )
             }
         }

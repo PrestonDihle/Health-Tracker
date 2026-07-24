@@ -45,6 +45,15 @@ private const val GLUCOSE_WINDOW_HOURS = 24L
 
 private const val CAFFEINE_WINDOW_HOURS = 24L
 
+/**
+ * How far the caffeine curve projects forward.
+ *
+ * Six hours is a little over one half-life, which is the horizon that actually
+ * answers the question the chart is asked: whether what is in the body now will
+ * have cleared enough by bedtime.
+ */
+private const val CAFFEINE_FORECAST_HOURS = 6L
+
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
 
@@ -123,8 +132,28 @@ data class DashboardUiState(
             return caffeine.filter { !it.timestamp.isBefore(midnight) }.sumOf { it.milligrams }
         }
 
+    /** Right edge of the caffeine chart: past window plus the projection. */
+    val caffeineWindowEnd: Instant
+        get() = now.plus(Duration.ofHours(CAFFEINE_FORECAST_HOURS))
+
     val caffeineCurve: List<Pair<Instant, Float>>
         get() = Caffeine.curve(caffeineDoses, caffeineWindowStart, now)
+
+    /**
+     * The curve continued past now, assuming nothing more is drunk.
+     *
+     * Shares its first point with the end of [caffeineCurve], so the measured
+     * line and the projection join rather than showing a step between them.
+     */
+    val caffeineForecast: List<Pair<Instant, Float>>
+        get() = Caffeine.curve(caffeineDoses, now, caffeineWindowEnd)
+
+    /** Projected milligrams still present at the end of the forecast. */
+    val caffeineForecastEndMg: Float
+        get() = Caffeine.levelAt(caffeineDoses, caffeineWindowEnd)
+
+    val caffeineForecastHours: Long
+        get() = CAFFEINE_FORECAST_HOURS
 }
 
 private data class FastingBundle(

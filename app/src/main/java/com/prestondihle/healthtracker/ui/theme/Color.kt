@@ -81,3 +81,7 @@ val CaffeineSeries = YaleBlue
 val ProteinSeries = BalticBlue
 val CarbSeries = OliveBark
 val FatSeries = YaleBlue
+
+/** Blood pressure. Two lines on one axis, so they need clearly separate hues. */
+val SystolicSeries = BalticBlue
+val DiastolicSeries = OliveBark

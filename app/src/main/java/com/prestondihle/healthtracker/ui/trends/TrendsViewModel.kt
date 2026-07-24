@@ -3,6 +3,7 @@ package com.prestondihle.healthtracker.ui.trends
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.ExerciseSet
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
@@ -36,6 +37,7 @@ data class TrendsUiState(
     val waists: List<WaistEntry> = emptyList(),
     val hydration: List<HydrationEntry> = emptyList(),
     val exerciseSets: List<ExerciseSet> = emptyList(),
+    val bloodPressure: List<BloodPressureReading> = emptyList(),
     val goals: UserGoals = UserGoals(),
 ) {
     /** Daily rep totals for one movement, ordered oldest first. */
@@ -102,8 +104,9 @@ class TrendsViewModel(private val repository: TrackerRepository) : ViewModel() {
                     combine(
                         repository.getHydrationBetween(start, end),
                         repository.getExerciseSetsBetween(start, end),
-                    ) { hydration, sets ->
-                        hydration to sets
+                        repository.getBloodPressureBetween(start, end),
+                    ) { hydration, sets, bloodPressure ->
+                        Triple(hydration, sets, bloodPressure)
                     },
                     repository.getUserGoals(),
                 ) { logs, snapshots, body, activity, goals ->
@@ -117,6 +120,7 @@ class TrendsViewModel(private val repository: TrackerRepository) : ViewModel() {
                         waists = body.second,
                         hydration = activity.first,
                         exerciseSets = activity.second,
+                        bloodPressure = activity.third,
                         goals = goals ?: UserGoals(),
                     )
                 }

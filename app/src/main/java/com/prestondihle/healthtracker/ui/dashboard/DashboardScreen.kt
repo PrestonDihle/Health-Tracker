@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -456,38 +458,46 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
         },
     ) {
         val snapshot = state.snapshot
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
                 label = "Steps",
                 value = snapshot?.steps?.toString() ?: "--",
                 supporting = state.goals.dailyStepGoal?.let { "goal $it" },
+                modifier = Modifier.weight(1f),
             )
-            Metric(label = "Resting HR", value = snapshot?.restingHeartRateBpm?.let { "$it bpm" } ?: "--")
+            Metric(
+                label = "Resting HR",
+                value = snapshot?.restingHeartRateBpm?.let { "$it bpm" } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
             Metric(
                 label = "Sleep",
                 value = snapshot?.sleepMinutes?.let { Units.formatMinutes(it) } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Best mile",
+                value = state.bestMileSeconds?.let { Units.formatPace(it) } ?: "--",
+                supporting = "avg pace",
+                modifier = Modifier.weight(1f),
             )
         }
 
         HorizontalDivider()
 
-        // Energy in, energy out, and the difference between them.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        // Energy in, energy out, the difference, and where it came from -- all
+        // one row so intake, expenditure and composition read together. Six
+        // columns leaves no room for supporting text; the labels carry it.
+        Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
                 label = "Eaten",
                 value = snapshot?.dietaryCalories?.toString() ?: "--",
-                supporting = "kcal",
+                modifier = Modifier.weight(1f),
             )
             Metric(
                 label = "Burned",
                 value = snapshot?.totalCalories?.toString() ?: "--",
-                supporting = snapshot?.activeCalories?.let { "$it active" } ?: "kcal",
+                modifier = Modifier.weight(1f),
             )
 
             val net = state.netCalories
@@ -496,34 +506,29 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
                 // Only meaningful with both halves; one alone would read as a
                 // deficit the size of whichever number happens to exist.
                 value = net?.let { if (it > 0) "+$it" else it.toString() } ?: "--",
-                supporting =
-                    when {
-                        net == null -> "needs both"
-                        net > 0 -> "surplus"
-                        net < 0 -> "deficit"
-                        else -> "even"
-                    },
                 valueColor =
                     when {
                         net == null || net == 0 -> null
                         net > 0 -> MaterialTheme.colorScheme.error
                         else -> Pine
                     },
+                modifier = Modifier.weight(1f),
             )
-        }
-
-        HorizontalDivider()
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Metric(label = "Protein", value = snapshot?.proteinGrams?.let { "${it.toInt()} g" } ?: "--")
-            Metric(label = "Carbs", value = snapshot?.carbGrams?.let { "${it.toInt()} g" } ?: "--")
-            Metric(label = "Fat", value = snapshot?.fatGrams?.let { "${it.toInt()} g" } ?: "--")
-            state.bestMileSeconds?.let {
-                Metric(label = "Best mile", value = Units.formatPace(it), supporting = "avg pace")
-            }
+            Metric(
+                label = "Protein",
+                value = snapshot?.proteinGrams?.let { "${it.toInt()}g" } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Carbs",
+                value = snapshot?.carbGrams?.let { "${it.toInt()}g" } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Fat",
+                value = snapshot?.fatGrams?.let { "${it.toInt()}g" } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -588,11 +593,16 @@ private fun CaffeineCard(
                 supporting = "5h half-life",
             )
             Metric(label = "Taken today", value = "${state.caffeineTodayMg} mg")
+            Metric(
+                label = "In ${state.caffeineForecastHours}h",
+                value = "${state.caffeineForecastEndMg.toInt()} mg",
+                supporting = "if nothing more",
+            )
         }
 
         DualAxisTimeChart(
             windowStart = state.caffeineWindowStart,
-            windowEnd = state.now,
+            windowEnd = state.caffeineWindowEnd,
             series =
                 listOf(
                     ChartSeries(
@@ -603,9 +613,19 @@ private fun CaffeineCard(
                         // The curve is a dense sampling of a continuous function,
                         // so dots would obscure the shape they are drawn from.
                         showPoints = false,
-                    )
+                    ),
+                    ChartSeries(
+                        label = "Projected",
+                        points = state.caffeineForecast.map { TimePoint(it.first, it.second) },
+                        color = CaffeineSeries,
+                        axis = ChartAxis.LEFT,
+                        showPoints = false,
+                        // Dashed so a projection is never mistaken for a reading.
+                        dashed = true,
+                    ),
                 ),
             leftAxis = AxisSpec(min = 0f, max = 200f, label = "mg"),
+            markerTime = state.now,
             modifier =
                 Modifier.fillMaxWidth()
                     .height(if (state.caffeine.isEmpty()) EmptyChartHeight else ChartHeight),
@@ -631,23 +651,43 @@ private fun CaffeineCard(
         if (recent.isNotEmpty()) {
             recent.forEach { intake ->
                 Row(
-                    modifier =
-                        Modifier.fillMaxWidth()
-                            .clickable { dialog = CaffeineDialog.Edit(intake) }
-                            .padding(vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        "${intake.milligrams} mg",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        intake.timestamp.asShortDateTime(state),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // Tapping the row edits; the bin deletes outright, so removing
+                    // a mis-logged dose does not mean opening a dialog first.
+                    Row(
+                        modifier =
+                            Modifier.weight(1f)
+                                .clickable { dialog = CaffeineDialog.Edit(intake) }
+                                .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${intake.milligrams} mg",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            intake.timestamp.asShortDateTime(state),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(
+                        onClick = { onDelete(intake) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription =
+                                "Delete ${intake.milligrams} mg at " +
+                                    intake.timestamp.asShortDateTime(state),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }
@@ -937,24 +977,28 @@ private fun Metric(
     supporting: String? = null,
     /** Null keeps the default text colour; set only where the value itself carries meaning. */
     valueColor: Color? = null,
+    modifier: Modifier = Modifier,
 ) {
-    Column {
+    Column(modifier = modifier) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
         )
         Text(
             value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = valueColor ?: Color.Unspecified,
+            maxLines = 1,
         )
         if (supporting != null) {
             Text(
                 supporting,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
             )
         }
     }
