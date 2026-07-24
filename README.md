@@ -9,8 +9,8 @@ know about: fasting, hydration, waist, blood pressure, ketones, reps and reading
 | Screen | What it does |
 | --- | --- |
 | **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, 24-hour glucose and ketone chart, waist, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
-| **Fasting** | Weekly feeding-window plan plus scheduled multi-day extended fasts, and the adherence score |
-| **Trends** | 14-day and 90-day history for steps, waist, weight, resting heart rate, sleep, protein, reps, mood and reading |
+| **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
+| **Trends** | 14-day and 90-day history for steps, waist, weight, resting heart rate, sleep, stacked macros, reps, mood and reading |
 | **History** | Backfill or correct any past day |
 | **Settings** | Units, daily goals, body targets |
 
@@ -42,10 +42,19 @@ today so one can be pinned as the one that counts.
 
 ### Calories
 
-Two different numbers, kept apart because they are easy to confuse:
+Two different numbers, kept apart because they are easy to confuse, plus the
+difference between them:
 
-- **Eaten** comes from nutrition records and sits with the macros.
-- **Burned** comes from total and active calories burned, shown separately.
+- **Eaten** comes from nutrition records.
+- **Burned** comes from total and active calories burned.
+- **Net** is eaten minus burned — green in deficit, red in surplus. It reads
+  blank unless both halves are known, since substituting zero for a missing one
+  would show a deficit the size of whichever figure happened to sync.
+
+The Trends macro chart stacks protein, carbohydrate and fat **by calories**
+(4/4/9 kcal per gram) rather than by grams, so bar height is total energy and
+each band is its true share. Fat is a small share of the grams and often half
+the calories.
 
 ### Best mile time
 
@@ -77,6 +86,19 @@ The interval algebra behind this lives in `domain/Interval.kt`; the scoring is i
 Fasts logged late can be corrected after the fact: the running fast's start can
 be moved, it can be stopped at a past time, and the most recently finished fast
 can have either end adjusted.
+
+### Timeline and stats
+
+The Fasting screen draws one row per day for the last fortnight, midnight to
+midnight, with fasted stretches filled — so a late first meal or a fast broken
+and restarted is visible as a shape rather than a number. Alongside it sit
+totals for today, seven days and thirty days, the longest and average completed
+fast, and the current and best streak.
+
+Every total is computed with interval set algebra, so two sessions that overlap
+— or one left open and started again — never count the same minute twice. Only
+finished fasts contribute to longest and average; a running one would report its
+length so far and beat itself an hour later.
 
 ## Caffeine
 

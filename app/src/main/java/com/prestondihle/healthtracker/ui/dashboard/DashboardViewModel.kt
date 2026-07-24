@@ -89,6 +89,20 @@ data class DashboardUiState(
                         .coerceIn(0f, 1f)
             }
 
+    /**
+     * Calories eaten minus calories burned, or null unless both are known.
+     *
+     * Negative is a deficit. Falling back to zero for a missing half would show
+     * a deficit the size of whichever figure happened to sync, which is worse
+     * than showing nothing.
+     */
+    val netCalories: Int?
+        get() {
+            val eaten = snapshot?.dietaryCalories ?: return null
+            val burned = snapshot?.totalCalories ?: return null
+            return eaten - burned
+        }
+
     val glucoseWindowStart: Instant
         get() = now.minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
 
@@ -342,9 +356,21 @@ class DashboardViewModel(
         }
     }
 
-    fun logCaffeine(milligrams: Int) {
+    fun logCaffeine(milligrams: Int, at: Instant = Instant.now()) {
         if (milligrams <= 0) return
-        viewModelScope.launch { repository.addCaffeine(milligrams) }
+        viewModelScope.launch { repository.addCaffeine(milligrams, at) }
+    }
+
+    /** Corrects a logged dose. A zero amount deletes it, which is the only way to undo a mistake. */
+    fun updateCaffeine(intake: CaffeineIntake, milligrams: Int, at: Instant) {
+        viewModelScope.launch {
+            if (milligrams <= 0) repository.deleteCaffeine(intake)
+            else repository.updateCaffeine(intake.copy(milligrams = milligrams, timestamp = at))
+        }
+    }
+
+    fun deleteCaffeine(intake: CaffeineIntake) {
+        viewModelScope.launch { repository.deleteCaffeine(intake) }
     }
 
     fun submitMood(vibe: Int, energy: Int, focus: Int) {

@@ -8,6 +8,9 @@ import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.domain.AdherenceResult
 import com.prestondihle.healthtracker.domain.FastingAdherence
+import com.prestondihle.healthtracker.domain.FastingDay
+import com.prestondihle.healthtracker.domain.FastingStatistics
+import com.prestondihle.healthtracker.domain.FastingStats
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,11 +26,16 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
+/** How far back the timeline draws. Two weeks fits a phone without scrolling forever. */
+private const val TIMELINE_DAYS = 14L
+
 data class FastingPlanUiState(
     val days: List<FastingPlanDay> = emptyList(),
     val extendedFasts: List<PlannedExtendedFast> = emptyList(),
     val adherence: AdherenceResult? = null,
     val weekStart: LocalDate = LocalDate.now(),
+    val timeline: List<FastingDay> = emptyList(),
+    val stats: FastingStats = FastingStats(),
 ) {
     /** Plan rows in weekday order, filling gaps so all seven always render. */
     val orderedDays: List<FastingPlanDay>
@@ -86,7 +94,30 @@ class FastingPlanViewModel(
                 repository.getFastingPlan(),
                 repository.getPlannedExtendedFasts(weekStart, horizonEnd),
                 repository.getFastingSessionsOverlapping(weekStart, weekEnd),
-            ) { plan, extended, sessions ->
+                // Stats such as the longest fast are all-time, so this cannot be
+                // scoped to the week the adherence score uses.
+                repository.getAllFastingSessions(),
+            ) { plan, extended, weekSessions, allSessions ->
+                val now = Instant.now()
+                val timeline =
+                    FastingStatistics.daysBetween(
+                        sessions = allSessions,
+                        from = today.minusDays(TIMELINE_DAYS - 1),
+                        to = today,
+                        zoneId = zoneId,
+                        now = now,
+                    )
+                // Streaks look further back than the timeline draws, otherwise a
+                // 20-day run would report as 14.
+                val streakWindow =
+                    FastingStatistics.daysBetween(
+                        sessions = allSessions,
+                        from = today.minusDays(364),
+                        to = today,
+                        zoneId = zoneId,
+                        now = now,
+                    )
+
                 FastingPlanUiState(
                     days = plan,
                     extendedFasts = extended,
@@ -94,13 +125,22 @@ class FastingPlanViewModel(
                         FastingAdherence.score(
                             plan = plan,
                             extendedFasts = extended,
-                            sessions = sessions,
+                            sessions = weekSessions,
                             weekStart = weekStart,
                             weekEnd = weekEnd,
-                            now = Instant.now(),
+                            now = now,
                             zoneId = zoneId,
                         ),
                     weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+                    timeline = timeline,
+                    stats =
+                        FastingStatistics.summarise(
+                            sessions = allSessions,
+                            days = streakWindow,
+                            today = today,
+                            zoneId = zoneId,
+                            now = now,
+                        ),
                 )
             }
         }

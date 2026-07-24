@@ -1,6 +1,7 @@
 ﻿package com.prestondihle.healthtracker.ui.dashboard
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -38,14 +39,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.ui.components.AxisSpec
+import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
@@ -58,6 +62,7 @@ import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.CaffeineSeries
 import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
 import com.prestondihle.healthtracker.ui.theme.KetoneSeries
+import com.prestondihle.healthtracker.ui.theme.Pine
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
@@ -133,9 +138,17 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
         item {
             CaffeineCard(
                 state = state,
-                onLog = {
-                    viewModel.logCaffeine(it)
-                    toast("Logged $it mg caffeine")
+                onLog = { mg, at ->
+                    viewModel.logCaffeine(mg, at)
+                    toast("Logged $mg mg caffeine")
+                },
+                onUpdate = { intake, mg, at ->
+                    viewModel.updateCaffeine(intake, mg, at)
+                    toast(if (mg <= 0) "Dose removed" else "Dose updated")
+                },
+                onDelete = {
+                    viewModel.deleteCaffeine(it)
+                    toast("Dose removed")
                 },
             )
         }
@@ -461,8 +474,7 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
 
         HorizontalDivider()
 
-        // Eaten, not burned. These four are all intake, so they belong on one
-        // row; the burn figure sits apart below so the two cannot be confused.
+        // Energy in, energy out, and the difference between them.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -472,31 +484,45 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
                 value = snapshot?.dietaryCalories?.toString() ?: "--",
                 supporting = "kcal",
             )
+            Metric(
+                label = "Burned",
+                value = snapshot?.totalCalories?.toString() ?: "--",
+                supporting = snapshot?.activeCalories?.let { "$it active" } ?: "kcal",
+            )
+
+            val net = state.netCalories
+            Metric(
+                label = "Net",
+                // Only meaningful with both halves; one alone would read as a
+                // deficit the size of whichever number happens to exist.
+                value = net?.let { if (it > 0) "+$it" else it.toString() } ?: "--",
+                supporting =
+                    when {
+                        net == null -> "needs both"
+                        net > 0 -> "surplus"
+                        net < 0 -> "deficit"
+                        else -> "even"
+                    },
+                valueColor =
+                    when {
+                        net == null || net == 0 -> null
+                        net > 0 -> MaterialTheme.colorScheme.error
+                        else -> Pine
+                    },
+            )
+        }
+
+        HorizontalDivider()
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
             Metric(label = "Protein", value = snapshot?.proteinGrams?.let { "${it.toInt()} g" } ?: "--")
             Metric(label = "Carbs", value = snapshot?.carbGrams?.let { "${it.toInt()} g" } ?: "--")
             Metric(label = "Fat", value = snapshot?.fatGrams?.let { "${it.toInt()} g" } ?: "--")
-        }
-
-        if (snapshot?.totalCalories != null || state.bestMileSeconds != null) {
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                snapshot?.totalCalories?.let {
-                    Metric(
-                        label = "Burned",
-                        value = it.toString(),
-                        supporting = snapshot.activeCalories?.let { active -> "$active active" },
-                    )
-                }
-                state.bestMileSeconds?.let {
-                    Metric(
-                        label = "Best mile",
-                        value = Units.formatPace(it),
-                        supporting = "average pace",
-                    )
-                }
+            state.bestMileSeconds?.let {
+                Metric(label = "Best mile", value = Units.formatPace(it), supporting = "avg pace")
             }
         }
     }
@@ -535,8 +561,22 @@ private fun HydrationCard(state: DashboardUiState, onAdd: (Int) -> Unit) {
     }
 }
 
+/** Null means the dialog is logging a new dose; a value means it is editing that one. */
+private sealed interface CaffeineDialog {
+    data object New : CaffeineDialog
+
+    data class Edit(val intake: CaffeineIntake) : CaffeineDialog
+}
+
 @Composable
-private fun CaffeineCard(state: DashboardUiState, onLog: (Int) -> Unit) {
+private fun CaffeineCard(
+    state: DashboardUiState,
+    onLog: (Int, Instant) -> Unit,
+    onUpdate: (CaffeineIntake, Int, Instant) -> Unit,
+    onDelete: (CaffeineIntake) -> Unit,
+) {
+    var dialog by remember { mutableStateOf<CaffeineDialog?>(null) }
+
     DashboardCard(title = "Caffeine") {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -573,22 +613,65 @@ private fun CaffeineCard(state: DashboardUiState, onLog: (Int) -> Unit) {
 
         HorizontalDivider()
 
-        var mg by remember { mutableIntStateOf(95) }
-        IntStepper(
-            label = "Caffeine",
-            value = mg,
-            onValueChange = { mg = it },
-            step = 5,
-            range = 0..1_000,
-            supportingText = "mg",
-        )
         Button(
-            onClick = { onLog(mg) },
+            onClick = { dialog = CaffeineDialog.New },
             modifier = Modifier.fillMaxWidth(),
             contentPadding = CompactButtonPadding,
         ) {
             Text("Log caffeine")
         }
+
+        // Doses inside the plotted window, newest first, each tappable to fix
+        // an amount or a time that was guessed at when logged.
+        val recent =
+            state.caffeine
+                .filter { !it.timestamp.isBefore(state.caffeineWindowStart) }
+                .sortedByDescending { it.timestamp }
+
+        if (recent.isNotEmpty()) {
+            recent.forEach { intake ->
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth()
+                            .clickable { dialog = CaffeineDialog.Edit(intake) }
+                            .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${intake.milligrams} mg",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        intake.timestamp.asShortDateTime(state),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    dialog?.let { open ->
+        val editing = (open as? CaffeineDialog.Edit)?.intake
+        CaffeineEntryDialog(
+            initialMilligrams = editing?.milligrams ?: 95,
+            initialTime = editing?.timestamp ?: state.now,
+            zoneId = state.zoneId,
+            onDismiss = { dialog = null },
+            onConfirm = { mg, at ->
+                if (editing == null) onLog(mg, at) else onUpdate(editing, mg, at)
+                dialog = null
+            },
+            onDelete =
+                editing?.let {
+                    {
+                        onDelete(it)
+                        dialog = null
+                    }
+                },
+        )
     }
 }
 
@@ -848,14 +931,25 @@ private fun Instant.asShortDateTime(state: DashboardUiState): String =
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun Metric(label: String, value: String, supporting: String? = null) {
+private fun Metric(
+    label: String,
+    value: String,
+    supporting: String? = null,
+    /** Null keeps the default text colour; set only where the value itself carries meaning. */
+    valueColor: Color? = null,
+) {
     Column {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor ?: Color.Unspecified,
+        )
         if (supporting != null) {
             Text(
                 supporting,

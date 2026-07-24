@@ -106,6 +106,8 @@ interface TrackerDao {
 
     @Insert suspend fun insertCaffeineIntake(intake: CaffeineIntake)
 
+    @Update suspend fun updateCaffeineIntake(intake: CaffeineIntake)
+
     @Delete suspend fun deleteCaffeineIntake(intake: CaffeineIntake)
 
     @Query("SELECT * FROM CreatineIntake WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp ASC")
@@ -119,6 +121,10 @@ interface TrackerDao {
 
     @Query("SELECT * FROM FastingSession WHERE endInstant IS NULL ORDER BY startInstant DESC LIMIT 1")
     fun getActiveFastingSession(): Flow<FastingSession?>
+
+    /** Every session ever logged, for all-time stats such as the longest fast. */
+    @Query("SELECT * FROM FastingSession ORDER BY startInstant ASC")
+    fun getAllFastingSessions(): Flow<List<FastingSession>>
 
     /** The fast most recently finished, so a forgotten Stop can be corrected after the fact. */
     @Query(

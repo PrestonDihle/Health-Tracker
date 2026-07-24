@@ -42,7 +42,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
+import com.prestondihle.healthtracker.domain.FastingStats
+import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.FastingTimeline
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -68,6 +72,17 @@ fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
         item { AdherenceCard(state) }
+
+        item {
+            PlanCard(
+                title = "Fasting pattern",
+                subtitle = "Last 14 days. Filled is fasted, blank is eating.",
+            ) {
+                FastingTimeline(days = state.timeline, modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        item { StatsCard(state.stats) }
 
         item {
             PlanCard(
@@ -163,6 +178,66 @@ private fun AdherenceCard(state: FastingPlanUiState) {
         )
     }
 }
+
+@Composable
+private fun StatsCard(stats: FastingStats) {
+    PlanCard(title = "Fasting stats", subtitle = "Totals count overlapping fasts only once") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            StatMetric("Today", stats.todaySeconds.asHours())
+            StatMetric("7 days", stats.weekSeconds.asHours())
+            StatMetric("30 days", stats.monthSeconds.asHours())
+        }
+
+        HorizontalDivider()
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            StatMetric(
+                "Longest",
+                stats.longestFast?.let { Units.formatDuration(it) } ?: "--",
+                stats.longestFastEnded?.let { DATE_FORMAT.format(it.atZone(ZoneId.systemDefault())) },
+            )
+            StatMetric(
+                "Average",
+                if (stats.completedFasts == 0) "--"
+                else Units.formatDuration(Duration.ofSeconds(stats.averageFastSeconds)),
+                "${stats.completedFasts} finished",
+            )
+            StatMetric(
+                "Streak",
+                "${stats.currentStreakDays}d",
+                "best ${stats.bestStreakDays}d",
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatMetric(label: String, value: String, supporting: String? = null) {
+    Column {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        if (supporting != null) {
+            Text(
+                supporting,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Whole hours with an `h`, which is the resolution these totals are read at. */
+private fun Long.asHours(): String = "${this / 3600}h"
 
 @Composable
 private fun PlanDayRow(

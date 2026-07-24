@@ -94,6 +94,79 @@ fun LineChart(
     }
 }
 
+/** One bar's segments, bottom to top, in the same order as the series colors. */
+data class StackedBar(val segments: List<Float>)
+
+/**
+ * Bars split into stacked segments sharing one scale.
+ *
+ * Segment order is fixed across bars so a band stays in the same place from day
+ * to day; a bar with fewer values than there are colors simply stops early
+ * rather than shifting the ones above it.
+ */
+@Composable
+fun StackedBarChart(
+    bars: List<StackedBar>,
+    colors: List<Color>,
+    modifier: Modifier = Modifier,
+    goalLine: Float? = null,
+    goalColor: Color = MaterialTheme.colorScheme.error,
+) {
+    val totals = bars.map { bar -> bar.segments.sum() }
+    if (bars.isEmpty() || totals.all { it <= 0f }) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            Text("No data yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+
+    val maxVal = maxOf(totals.max(), goalLine ?: 0f).takeIf { it > 0f } ?: 1f
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val stepX = width / bars.size
+        val barWidth = stepX * 0.6f
+
+        fun mapY(value: Float): Float = height - (value / maxVal) * height
+
+        goalLine?.let {
+            val y = mapY(it)
+            if (y in 0f..height) {
+                drawLine(
+                    color = goalColor,
+                    start = Offset(0f, y),
+                    end = Offset(width, y),
+                    strokeWidth = 2.dp.toPx(),
+                    pathEffect =
+                        androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                            floatArrayOf(10f, 10f),
+                            0f,
+                        ),
+                )
+            }
+        }
+
+        bars.forEachIndexed { index, bar ->
+            val startX = index * stepX + (stepX - barWidth) / 2
+            // Stack upward from the baseline, tracking the running height so
+            // each segment sits on the one below it.
+            var runningValue = 0f
+            bar.segments.forEachIndexed { segmentIndex, value ->
+                if (value <= 0f) return@forEachIndexed
+                val bottom = mapY(runningValue)
+                val top = mapY(runningValue + value)
+                drawRect(
+                    color = colors.getOrElse(segmentIndex) { colors.last() },
+                    topLeft = Offset(startX, top),
+                    size = Size(barWidth, bottom - top),
+                )
+                runningValue += value
+            }
+        }
+    }
+}
+
 @Composable
 fun BarChart(
     dataPoints: List<Float>,

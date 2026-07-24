@@ -75,10 +75,11 @@ Weight exists on both sides and is merged at read time, not at write time: `Weig
 manual table, `HealthDaySnapshot.weightKg` is the synced value, and `TrendsUiState.weightByDay`
 prefers the manual entry on any day that has both. A sync must never overwrite a hand-typed weight.
 
-**Calories are two different numbers.** `dietaryCalories` is food eaten (`NutritionRecord`) and
-belongs with the macros; `totalCalories`/`activeCalories` are energy burned and are displayed
-separately. Grouping burn figures next to protein/carbs/fat is what made the dashboard read as if it
-were showing intake.
+**Calories are two different numbers.** `dietaryCalories` is food eaten (`NutritionRecord`);
+`totalCalories`/`activeCalories` are energy burned. They sit together on one row with a signed
+`netCalories` (eaten − burned, green under, red over), which is null unless *both* halves are known —
+substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
+Grouping burn figures next to protein/carbs/fat is what originally made the dashboard read as intake.
 
 ### Health Connect
 
@@ -145,6 +146,14 @@ The theme is light-only and dynamic color is deliberately absent — leaving it 
 Baltic Blue `#2F6690` (primary), Olive Bark `#625834` (secondary), Alabaster Grey `#D9DCD6`
 (background), Yale Blue `#16425B`, Inferno `#A30000` (error).
 
+`domain/FastingStats.kt` aggregates logged sessions for the Fasting screen — per-day segments for the
+timeline, plus totals, longest, average and streaks. It works off `Interval` set algebra rather than
+summing session durations, so overlapping or restarted sessions cannot double-count a minute.
+Segments are emitted as `0f..1f` fractions of the day because the timeline draws proportions and
+would otherwise redo time arithmetic every frame. Longest and average count only *finished* fasts —
+a running one would report its length so far and beat itself an hour later. A streak tolerates an
+empty today (checked before the day's fast is logged) but not an empty yesterday.
+
 ### Caffeine
 
 `domain/Caffeine.kt` models caffeine remaining in the body with a 5-hour half-life. Elimination is
@@ -157,11 +166,12 @@ it.
 
 ## Testing
 
-`FastingAdherenceTest` and `CaffeineTest` are the real suites — both pure JVM. Fasting covers the
-midnight-wrapping window, extended fasts overriding the daily plan, no-eating days, and the
-future-time exclusion. Caffeine covers half-life decay, dose accumulation, and curve shape. New
-adherence, interval or decay behaviour belongs there. `ExampleUnitTest` and `ExampleRobolectricTest`
-are scaffolding.
+`FastingAdherenceTest`, `FastingStatsTest` and `CaffeineTest` are the real suites — all pure JVM.
+Adherence covers the midnight-wrapping window, extended fasts overriding the daily plan, no-eating
+days, and the future-time exclusion. Stats covers overlap de-duplication, midnight splits, streak
+rules and open sessions. Caffeine covers half-life decay, dose accumulation and curve shape. New
+adherence, interval, stats or decay behaviour belongs there. `ExampleUnitTest` and
+`ExampleRobolectricTest` are scaffolding.
 
 Unit tests run with `isIncludeAndroidResources = true`, so Robolectric tests can read resources. The
 Roborazzi plugin is applied and its dependencies are on the test classpath, but no screenshot tests

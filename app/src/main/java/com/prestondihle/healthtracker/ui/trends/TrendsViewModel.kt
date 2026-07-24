@@ -47,6 +47,25 @@ data class TrendsUiState(
             .sortedBy { it.first }
 
     /**
+     * Macro calories per day, oldest first, as protein / carbs / fat triples.
+     *
+     * Converted from grams at 4/4/9 kcal so the stack height is total energy and
+     * each band is its real share -- fat is barely a third of the grams but
+     * often half the calories, which stacking grams would hide.
+     */
+    val macroCaloriesByDay: List<Triple<Float, Float, Float>>
+        get() =
+            snapshots
+                .filter { it.proteinGrams != null || it.carbGrams != null || it.fatGrams != null }
+                .map {
+                    Triple(
+                        (it.proteinGrams ?: 0f) * 4f,
+                        (it.carbGrams ?: 0f) * 4f,
+                        (it.fatGrams ?: 0f) * 9f,
+                    )
+                }
+
+    /**
      * Weight per day in kilograms, oldest first, combining hand-entered values
      * with those synced from Health Connect.
      *

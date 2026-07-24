@@ -1,13 +1,17 @@
 ﻿package com.prestondihle.healthtracker.ui.trends
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -16,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -24,6 +29,11 @@ import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.BarChart
 import com.prestondihle.healthtracker.ui.components.LineChart
+import com.prestondihle.healthtracker.ui.components.StackedBar
+import com.prestondihle.healthtracker.ui.components.StackedBarChart
+import com.prestondihle.healthtracker.ui.theme.CarbSeries
+import com.prestondihle.healthtracker.ui.theme.FatSeries
+import com.prestondihle.healthtracker.ui.theme.ProteinSeries
 
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel) {
@@ -95,12 +105,34 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         }
 
         item {
-            TrendCard(title = "Protein", subtitle = "grams, from Health Connect") {
-                BarChart(
-                    dataPoints = state.snapshots.mapNotNull { it.proteinGrams },
-                    goalLine = state.goals.dailyProteinTarget?.toFloat(),
+            TrendCard(title = "Macros", subtitle = "calories from protein, carbs and fat") {
+                StackedBarChart(
+                    bars =
+                        state.macroCaloriesByDay.map { (protein, carbs, fat) ->
+                            StackedBar(listOf(protein, carbs, fat))
+                        },
+                    colors = listOf(ProteinSeries, CarbSeries, FatSeries),
+                    goalLine = state.goals.dailyCalorieTarget?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf(
+                            "Protein" to ProteinSeries,
+                            "Carbs" to CarbSeries,
+                            "Fat" to FatSeries,
+                        )
+                        .forEach { (label, color) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Canvas(modifier = Modifier.size(8.dp)) { drawCircle(color) }
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                }
             }
         }
 

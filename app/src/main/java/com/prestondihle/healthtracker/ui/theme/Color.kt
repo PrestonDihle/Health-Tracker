@@ -21,6 +21,15 @@ val YaleBlue = Color(0xFF16425B)
 /** Accent, reserved for errors, over-goal states and threshold lines. */
 val Inferno = Color(0xFFA30000)
 
+/**
+ * Favourable counterpart to [Inferno], for a calorie deficit.
+ *
+ * The brand palette has no green, and the differential needs one: red alone
+ * cannot express a two-directional value. Desaturated and dark to sit with the
+ * other four rather than glowing next to them.
+ */
+val Pine = Color(0xFF356B3F)
+
 // ---------------------------------------------------------------------------
 // Derived neutrals. Cards sit *above* the alabaster background, so surface is
 // lighter than background rather than darker.
@@ -61,3 +70,14 @@ val ThresholdLine = Inferno
 
 /** Caffeine decay curve. Yale Blue keeps it in-palette and distinct from glucose. */
 val CaffeineSeries = YaleBlue
+
+/**
+ * Macro stack colors.
+ *
+ * Ordered so the two blues are never adjacent in the stack -- olive sits
+ * between them, which is what keeps the bands readable without inventing a
+ * fourth hue.
+ */
+val ProteinSeries = BalticBlue
+val CarbSeries = OliveBark
+val FatSeries = YaleBlue

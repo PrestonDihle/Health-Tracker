@@ -150,6 +150,8 @@ class TrackerRepository(
     suspend fun addCaffeine(mg: Int, at: Instant = Instant.now()) =
         dao.insertCaffeineIntake(CaffeineIntake(timestamp = at, milligrams = mg))
 
+    suspend fun updateCaffeine(intake: CaffeineIntake) = dao.updateCaffeineIntake(intake)
+
     suspend fun deleteCaffeine(intake: CaffeineIntake) = dao.deleteCaffeineIntake(intake)
 
     fun getCreatineForDate(date: LocalDate): Flow<List<CreatineIntake>> =
@@ -166,6 +168,8 @@ class TrackerRepository(
 
     fun getLastCompletedFastingSession(): Flow<FastingSession?> =
         dao.getLastCompletedFastingSession()
+
+    fun getAllFastingSessions(): Flow<List<FastingSession>> = dao.getAllFastingSessions()
 
     fun getFastingSessionsOverlapping(start: Instant, end: Instant): Flow<List<FastingSession>> =
         dao.getFastingSessionsOverlapping(start.toEpochMilli(), end.toEpochMilli())
