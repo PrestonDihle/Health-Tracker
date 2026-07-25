@@ -191,7 +191,11 @@ fun BarChart(
     Canvas(modifier = modifier) {
         val width = size.width
         val height = size.height
-        val barWidth = width / (dataPoints.size * 2)
+        val stepX = width / dataPoints.size
+        // Proportional to the slot, but capped: one or two days of data would
+        // otherwise draw a bar half the chart wide, reading as a solid block
+        // rather than a bar. The cap keeps sparse data looking like a column.
+        val barWidth = (stepX * 0.6f).coerceAtMost(48.dp.toPx())
 
         fun mapY(value: Float): Float {
             val normalized = (value - minVal) / range
@@ -212,7 +216,6 @@ fun BarChart(
             }
         }
 
-        val stepX = width / dataPoints.size
         for (i in dataPoints.indices) {
             val value = dataPoints[i]
             val y = mapY(value)

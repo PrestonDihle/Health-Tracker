@@ -103,13 +103,17 @@ length so far and beat itself an hour later.
 ## Caffeine
 
 Caffeine is eliminated first-order with a **5-hour half-life**, so each dose
-decays on its own and doses add together:
+decays on its own and doses add together.
 
-```
-level(t) = Σ dose_i × 0.5 ^ ((t − t_i) / 5h)
-```
+A dose is not treated as arriving all at once. Nobody downs a coffee in a single
+instant, and a vertical step in the curve implies a precision the logged time
+does not have. Each dose is instead spread evenly over the **30 minutes ending
+at its logged time** and that steady intake is integrated against the decay,
+which rounds the jump into a short climb. A dose reads about 97% of its amount at
+the moment it is logged, since its earliest part has already begun to clear. The
+model collapses back to a plain instantaneous dose as that ramp shrinks to zero.
 
-The chart samples that curve every 10 minutes over a rolling 24 hours, which is
+The chart samples the curve every 10 minutes over a rolling 24 hours, which is
 what gives it a smooth exponential shape rather than straight lines between
 doses. Doses from before the window are still loaded, because one taken last
 night is still in the body this morning.

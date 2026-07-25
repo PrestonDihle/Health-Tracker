@@ -235,6 +235,39 @@ private val BarHeight = 5.dp
 /** Buttons at stock size waste a lot of vertical space when a card has three of them. */
 private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
+/**
+ * A compact log action, right-aligned under its inputs.
+ *
+ * Metric cards used to end in a full-width button, which gave a secondary action
+ * as much weight as a primary one and pushed the next card off screen. A small
+ * button pinned to the right reads as "commit what I just dialled in" and lets
+ * more cards share the view -- which is the whole point of the dense layout.
+ */
+@Composable
+private fun LogButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    outlined: Boolean = false,
+) {
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        if (outlined) {
+            OutlinedButton(
+                onClick = onClick,
+                enabled = enabled,
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text(text)
+            }
+        } else {
+            Button(onClick = onClick, enabled = enabled, contentPadding = CompactButtonPadding) {
+                Text(text)
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cards
 // ---------------------------------------------------------------------------
@@ -633,13 +666,7 @@ private fun CaffeineCard(
 
         HorizontalDivider()
 
-        Button(
-            onClick = { dialog = CaffeineDialog.New },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Log caffeine")
-        }
+        LogButton("Log caffeine", onClick = { dialog = CaffeineDialog.New })
 
         // Doses inside the plotted window, newest first, each tappable to fix
         // an amount or a time that was guessed at when logged.
@@ -766,13 +793,7 @@ private fun MetabolicCard(
             valueFormatter = { "%.1f".format(it) },
             supportingText = "mmol/L",
         )
-        Button(
-            onClick = { onAddKetone(ketone) },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Log ketones")
-        }
+        LogButton("Log ketones", onClick = { onAddKetone(ketone) })
 
         var glucose by remember { mutableIntStateOf(90) }
         IntStepper(
@@ -783,24 +804,22 @@ private fun MetabolicCard(
             range = 20..500,
             supportingText = "mg/dL, for manual fingersticks",
         )
-        OutlinedButton(
-            onClick = { onAddGlucose(glucose) },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Log blood sugar")
-        }
+        LogButton("Log blood sugar", onClick = { onAddGlucose(glucose) }, outlined = true)
     }
 }
 
 @Composable
 private fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
     DashboardCard(title = "Body") {
-        val inches = Units.cmToInches(state.waistCm)
+        // Held locally and written only on Log, so dialling past the target value
+        // does not save a string of measurements that were never taken. Re-seeds
+        // whenever the stored value changes underneath it.
+        var inches by
+            remember(state.waistCm) { mutableFloatStateOf(Units.cmToInches(state.waistCm)) }
         Stepper(
             label = "Waist",
             value = inches,
-            onValueChange = { onWaistChange(Units.inchesToCm(it)) },
+            onValueChange = { inches = it },
             step = 0.25f,
             range = 20f..70f,
             snap = Units::roundToQuarter,
@@ -808,6 +827,7 @@ private fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
             supportingText =
                 if (state.hasWaistMeasurement) "quarter-inch steps" else "default until measured",
         )
+        LogButton("Log waist", onClick = { onWaistChange(Units.inchesToCm(inches)) })
     }
 }
 
@@ -829,13 +849,7 @@ private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> U
             onValueChange = { diastolic = it },
             range = 30..160,
         )
-        Button(
-            onClick = { onSubmit(systolic, diastolic) },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Log blood pressure")
-        }
+        LogButton("Log blood pressure", onClick = { onSubmit(systolic, diastolic) })
 
         state.latestBloodPressure?.let {
             Text(
@@ -859,13 +873,7 @@ private fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit)
         LabeledSlider("Energy", energy, { energy = it }, ScaleDescriptors.Energy)
         LabeledSlider("Focus", focus, { focus = it }, ScaleDescriptors.Focus)
 
-        Button(
-            onClick = { onSubmit(vibe, energy, focus) },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Submit")
-        }
+        LogButton("Submit", onClick = { onSubmit(vibe, energy, focus) })
     }
 }
 
@@ -883,13 +891,7 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
             range = 0..500,
             supportingText = "${state.pushupsToday} today",
         )
-        Button(
-            onClick = { onLog(MovementType.PUSHUP, pushups) },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Log pushups")
-        }
+        LogButton("Log pushups", onClick = { onLog(MovementType.PUSHUP, pushups) })
 
         HorizontalDivider()
 
@@ -901,13 +903,7 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
             range = 0..500,
             supportingText = "${state.squatsToday} today",
         )
-        Button(
-            onClick = { onLog(MovementType.AIR_SQUAT, squats) },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = CompactButtonPadding,
-        ) {
-            Text("Log air squats")
-        }
+        LogButton("Log air squats", onClick = { onLog(MovementType.AIR_SQUAT, squats) })
     }
 }
 
@@ -944,21 +940,17 @@ private fun ReadingCard(
             step = 5,
             range = 0..2_000,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = { onLogPages(pages) },
-                modifier = Modifier.weight(1f),
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text("Log pages")
-            }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             if (readToday > 0) {
-                OutlinedButton(
-                    onClick = { onSetPages(0) },
-                    contentPadding = CompactButtonPadding,
-                ) {
+                OutlinedButton(onClick = { onSetPages(0) }, contentPadding = CompactButtonPadding) {
                     Text("Reset")
                 }
+            }
+            Button(onClick = { onLogPages(pages) }, contentPadding = CompactButtonPadding) {
+                Text("Log pages")
             }
         }
     }

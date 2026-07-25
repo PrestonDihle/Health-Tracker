@@ -2,7 +2,8 @@ package com.prestondihle.healthtracker.domain
 
 import java.time.Duration
 import java.time.Instant
-import kotlin.math.pow
+import kotlin.math.exp
+import kotlin.math.ln
 
 /** One caffeine dose: how much, and when it was taken. */
 data class CaffeineDose(val time: Instant, val milligrams: Int)
@@ -13,6 +14,11 @@ data class CaffeineDose(val time: Instant, val milligrams: Int)
  * Elimination is first-order, so each dose decays independently and doses
  * simply add up. That is what makes an afternoon coffee on top of a morning one
  * read so much higher than either alone.
+ *
+ * A dose is not treated as arriving all at once. Nobody downs a coffee in one
+ * instant, and a vertical step in the curve implies a precision the logged time
+ * does not have. Each dose is instead spread evenly over the [INTAKE_RAMP]
+ * ending at its logged time, which rounds the jump into a short climb.
  */
 object Caffeine {
 
@@ -20,20 +26,52 @@ object Caffeine {
     const val HALF_LIFE_HOURS = 5.0
 
     /**
+     * How long a dose is assumed to take to drink, ending at its logged time.
+     *
+     * The dose is consumed at a steady rate across this span rather than in one
+     * gulp, so the curve ramps up over half an hour instead of stepping.
+     */
+    val INTAKE_RAMP: Duration = Duration.ofMinutes(30)
+
+    /**
      * Doses older than this contribute under 0.1% of their original amount, so
      * they are not worth loading to draw a curve.
      */
     const val RELEVANT_HISTORY_HOURS = 10L * HALF_LIFE_HOURS.toLong()
 
+    /** First-order elimination constant, per hour: ln 2 over the half-life. */
+    private val K = ln(2.0) / HALF_LIFE_HOURS
+
     /** Milligrams still present at [at], summed over every dose taken by then. */
     fun levelAt(doses: List<CaffeineDose>, at: Instant): Float =
-        doses
-            .filter { !it.time.isAfter(at) }
-            .sumOf { dose ->
-                val hours = Duration.between(dose.time, at).toMillis() / 3_600_000.0
-                dose.milligrams * 0.5.pow(hours / HALF_LIFE_HOURS)
-            }
-            .toFloat()
+        doses.sumOf { doseLevel(it, at) }.toFloat()
+
+    /**
+     * One distributed dose's contribution at [at].
+     *
+     * The dose infuses at a constant rate over `[end - ramp, end]`. Integrating
+     * that infusion against first-order decay gives, once fully in,
+     * `(rate/k)·(e^(-k·tEnd) − e^(-k·tStart))`; partway through the ramp the
+     * upper limit is [at] itself, leaving `(rate/k)·(1 − e^(-k·tStart))`. Both
+     * collapse to the plain `dose·e^(-k·t)` bolus as the ramp shrinks to zero.
+     */
+    private fun doseLevel(dose: CaffeineDose, at: Instant): Double {
+        val rampHours = INTAKE_RAMP.toMillis() / 3_600_000.0
+        val start = dose.time.minus(INTAKE_RAMP)
+        // Nothing has been drunk yet.
+        if (!at.isAfter(start)) return 0.0
+
+        val rate = dose.milligrams / rampHours // mg per hour
+        val hoursSinceStart = Duration.between(start, at).toMillis() / 3_600_000.0
+
+        return if (at.isBefore(dose.time)) {
+            // Still drinking: only the portion consumed so far, each bit decayed.
+            (rate / K) * (1 - exp(-K * hoursSinceStart))
+        } else {
+            val hoursSinceEnd = Duration.between(dose.time, at).toMillis() / 3_600_000.0
+            (rate / K) * (exp(-K * hoursSinceEnd) - exp(-K * hoursSinceStart))
+        }
+    }
 
     /**
      * The level sampled evenly from [from] to [to].

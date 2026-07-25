@@ -199,12 +199,34 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         }
 
         item {
-            TrendCard(title = "Vibe, energy, focus", subtitle = "1 to 10") {
+            TrendCard(title = "Vibe", subtitle = "1 to 10") {
                 LineChart(
                     dataPoints = state.dailyLogs.mapNotNull { it.vibe?.toFloat() },
                     minY = 1f,
                     maxY = 10f,
-                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Energy", subtitle = "1 to 10") {
+                LineChart(
+                    dataPoints = state.dailyLogs.mapNotNull { it.energy?.toFloat() },
+                    minY = 1f,
+                    maxY = 10f,
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                )
+            }
+        }
+
+        item {
+            TrendCard(title = "Focus", subtitle = "1 to 10") {
+                LineChart(
+                    dataPoints = state.dailyLogs.mapNotNull { it.focus?.toFloat() },
+                    minY = 1f,
+                    maxY = 10f,
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
                 )
             }
         }
