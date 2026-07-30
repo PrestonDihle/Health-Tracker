@@ -222,6 +222,50 @@ class HealthConnectDataSource(
             .onFailure { Log.d(TAG, "record read failed for ${type.simpleName}", it) }
             .getOrDefault(emptyList())
 
+    /**
+     * Meals in a window, each with the time it was eaten.
+     *
+     * A [NutritionRecord] is an interval, not an instant. Its start is when eating
+     * began, which is the reference an absorption curve is anchored to -- so the
+     * end time is dropped rather than averaged in.
+     */
+    override suspend fun readMeals(from: Instant, to: Instant): List<MealSample> {
+        val active = client ?: return emptyList()
+        return active
+            .readAllRecords(NutritionRecord::class, TimeRangeFilter.between(from, to))
+            .map { record ->
+                MealSample(
+                    time = record.startTime,
+                    calories = record.energy?.inKilocalories?.toInt(),
+                    proteinGrams = record.protein?.inGrams?.toFloat(),
+                    carbGrams = record.totalCarbohydrate?.inGrams?.toFloat(),
+                    fatGrams = record.totalFat?.inGrams?.toFloat(),
+                    name = record.name,
+                    externalId = record.metadata.id.takeIf { it.isNotBlank() },
+                )
+            }
+    }
+
+    /**
+     * Every heart rate sample in a window.
+     *
+     * One [HeartRateRecord] holds many samples -- a watch writes a batch covering
+     * minutes at a time -- so the records are flattened to their samples. The
+     * caller does the averaging; this returns the full resolution it was given.
+     */
+    override suspend fun readHeartRate(from: Instant, to: Instant): List<HeartRateSample> {
+        val active = client ?: return emptyList()
+        return active
+            .readAllRecords(HeartRateRecord::class, TimeRangeFilter.between(from, to))
+            .flatMap { record ->
+                record.samples.map { HeartRateSample(it.time, it.beatsPerMinute.toInt()) }
+            }
+            // A batch can straddle the window edge, so its samples are filtered
+            // individually rather than trusting the record's own bounds.
+            .filter { !it.time.isBefore(from) && it.time.isBefore(to) }
+            .sortedBy { it.time }
+    }
+
     /** The day's last weigh-in, which is the one a scale-synced app means by "weight". */
     private suspend fun HealthConnectClient.readLatestWeightKg(range: TimeRangeFilter): Float? =
         readAllRecords(WeightRecord::class, range).maxByOrNull { it.time }?.weight?.inKilograms

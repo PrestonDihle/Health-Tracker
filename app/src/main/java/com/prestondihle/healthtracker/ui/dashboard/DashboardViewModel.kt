@@ -15,6 +15,7 @@ import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.UserGoals
+import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.domain.AdherenceResult
 import com.prestondihle.healthtracker.domain.Caffeine
 import com.prestondihle.healthtracker.domain.CaffeineDose
@@ -43,16 +44,28 @@ private const val DEFAULT_WAIST_CM = 106.68f
 
 private const val GLUCOSE_WINDOW_HOURS = 24L
 
-private const val CAFFEINE_WINDOW_HOURS = 24L
+/**
+ * Half the caffeine window, extending equally either side of now.
+ *
+ * Splitting a 36-hour span down the middle puts *now* at the centre of the plot,
+ * so the height of the line at the mid-point is the current level and the two
+ * halves read as history and forecast at the same scale. Eighteen hours back
+ * reaches last night's last dose; eighteen forward runs past tonight's bedtime
+ * and into tomorrow morning.
+ */
+private const val CAFFEINE_HALF_WINDOW_HOURS = 18L
 
 /**
- * How far the caffeine curve projects forward.
+ * The near-term horizon called out on the chart and in the metrics.
  *
- * Six hours is a little over one half-life, which is the horizon that actually
- * answers the question the chart is asked: whether what is in the body now will
- * have cleared enough by bedtime.
+ * Six hours is a little over one half-life, which is the question the chart is
+ * most often asked: whether what is in the body now will have cleared enough to
+ * matter by this evening.
  */
 private const val CAFFEINE_FORECAST_HOURS = 6L
+
+/** Bedtime reference for the evening estimate. */
+private val CAFFEINE_EVENING_HOUR = java.time.LocalTime.of(21, 0)
 
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
@@ -71,6 +84,8 @@ data class DashboardUiState(
     val dailyLog: DailyLog = DailyLog(LocalDate.now()),
     val waistCm: Float = DEFAULT_WAIST_CM,
     val hasWaistMeasurement: Boolean = false,
+    /** Most recent stored waist measurement, with the date it was taken. */
+    val latestWaist: WaistEntry? = null,
     val glucose: List<BloodSugarReading> = emptyList(),
     val ketones: List<KetoneReading> = emptyList(),
     val caffeine: List<CaffeineIntake> = emptyList(),
@@ -99,24 +114,36 @@ data class DashboardUiState(
             }
 
     /**
-     * Calories eaten minus calories burned, or null unless both are known.
+     * Calories eaten so far today. Nothing logged means nothing eaten.
      *
-     * Negative is a deficit. Falling back to zero for a missing half would show
-     * a deficit the size of whichever figure happened to sync, which is worse
-     * than showing nothing.
+     * Unlike the burn figures this is not a measurement that might simply not
+     * have synced yet -- food reaches Health Connect only by being entered by
+     * hand, so an absent value and a zero are the same statement. Treating it as
+     * null instead left the differential blank for the whole of a fasted morning,
+     * which is exactly when it is worth reading.
+     */
+    val caloriesEaten: Int
+        get() = snapshot?.dietaryCalories ?: 0
+
+    /**
+     * Calories eaten minus calories burned, or null while the burn is unknown.
+     *
+     * Negative is a deficit. The burn half keeps its guard: it comes from a watch,
+     * so a missing value means "not synced", and standing in a zero would report
+     * a surplus the size of the day's food.
      */
     val netCalories: Int?
-        get() {
-            val eaten = snapshot?.dietaryCalories ?: return null
-            val burned = snapshot?.totalCalories ?: return null
-            return eaten - burned
-        }
+        get() = snapshot?.totalCalories?.let { caloriesEaten - it }
 
     val glucoseWindowStart: Instant
         get() = now.minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
 
     val caffeineWindowStart: Instant
-        get() = now.minus(Duration.ofHours(CAFFEINE_WINDOW_HOURS))
+        get() = now.minus(Duration.ofHours(CAFFEINE_HALF_WINDOW_HOURS))
+
+    /** Right edge of the caffeine chart, the same distance ahead as the start is behind. */
+    val caffeineWindowEnd: Instant
+        get() = now.plus(Duration.ofHours(CAFFEINE_HALF_WINDOW_HOURS))
 
     private val caffeineDoses: List<CaffeineDose>
         get() = caffeine.map { CaffeineDose(it.timestamp, it.milligrams) }
@@ -132,10 +159,6 @@ data class DashboardUiState(
             return caffeine.filter { !it.timestamp.isBefore(midnight) }.sumOf { it.milligrams }
         }
 
-    /** Right edge of the caffeine chart: past window plus the projection. */
-    val caffeineWindowEnd: Instant
-        get() = now.plus(Duration.ofHours(CAFFEINE_FORECAST_HOURS))
-
     val caffeineCurve: List<Pair<Instant, Float>>
         get() = Caffeine.curve(caffeineDoses, caffeineWindowStart, now)
 
@@ -148,12 +171,44 @@ data class DashboardUiState(
     val caffeineForecast: List<Pair<Instant, Float>>
         get() = Caffeine.curve(caffeineDoses, now, caffeineWindowEnd)
 
-    /** Projected milligrams still present at the end of the forecast. */
+    /** The moment the near-term estimate is quoted for. */
+    val caffeineForecastTime: Instant
+        get() = now.plus(Duration.ofHours(CAFFEINE_FORECAST_HOURS))
+
+    /** Projected milligrams still present [CAFFEINE_FORECAST_HOURS] from now. */
     val caffeineForecastEndMg: Float
-        get() = Caffeine.levelAt(caffeineDoses, caffeineWindowEnd)
+        get() = Caffeine.levelAt(caffeineDoses, caffeineForecastTime)
 
     val caffeineForecastHours: Long
         get() = CAFFEINE_FORECAST_HOURS
+
+    /**
+     * The next 9 PM, which is the bedtime the evening estimate is quoted for.
+     *
+     * Rolls to tomorrow once tonight's has passed, so after 9 PM the figure
+     * answers "what about tomorrow night" rather than restating the present.
+     */
+    val caffeineEveningTime: Instant
+        get() {
+            val tonight = today.atTime(CAFFEINE_EVENING_HOUR).atZone(zoneId).toInstant()
+            return if (tonight.isAfter(now)) tonight
+            else today.plusDays(1).atTime(CAFFEINE_EVENING_HOUR).atZone(zoneId).toInstant()
+        }
+
+    /** Projected milligrams still present at [caffeineEveningTime]. */
+    val caffeineEveningMg: Float
+        get() = Caffeine.levelAt(caffeineDoses, caffeineEveningTime)
+
+    /**
+     * Earliest dose still offered for correction: the left edge of the plot, or
+     * midnight when that is earlier.
+     *
+     * Late at night midnight is further back than the window reaches, and a dose
+     * counted in [caffeineTodayMg] that cannot be edited is a figure with no way
+     * to fix it.
+     */
+    val caffeineEditableFrom: Instant
+        get() = minOf(caffeineWindowStart, today.atStartOfDay(zoneId).toInstant())
 }
 
 private data class FastingBundle(
@@ -167,7 +222,7 @@ private data class FastingBundle(
 private data class TodayBundle(
     val log: DailyLog?,
     val hydrationMl: Int,
-    val waistCm: Float?,
+    val waist: WaistEntry?,
     val bloodPressures: List<BloodPressureReading>,
     val pushups: Int,
     val squats: Int,
@@ -241,7 +296,7 @@ class DashboardViewModel(
                     repository.getRepTotalForDate(MovementType.AIR_SQUAT, date),
                 ) { pushups, squats -> pushups to squats },
             ) { log, hydration, waist, bps, reps ->
-                TodayBundle(log, hydration, waist?.waistCm, bps, reps.first, reps.second)
+                TodayBundle(log, hydration, waist, bps, reps.first, reps.second)
             }
         }
 
@@ -309,8 +364,9 @@ class DashboardViewModel(
                     bestMileSeconds = health.second,
                     hydrationMl = todayBundle.hydrationMl,
                     dailyLog = todayBundle.log ?: DailyLog(date),
-                    waistCm = todayBundle.waistCm ?: DEFAULT_WAIST_CM,
-                    hasWaistMeasurement = todayBundle.waistCm != null,
+                    waistCm = todayBundle.waist?.waistCm ?: DEFAULT_WAIST_CM,
+                    hasWaistMeasurement = todayBundle.waist != null,
+                    latestWaist = todayBundle.waist,
                     glucose = metabolicBundle.glucose,
                     ketones = metabolicBundle.ketones,
                     caffeine = metabolicBundle.caffeine,

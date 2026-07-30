@@ -15,12 +15,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +55,7 @@ import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
 import com.prestondihle.healthtracker.ui.components.ChartAxis
+import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.InstantPickerDialog
@@ -66,6 +69,7 @@ import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
 import com.prestondihle.healthtracker.ui.theme.KetoneSeries
 import com.prestondihle.healthtracker.ui.theme.Pine
 import java.time.Instant
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
@@ -236,12 +240,34 @@ private val BarHeight = 5.dp
 private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
 /**
+ * A commit action sized to sit inline with a [Stepper]'s arrows.
+ *
+ * Passed as the stepper's `trailingContent`, this collapses what used to be a
+ * whole second row -- a right-aligned "Log X" button -- onto the same line as the
+ * value being logged. Filled (primary) where the arrows are tonal, so the button
+ * that writes a reading stands apart from the two that only nudge it. Each card
+ * reclaims a full button-height row, which is most of the point of the dense
+ * layout: more metrics above the fold.
+ */
+@Composable
+private fun InlineLogButton(
+    contentDescription: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    FilledIconButton(onClick = onClick, enabled = enabled) {
+        Icon(Icons.Filled.Check, contentDescription = contentDescription)
+    }
+}
+
+/**
  * A compact log action, right-aligned under its inputs.
  *
- * Metric cards used to end in a full-width button, which gave a secondary action
- * as much weight as a primary one and pushed the next card off screen. A small
- * button pinned to the right reads as "commit what I just dialled in" and lets
- * more cards share the view -- which is the whole point of the dense layout.
+ * Used where there is no single stepper to sit inline with: the mood card's
+ * three sliders, and caffeine, where the button opens a dialog rather than
+ * committing a dialled-in value. A small button pinned to the right reads as
+ * "commit" without giving a secondary action the weight of a full-width primary
+ * button.
  */
 @Composable
 private fun LogButton(
@@ -249,21 +275,10 @@ private fun LogButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    outlined: Boolean = false,
 ) {
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        if (outlined) {
-            OutlinedButton(
-                onClick = onClick,
-                enabled = enabled,
-                contentPadding = CompactButtonPadding,
-            ) {
-                Text(text)
-            }
-        } else {
-            Button(onClick = onClick, enabled = enabled, contentPadding = CompactButtonPadding) {
-                Text(text)
-            }
+        Button(onClick = onClick, enabled = enabled, contentPadding = CompactButtonPadding) {
+            Text(text)
         }
     }
 }
@@ -524,7 +539,9 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
                 label = "Eaten",
-                value = snapshot?.dietaryCalories?.toString() ?: "--",
+                // Zero rather than "--": food is hand-entered, so nothing logged
+                // means nothing eaten, and the net figure below depends on it.
+                value = state.caloriesEaten.toString(),
                 modifier = Modifier.weight(1f),
             )
             Metric(
@@ -536,8 +553,8 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
             val net = state.netCalories
             Metric(
                 label = "Net",
-                // Only meaningful with both halves; one alone would read as a
-                // deficit the size of whichever number happens to exist.
+                // Blank only while the burn has not synced; a missing burn would
+                // read as a surplus the size of the day's food.
                 value = net?.let { if (it > 0) "+$it" else it.toString() } ?: "--",
                 valueColor =
                     when {
@@ -599,6 +616,9 @@ private fun HydrationCard(state: DashboardUiState, onAdd: (Int) -> Unit) {
     }
 }
 
+/** Starting amount for a new dose, matching the usual serving actually drunk. */
+private const val DEFAULT_CAFFEINE_MG = 70
+
 /** Null means the dialog is logging a new dose; a value means it is editing that one. */
 private sealed interface CaffeineDialog {
     data object New : CaffeineDialog
@@ -616,20 +636,33 @@ private fun CaffeineCard(
     var dialog by remember { mutableStateOf<CaffeineDialog?>(null) }
 
     DashboardCard(title = "Caffeine") {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+        // Taken today leads: it is the only figure here that is a plain fact
+        // rather than a model output, and it is what a daily limit is read
+        // against. The three to its right are all the same decay curve sampled
+        // at now, at the six-hour horizon, and at bedtime.
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Metric(
+                label = "Taken today",
+                value = "${state.caffeineTodayMg} mg",
+                modifier = Modifier.weight(1f),
+            )
             Metric(
                 label = "In body now",
                 value = "${state.caffeineNowMg.toInt()} mg",
                 supporting = "5h half-life",
+                modifier = Modifier.weight(1f),
             )
-            Metric(label = "Taken today", value = "${state.caffeineTodayMg} mg")
             Metric(
                 label = "In ${state.caffeineForecastHours}h",
                 value = "${state.caffeineForecastEndMg.toInt()} mg",
                 supporting = "if nothing more",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "At 9 PM",
+                value = "${state.caffeineEveningMg.toInt()} mg",
+                supporting = state.caffeineEveningTime.asEveningSupporting(state),
+                modifier = Modifier.weight(1f),
             )
         }
 
@@ -658,7 +691,20 @@ private fun CaffeineCard(
                     ),
                 ),
             leftAxis = AxisSpec(min = 0f, max = 200f, label = "mg"),
-            markerTime = state.now,
+            markers =
+                listOf(
+                    // Now sits at the centre of the window, so this rule also
+                    // divides the measured half of the chart from the projected one.
+                    ChartMarker(
+                        time = state.now,
+                        label = "${state.caffeineNowMg.toInt()} mg now",
+                    ),
+                    ChartMarker(
+                        time = state.caffeineForecastTime,
+                        label = "${state.caffeineForecastEndMg.toInt()} mg",
+                        dashed = true,
+                    ),
+                ),
             modifier =
                 Modifier.fillMaxWidth()
                     .height(if (state.caffeine.isEmpty()) EmptyChartHeight else ChartHeight),
@@ -668,11 +714,11 @@ private fun CaffeineCard(
 
         LogButton("Log caffeine", onClick = { dialog = CaffeineDialog.New })
 
-        // Doses inside the plotted window, newest first, each tappable to fix
-        // an amount or a time that was guessed at when logged.
+        // Recent doses, newest first, each tappable to fix an amount or a time
+        // that was guessed at when logged.
         val recent =
             state.caffeine
-                .filter { !it.timestamp.isBefore(state.caffeineWindowStart) }
+                .filter { !it.timestamp.isBefore(state.caffeineEditableFrom) }
                 .sortedByDescending { it.timestamp }
 
         if (recent.isNotEmpty()) {
@@ -723,7 +769,7 @@ private fun CaffeineCard(
     dialog?.let { open ->
         val editing = (open as? CaffeineDialog.Edit)?.intake
         CaffeineEntryDialog(
-            initialMilligrams = editing?.milligrams ?: 95,
+            initialMilligrams = editing?.milligrams ?: DEFAULT_CAFFEINE_MG,
             initialTime = editing?.timestamp ?: state.now,
             zoneId = state.zoneId,
             onDismiss = { dialog = null },
@@ -792,8 +838,12 @@ private fun MetabolicCard(
             range = 0f..10f,
             valueFormatter = { "%.1f".format(it) },
             supportingText = "mmol/L",
+            trailingContent = {
+                InlineLogButton(contentDescription = "Log ketones", onClick = { onAddKetone(ketone) })
+            },
         )
-        LogButton("Log ketones", onClick = { onAddKetone(ketone) })
+
+        HorizontalDivider()
 
         var glucose by remember { mutableIntStateOf(90) }
         IntStepper(
@@ -803,8 +853,13 @@ private fun MetabolicCard(
             step = 1,
             range = 20..500,
             supportingText = "mg/dL, for manual fingersticks",
+            trailingContent = {
+                InlineLogButton(
+                    contentDescription = "Log blood sugar",
+                    onClick = { onAddGlucose(glucose) },
+                )
+            },
         )
-        LogButton("Log blood sugar", onClick = { onAddGlucose(glucose) }, outlined = true)
     }
 }
 
@@ -824,10 +879,27 @@ private fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
             range = 20f..70f,
             snap = Units::roundToQuarter,
             valueFormatter = Units::formatInches,
-            supportingText =
-                if (state.hasWaistMeasurement) "quarter-inch steps" else "default until measured",
+            // Only the placeholder case needs a hint; the step size is self-evident.
+            supportingText = if (state.hasWaistMeasurement) null else "default until measured",
+            trailingContent = {
+                InlineLogButton(
+                    contentDescription = "Log waist",
+                    onClick = { onWaistChange(Units.inchesToCm(inches)) },
+                )
+            },
         )
-        LogButton("Log waist", onClick = { onWaistChange(Units.inchesToCm(inches)) })
+
+        // Waist is measured every few days at most, so -- unlike blood pressure's
+        // "last today" -- the reading that matters is the last one on record,
+        // dated. It also confirms the tap landed without a snackbar to chase.
+        state.latestWaist?.let { last ->
+            Text(
+                "Last: ${Units.formatInches(Units.cmToInches(last.waistCm))} on " +
+                    last.date.asShortDate(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -849,14 +921,28 @@ private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> U
             onValueChange = { diastolic = it },
             range = 30..160,
         )
-        LogButton("Log blood pressure", onClick = { onSubmit(systolic, diastolic) })
 
-        state.latestBloodPressure?.let {
+        // Two steppers commit together, so the action cannot ride inline on
+        // either one. Pairing it with the last reading on a single row saves the
+        // line a standalone button would have cost.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "Last today: ${it.systolic}/${it.diastolic}",
+                state.latestBloodPressure?.let { "Last today: ${it.systolic}/${it.diastolic}" }
+                    ?: "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
             )
+            Button(
+                onClick = { onSubmit(systolic, diastolic) },
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("Log blood pressure")
+            }
         }
     }
 }
@@ -890,8 +976,13 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
             step = 5,
             range = 0..500,
             supportingText = "${state.pushupsToday} today",
+            trailingContent = {
+                InlineLogButton(
+                    contentDescription = "Log pushups",
+                    onClick = { onLog(MovementType.PUSHUP, pushups) },
+                )
+            },
         )
-        LogButton("Log pushups", onClick = { onLog(MovementType.PUSHUP, pushups) })
 
         HorizontalDivider()
 
@@ -902,8 +993,13 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
             step = 5,
             range = 0..500,
             supportingText = "${state.squatsToday} today",
+            trailingContent = {
+                InlineLogButton(
+                    contentDescription = "Log air squats",
+                    onClick = { onLog(MovementType.AIR_SQUAT, squats) },
+                )
+            },
         )
-        LogButton("Log air squats", onClick = { onLog(MovementType.AIR_SQUAT, squats) })
     }
 }
 
@@ -917,11 +1013,25 @@ private fun ReadingCard(
         val readToday = state.dailyLog.bookPagesRead ?: 0
         val goal = state.goals.dailyPagesGoal
 
-        Metric(
-            label = "Pages today",
-            value = readToday.toString(),
-            supporting = goal?.let { "goal $it" },
-        )
+        // Reset clears the day's total, so it belongs beside that total rather
+        // than down by the "add more pages" control.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Metric(
+                label = "Pages today",
+                value = readToday.toString(),
+                supporting = goal?.let { "goal $it" },
+                modifier = Modifier.weight(1f),
+            )
+            if (readToday > 0) {
+                OutlinedButton(onClick = { onSetPages(0) }, contentPadding = CompactButtonPadding) {
+                    Text("Reset")
+                }
+            }
+        }
         if (goal != null && goal > 0) {
             LinearProgressIndicator(
                 progress = { (readToday.toFloat() / goal).coerceIn(0f, 1f) },
@@ -939,26 +1049,23 @@ private fun ReadingCard(
             onValueChange = { pages = it },
             step = 5,
             range = 0..2_000,
+            trailingContent = {
+                InlineLogButton(contentDescription = "Log pages", onClick = { onLogPages(pages) })
+            },
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (readToday > 0) {
-                OutlinedButton(onClick = { onSetPages(0) }, contentPadding = CompactButtonPadding) {
-                    Text("Reset")
-                }
-            }
-            Button(onClick = { onLogPages(pages) }, contentPadding = CompactButtonPadding) {
-                Text("Log pages")
-            }
-        }
     }
 }
 
 /** `Mon 14:05`, for showing when a fast started without spending a whole line on it. */
 private fun Instant.asShortDateTime(state: DashboardUiState): String =
     DateTimeFormatter.ofPattern("EEE h:mm a").format(atZone(state.zoneId))
+
+/** `Jul 22`, for a date-keyed reading whose time of day is not recorded. */
+private fun LocalDate.asShortDate(): String = DateTimeFormatter.ofPattern("MMM d").format(this)
+
+/** Says which 9 PM the evening estimate means, since it rolls over once tonight's has passed. */
+private fun Instant.asEveningSupporting(state: DashboardUiState): String =
+    if (atZone(state.zoneId).toLocalDate() == state.today) "tonight" else "tomorrow"
 
 // ---------------------------------------------------------------------------
 

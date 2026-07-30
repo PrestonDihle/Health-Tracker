@@ -12,6 +12,8 @@ import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.ui.components.DayPoint
+import com.prestondihle.healthtracker.ui.components.StackedBar
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +23,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 enum class TrendsRange(val label: String, val days: Long) {
     TWO_WEEKS("14 days", 14),
@@ -39,33 +43,85 @@ data class TrendsUiState(
     val exerciseSets: List<ExerciseSet> = emptyList(),
     val bloodPressure: List<BloodPressureReading> = emptyList(),
     val goals: UserGoals = UserGoals(),
+    val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
-    /** Daily rep totals for one movement, ordered oldest first. */
-    fun repsByDay(movement: MovementType): List<Pair<LocalDate, Int>> =
-        exerciseSets
-            .filter { it.movement == movement }
-            .groupBy { it.timestamp.atZone(java.time.ZoneId.systemDefault()).toLocalDate() }
-            .map { (date, sets) -> date to sets.sumOf { it.reps } }
-            .sortedBy { it.first }
+    /**
+     * Every date in the range, oldest first, including days with nothing logged.
+     *
+     * Charts are drawn one slot per day off this list rather than one slot per
+     * reading, which is what lets a bar be labelled with the date it belongs to.
+     */
+    val days: List<LocalDate>
+        get() = (0..ChronoUnit.DAYS.between(startDate, endDate)).map { startDate.plusDays(it) }
 
     /**
-     * Macro calories per day, oldest first, as protein / carbs / fat triples.
+     * One point per day, null on days the row is missing or the field unset.
+     *
+     * Null means "no reading", which for anything measured -- steps, sleep, heart
+     * rate, a mood score -- is the truth and must not be drawn as a zero.
+     * Hand-counted totals are the exception and pass zero explicitly.
+     */
+    private fun <T> series(
+        rows: List<T>,
+        dateOf: (T) -> LocalDate,
+        valueOf: (T) -> Float?,
+    ): List<DayPoint> {
+        val byDate = rows.associate { dateOf(it) to valueOf(it) }
+        return days.map { DayPoint(it, byDate[it]) }
+    }
+
+    fun snapshotSeries(valueOf: (HealthDaySnapshot) -> Float?): List<DayPoint> =
+        series(snapshots, { it.date }, valueOf)
+
+    fun logSeries(valueOf: (DailyLog) -> Float?): List<DayPoint> =
+        series(dailyLogs, { it.date }, valueOf)
+
+    /** [convert] receives centimetres, so the inch conversion stays at the display boundary. */
+    fun waistSeries(convert: (Float) -> Float): List<DayPoint> =
+        series(waists, { it.date }) { convert(it.waistCm) }
+
+    /** [convert] receives kilograms. */
+    fun weightSeries(convert: (Float) -> Float): List<DayPoint> =
+        series(weightByDay, { it.first }) { convert(it.second) }
+
+    /**
+     * Daily rep totals for one movement, zero on a day with no logged sets.
+     *
+     * Zero rather than null because a set is only ever recorded by logging it: no
+     * rows for a day means none were done, not that the count is unknown.
+     */
+    fun repSeries(movement: MovementType): List<DayPoint> {
+        val byDate =
+            exerciseSets
+                .filter { it.movement == movement }
+                .groupBy { it.timestamp.atZone(zoneId).toLocalDate() }
+                .mapValues { (_, sets) -> sets.sumOf { it.reps }.toFloat() }
+        return days.map { DayPoint(it, byDate[it] ?: 0f) }
+    }
+
+    /**
+     * Macro calories per day as protein / carbs / fat stacks, one bar per day.
      *
      * Converted from grams at 4/4/9 kcal so the stack height is total energy and
      * each band is its real share -- fat is barely a third of the grams but
      * often half the calories, which stacking grams would hide.
      */
-    val macroCaloriesByDay: List<Triple<Float, Float, Float>>
-        get() =
-            snapshots
-                .filter { it.proteinGrams != null || it.carbGrams != null || it.fatGrams != null }
-                .map {
-                    Triple(
-                        (it.proteinGrams ?: 0f) * 4f,
-                        (it.carbGrams ?: 0f) * 4f,
-                        (it.fatGrams ?: 0f) * 9f,
-                    )
-                }
+    val macroBars: List<StackedBar>
+        get() {
+            val byDate = snapshots.associateBy { it.date }
+            return days.map { date ->
+                val snapshot = byDate[date]
+                StackedBar(
+                    date = date,
+                    segments =
+                        listOf(
+                            (snapshot?.proteinGrams ?: 0f) * 4f,
+                            (snapshot?.carbGrams ?: 0f) * 4f,
+                            (snapshot?.fatGrams ?: 0f) * 9f,
+                        ),
+                )
+            }
+        }
 
     /**
      * Weight per day in kilograms, oldest first, combining hand-entered values
@@ -82,7 +138,10 @@ data class TrendsUiState(
         }
 }
 
-class TrendsViewModel(private val repository: TrackerRepository) : ViewModel() {
+class TrendsViewModel(
+    private val repository: TrackerRepository,
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+) : ViewModel() {
 
     private val range = MutableStateFlow(TrendsRange.TWO_WEEKS)
 
@@ -90,7 +149,7 @@ class TrendsViewModel(private val repository: TrackerRepository) : ViewModel() {
     val uiState: StateFlow<TrendsUiState> =
         range
             .flatMapLatest { selected ->
-                val end = LocalDate.now()
+                val end = LocalDate.now(zoneId)
                 val start = end.minusDays(selected.days - 1)
 
                 combine(
@@ -122,6 +181,7 @@ class TrendsViewModel(private val repository: TrackerRepository) : ViewModel() {
                         exerciseSets = activity.second,
                         bloodPressure = activity.third,
                         goals = goals ?: UserGoals(),
+                        zoneId = zoneId,
                     )
                 }
             }

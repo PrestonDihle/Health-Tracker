@@ -85,3 +85,45 @@ val FatSeries = YaleBlue
 /** Blood pressure. Two lines on one axis, so they need clearly separate hues. */
 val SystolicSeries = BalticBlue
 val DiastolicSeries = OliveBark
+
+/**
+ * The three subjective 1-10 scores, sharing one chart.
+ *
+ * Colour alone cannot carry three lines that cross constantly at this scale, so
+ * each also gets its own stroke pattern; the hues only have to stay
+ * distinguishable, not do the work by themselves.
+ */
+val VibeSeries = BalticBlue
+val EnergySeries = OliveBark
+val FocusSeries = YaleBlue
+
+// ---------------------------------------------------------------------------
+// Master graph. Six series on one plot, so the three macro absorption curves
+// have to be told apart from each other *and* from the measured signals they
+// are drawn against.
+// ---------------------------------------------------------------------------
+
+/**
+ * Modelled macro appearance in the bloodstream.
+ *
+ * These deliberately leave the brand palette. Reusing the macro stack's hues put
+ * protein on the same Baltic Blue as glucose and carbs on the same Olive Bark as
+ * ketones -- six lines rendering in three colours, with only the dash pattern
+ * left to separate a modelled curve from the measured signal it crosses. The
+ * three below are instead picked to be distinct from each other *and* from the
+ * three measured series, while staying at the palette's muted saturation so the
+ * plot does not turn into a highlighter set.
+ *
+ * They are still a visible family -- all mid-toned, all dashed on the chart --
+ * which is the distinction that actually matters: modelled, not measured.
+ */
+val CarbAbsorptionSeries = Color(0xFFC98A17)
+val ProteinAbsorptionSeries = Color(0xFF2E8B84)
+val FatAbsorptionSeries = Color(0xFF6F5AA6)
+
+/**
+ * Heart rate. Outside the brand palette for the same reason: it is the one
+ * master-graph series with no relative in the other charts, and a brand colour
+ * would have it read as a macro curve.
+ */
+val HeartRateSeries = Color(0xFF8C4A3C)

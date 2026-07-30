@@ -1,5 +1,7 @@
 package com.prestondihle.healthtracker.health
 
+import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.sin
@@ -54,6 +56,52 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
             bestMileSeconds = random.nextInt(7 * 60, 11 * 60),
             glucoseSamples = samples,
         )
+    }
+
+    /**
+     * Three meals a day at 08:00, 13:00 and 19:00.
+     *
+     * Fixed times rather than random ones: the master graph is read by comparing
+     * an absorption curve against a glucose trace, and a meal that moves between
+     * renders makes that comparison impossible to check.
+     */
+    override suspend fun readMeals(from: Instant, to: Instant): List<MealSample> {
+        val firstDay = from.atZone(zoneId).toLocalDate()
+        val lastDay = to.atZone(zoneId).toLocalDate()
+
+        return generateSequence(firstDay) { it.plusDays(1) }
+            .takeWhile { !it.isAfter(lastDay) }
+            .flatMap { date ->
+                val random = Random(date.toEpochDay())
+                listOf(8 to "Breakfast", 13 to "Lunch", 19 to "Dinner").map { (hour, label) ->
+                    val protein = random.nextInt(25, 60).toFloat()
+                    val carbs = random.nextInt(5, 70).toFloat()
+                    val fat = random.nextInt(20, 60).toFloat()
+                    MealSample(
+                        time = date.atTime(hour, 0).atZone(zoneId).toInstant(),
+                        calories = (protein * 4 + carbs * 4 + fat * 9).toInt(),
+                        proteinGrams = protein,
+                        carbGrams = carbs,
+                        fatGrams = fat,
+                        name = label,
+                        externalId = "mock-meal-$date-$hour",
+                    )
+                }
+            }
+            .filter { !it.time.isBefore(from) && it.time.isBefore(to) }
+            .toList()
+    }
+
+    /** A sample a minute, drifting around a resting rate with a daytime rise. */
+    override suspend fun readHeartRate(from: Instant, to: Instant): List<HeartRateSample> {
+        val minutes = Duration.between(from, to).toMinutes().coerceAtMost(60 * 48)
+        val random = Random(from.epochSecond)
+        return (0 until minutes).map { minute ->
+            val time = from.plusSeconds(minute * 60)
+            val hourOfDay = time.atZone(zoneId).hour + time.atZone(zoneId).minute / 60.0
+            val awake = 14.0 * sin((hourOfDay - 4.0) / 24.0 * 2 * Math.PI).coerceAtLeast(0.0)
+            HeartRateSample(time = time, bpm = (58 + awake + random.nextInt(-3, 4)).toInt())
+        }
     }
 
     /** Two sources that disagree, which is the situation the picker exists to resolve. */

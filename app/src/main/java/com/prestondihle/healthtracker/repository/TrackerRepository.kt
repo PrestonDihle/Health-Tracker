@@ -11,8 +11,10 @@ import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
 import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
+import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.KetoneReading
+import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.RestingHeartRate
@@ -24,6 +26,7 @@ import com.prestondihle.healthtracker.data.WeeklyPerformance
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
+import com.prestondihle.healthtracker.health.HeartRateSample
 import com.prestondihle.healthtracker.health.StepSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -252,6 +255,77 @@ class TrackerRepository(
         dao.insertKetoneReading(KetoneReading(timestamp = at, mmolL = mmolL))
 
     suspend fun deleteKetone(reading: KetoneReading) = dao.deleteKetoneReading(reading)
+
+    // ----- Meals and heart rate time series ----------------------------------
+
+    /**
+     * Meals eaten since [since], for the absorption curves.
+     *
+     * Like the caffeine curve, this reaches back further than the plotted window:
+     * a meal eaten before the left edge is still being absorbed inside it.
+     */
+    fun getMealsSince(since: Instant): Flow<List<MealEntry>> =
+        dao.getMealsBetween(since.toEpochMilli(), Long.MAX_VALUE)
+
+    fun getHeartRateSince(since: Instant): Flow<List<HeartRateBucket>> =
+        dao.getHeartRateBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
+
+    /**
+     * Pulls the meal and heart rate time series for an arbitrary window into the
+     * local cache.
+     *
+     * Separate from [syncHealthData] because that one is keyed to a calendar day
+     * and these two are read over a rolling span that crosses midnight. Both
+     * halves degrade independently: no nutrition permission must still leave the
+     * heart rate trace populated.
+     */
+    suspend fun syncTimeSeries(from: Instant, to: Instant): Result<Unit> = runCatching {
+        val meals = runCatching { healthDataSource.readMeals(from, to) }.getOrDefault(emptyList())
+        if (meals.isNotEmpty()) {
+            val known = dao.getKnownMealExternalIds(from.toEpochMilli(), to.toEpochMilli()).toSet()
+            val fresh =
+                meals
+                    .filter { it.externalId !in known }
+                    .map {
+                        MealEntry(
+                            timestamp = it.time,
+                            calories = it.calories,
+                            proteinGrams = it.proteinGrams,
+                            carbGrams = it.carbGrams,
+                            fatGrams = it.fatGrams,
+                            name = it.name,
+                            source = DataSourceEnum.HEALTH_CONNECT,
+                            externalId = it.externalId,
+                        )
+                    }
+            if (fresh.isNotEmpty()) dao.insertMeals(fresh)
+        }
+
+        val samples =
+            runCatching { healthDataSource.readHeartRate(from, to) }.getOrDefault(emptyList())
+        if (samples.isNotEmpty()) dao.upsertHeartRateBuckets(samples.bucketed())
+    }
+
+    /**
+     * Averages raw heart rate samples into fixed wall-clock buckets.
+     *
+     * Bucketing on absolute epoch millis rather than on offsets from [from] is
+     * what makes the result stable across syncs: the same minute always lands in
+     * the same bucket, so an overlapping re-sync overwrites rows instead of
+     * producing a second, slightly-shifted copy of the same trace.
+     */
+    private fun List<HeartRateSample>.bucketed(): List<HeartRateBucket> {
+        val bucketMillis = HeartRateBucket.BUCKET_MINUTES * 60_000
+        return groupBy { it.time.toEpochMilli() / bucketMillis * bucketMillis }
+            .map { (start, samples) ->
+                HeartRateBucket(
+                    bucketStartMillis = start,
+                    bpm = samples.map { it.bpm }.average().toInt(),
+                    sampleCount = samples.size,
+                )
+            }
+            .sortedBy { it.bucketStartMillis }
+    }
 
     // ----- Resting heart rate ------------------------------------------------
 

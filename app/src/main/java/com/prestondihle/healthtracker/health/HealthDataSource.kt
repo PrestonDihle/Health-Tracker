@@ -22,6 +22,26 @@ enum class HealthPermissionState {
 data class GlucoseSample(val time: Instant, val mgDl: Int, val externalId: String?)
 
 /**
+ * One meal as recorded, with the time it was eaten.
+ *
+ * Every macro is nullable independently: apps routinely log calories without
+ * breaking them down, and a meal with only an energy figure is still worth
+ * placing on a timeline.
+ */
+data class MealSample(
+    val time: Instant,
+    val calories: Int? = null,
+    val proteinGrams: Float? = null,
+    val carbGrams: Float? = null,
+    val fatGrams: Float? = null,
+    val name: String? = null,
+    val externalId: String? = null,
+)
+
+/** One heart rate reading at one instant, before bucketing. */
+data class HeartRateSample(val time: Instant, val bpm: Int)
+
+/**
  * Steps contributed by one writing app on a given day.
  *
  * [packageName] is the Health Connect data origin; [appLabel] is the installed
@@ -85,4 +105,16 @@ interface HealthDataSource {
 
     /** Per-app step totals for [date], for choosing which source to trust. */
     suspend fun readStepSources(date: LocalDate): List<StepSource>
+
+    /**
+     * Meals eaten in an arbitrary window.
+     *
+     * Takes instants rather than a date because the master graph's window is a
+     * rolling span that crosses midnight, and a meal eaten last night is still
+     * being absorbed this morning.
+     */
+    suspend fun readMeals(from: Instant, to: Instant): List<MealSample>
+
+    /** Every heart rate sample in a window, unaggregated. */
+    suspend fun readHeartRate(from: Instant, to: Instant): List<HeartRateSample>
 }

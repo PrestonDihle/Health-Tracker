@@ -206,6 +206,30 @@ interface TrackerDao {
 
     @Delete suspend fun deleteKetoneReading(reading: KetoneReading)
 
+    // ----- Meals and heart rate time series ----------------------------------
+
+    @Query("SELECT * FROM MealEntry WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp ASC")
+    fun getMealsBetween(start: Long, end: Long): Flow<List<MealEntry>>
+
+    /** Ignores rows whose externalId is already present, so a repeated sync cannot duplicate meals. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMeals(meals: List<MealEntry>)
+
+    @Query("SELECT externalId FROM MealEntry WHERE externalId IS NOT NULL AND timestamp >= :start AND timestamp < :end")
+    suspend fun getKnownMealExternalIds(start: Long, end: Long): List<String>
+
+    @Delete suspend fun deleteMeal(meal: MealEntry)
+
+    @Query(
+        "SELECT * FROM HeartRateBucket " +
+            "WHERE bucketStartMillis >= :start AND bucketStartMillis < :end " +
+            "ORDER BY bucketStartMillis ASC"
+    )
+    fun getHeartRateBucketsBetween(start: Long, end: Long): Flow<List<HeartRateBucket>>
+
+    /** Upsert keyed on the bucket's start time, so re-syncing a window rewrites it in place. */
+    @Upsert suspend fun upsertHeartRateBuckets(buckets: List<HeartRateBucket>)
+
     // ----- Resting heart rate ------------------------------------------------
 
     @Query("SELECT * FROM RestingHeartRate WHERE date = :date")

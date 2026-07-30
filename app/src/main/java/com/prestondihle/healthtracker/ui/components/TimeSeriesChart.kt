@@ -4,12 +4,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -50,6 +51,16 @@ data class ChartSeries(
     val showPoints: Boolean = true,
     /** Dashed marks a projection rather than something measured. */
     val dashed: Boolean = false,
+    /**
+     * A scale of this series' own, used instead of [axis].
+     *
+     * A plot has room to label two axes, and no more -- but six series can easily
+     * carry four units. Anything beyond the second unit is mapped by its own
+     * spec and has its range printed in the legend instead of down the side,
+     * which keeps every line correctly *shaped* even where there is nowhere left
+     * to print its numbers.
+     */
+    val scale: AxisSpec? = null,
 )
 
 /**
@@ -65,8 +76,30 @@ data class AxisSpec(
     val threshold: Float? = null,
 )
 
+/**
+ * A vertical rule at one moment, optionally captioned.
+ *
+ * [label] is drawn at the top of the rule rather than beside it, which is the
+ * only place on a full-height line that cannot overlap the data. Solid marks a
+ * real instant such as now; [dashed] marks a projected one.
+ */
+data class ChartMarker(
+    val time: Instant,
+    val label: String? = null,
+    val dashed: Boolean = false,
+)
+
 private const val MAX_RENDERED_POINTS = 240
 private val AXIS_LABEL_SIZE = 10.sp
+
+/** Room above the plot for marker captions; without it they would clip. */
+private val MARKER_LABEL_HEIGHT = 16.dp
+
+/** Clear space demanded between two marker captions before the later one is dropped. */
+private val MARKER_LABEL_GAP = 6.dp
+
+/** Least vertical room a gridline row may have before rows are dropped. */
+private val MIN_ROW_SPACING = 28.dp
 
 /**
  * Time-indexed line chart with an independent scale on each side.
@@ -84,8 +117,8 @@ fun DualAxisTimeChart(
     modifier: Modifier = Modifier,
     rightAxis: AxisSpec? = null,
     zoneId: ZoneId = ZoneId.systemDefault(),
-    /** Draws a vertical rule, used to separate measured past from projected future. */
-    markerTime: Instant? = null,
+    /** Vertical rules, used to separate measured past from projected future. */
+    markers: List<ChartMarker> = emptyList(),
 ) {
     val textMeasurer = rememberTextMeasurer()
     val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -114,7 +147,7 @@ fun DualAxisTimeChart(
                         gridColor = gridColor,
                         axisTextColor = axisTextColor,
                         zoneId = zoneId,
-                        markerTime = markerTime,
+                        markers = markers,
                     )
                 }
             }
@@ -124,21 +157,51 @@ fun DualAxisTimeChart(
     }
 }
 
+/**
+ * Series names with their units, wrapping onto as many rows as it takes.
+ *
+ * A series drawn against a scale of its own also states that scale's range here,
+ * since that is the only place its numbers appear at all.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Legend(series: List<ChartSeries>, leftAxis: AxisSpec, rightAxis: AxisSpec?) {
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         series.forEach { item ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Canvas(modifier = Modifier.size(10.dp)) { drawCircle(item.color) }
+                // A short stroke rather than a dot, so a dashed projection is
+                // identifiable in the legend and not just on the plot.
+                Canvas(modifier = Modifier.width(14.dp).height(8.dp)) {
+                    drawLine(
+                        color = item.color,
+                        start = androidx.compose.ui.geometry.Offset(0f, size.height / 2f),
+                        end = androidx.compose.ui.geometry.Offset(size.width, size.height / 2f),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        pathEffect =
+                            if (item.dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f)
+                            else null,
+                    )
+                }
                 Spacer(Modifier.width(4.dp))
-                val unit =
-                    if (item.axis == ChartAxis.LEFT) leftAxis.label else rightAxis?.label.orEmpty()
+                val scale = item.scale
+                val caption =
+                    when {
+                        scale != null ->
+                            "${item.label} (${scale.format(scale.min)}-" +
+                                "${scale.format(scale.max)} ${scale.label})"
+                        item.axis == ChartAxis.LEFT && leftAxis.label.isNotBlank() ->
+                            "${item.label} (${leftAxis.label})"
+                        item.axis == ChartAxis.RIGHT && !rightAxis?.label.isNullOrBlank() ->
+                            "${item.label} (${rightAxis?.label})"
+                        else -> item.label
+                    }
                 Text(
-                    text = if (unit.isBlank()) item.label else "${item.label} ($unit)",
+                    text = caption,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -147,9 +210,18 @@ private fun Legend(series: List<ChartSeries>, leftAxis: AxisSpec, rightAxis: Axi
     }
 }
 
-/** Widens the axis if any of its series fall outside the configured bounds. */
-private fun AxisSpec.expandedFor(series: List<ChartSeries>, axis: ChartAxis): AxisSpec {
-    val values = series.filter { it.axis == axis }.flatMap { it.points }.map { it.value }
+/**
+ * Widens the axis if any of its series fall outside the configured bounds.
+ *
+ * Series carrying a [ChartSeries.scale] of their own are excluded: they are not
+ * drawn against this axis, so letting a 180 bpm trace stretch the glucose scale
+ * would flatten the very line the axis exists to label.
+ */
+private fun AxisSpec.expandedFor(series: List<ChartSeries>, axis: ChartAxis): AxisSpec =
+    expandedFor(series.filter { it.scale == null && it.axis == axis })
+
+private fun AxisSpec.expandedFor(series: List<ChartSeries>): AxisSpec {
+    val values = series.flatMap { it.points }.map { it.value }
     if (values.isEmpty()) return this
     val lo = minOf(min, values.min())
     val hi = maxOf(max, values.max())
@@ -177,12 +249,12 @@ private fun DrawScope.drawChart(
     gridColor: Color,
     axisTextColor: Color,
     zoneId: ZoneId,
-    markerTime: Instant? = null,
+    markers: List<ChartMarker> = emptyList(),
 ) {
     val leftGutter = 36.dp.toPx()
     val rightGutter = if (rightAxis != null) 36.dp.toPx() else 8.dp.toPx()
     val bottomGutter = 18.dp.toPx()
-    val topPad = 6.dp.toPx()
+    val topPad = if (markers.any { it.label != null }) MARKER_LABEL_HEIGHT.toPx() else 6.dp.toPx()
 
     val plotLeft = leftGutter
     val plotRight = size.width - rightGutter
@@ -205,8 +277,13 @@ private fun DrawScope.drawChart(
         return plotBottom - ((value - axis.min) / range) * plotHeight
     }
 
-    // Horizontal gridlines and left-axis labels, four rows.
-    val rows = 4
+    // Horizontal gridlines and axis labels.
+    //
+    // The row count follows the height available rather than being fixed: the
+    // dashboard drops its charts to a stub when there is nothing logged, and five
+    // rows of labels in 72dp overprint into an unreadable stack. Two gaps is the
+    // floor, which still gives a min, a max and a midpoint.
+    val rows = (plotHeight / MIN_ROW_SPACING.toPx()).toInt().coerceIn(2, 4)
     for (i in 0..rows) {
         val fraction = i.toFloat() / rows
         val y = plotBottom - fraction * plotHeight
@@ -278,21 +355,47 @@ private fun DrawScope.drawChart(
     leftAxis.threshold?.let { drawThreshold(yFor(it, leftAxis), plotLeft, plotRight) }
     rightAxis?.threshold?.let { drawThreshold(yFor(it, rightAxis), plotLeft, plotRight) }
 
-    markerTime?.let {
-        val x = xFor(it)
-        if (x in plotLeft..plotRight) {
-            drawLine(
-                color = axisTextColor,
-                start = androidx.compose.ui.geometry.Offset(x, plotTop),
-                end = androidx.compose.ui.geometry.Offset(x, plotBottom),
-                strokeWidth = 1.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f),
-            )
-        }
+    // Rightmost edge of the last caption drawn, so a later one that would collide
+    // with it can be dropped. Meals cluster -- three in an evening is normal --
+    // and over a 48-hour window their captions otherwise overprint into a smear.
+    // The rules themselves are always drawn; only the text is rationed.
+    var lastLabelEnd = Float.NEGATIVE_INFINITY
+
+    for (marker in markers.sortedBy { it.time }) {
+        val x = xFor(marker.time)
+        if (x !in plotLeft..plotRight) continue
+        drawLine(
+            color = axisTextColor,
+            start = androidx.compose.ui.geometry.Offset(x, plotTop),
+            end = androidx.compose.ui.geometry.Offset(x, plotBottom),
+            // A solid rule reads as a real instant; the dash says "projected".
+            strokeWidth = if (marker.dashed) 1.dp.toPx() else 1.5.dp.toPx(),
+            pathEffect =
+                if (marker.dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f) else null,
+        )
+
+        val caption = marker.label ?: continue
+        val laid = textMeasurer.measure(caption, labelStyle)
+        // Centred on the rule, but never pushed outside the canvas -- a marker
+        // near an edge would otherwise lose half its caption.
+        val left = (x - laid.size.width / 2f).coerceIn(0f, size.width - laid.size.width)
+        if (left < lastLabelEnd) continue
+
+        drawText(
+            textLayoutResult = laid,
+            topLeft =
+                androidx.compose.ui.geometry.Offset(
+                    x = left,
+                    y = (plotTop - laid.size.height).coerceAtLeast(0f),
+                ),
+        )
+        lastLabelEnd = left + laid.size.width + MARKER_LABEL_GAP.toPx()
     }
 
     for (item in series) {
-        val axis = if (item.axis == ChartAxis.LEFT) leftAxis else rightAxis ?: leftAxis
+        val axis =
+            item.scale?.expandedFor(listOf(item))
+                ?: if (item.axis == ChartAxis.LEFT) leftAxis else rightAxis ?: leftAxis
         val points =
             item.points
                 .filter { !it.time.isBefore(windowStart) && !it.time.isAfter(windowEnd) }

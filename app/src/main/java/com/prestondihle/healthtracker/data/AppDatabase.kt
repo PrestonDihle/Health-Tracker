@@ -25,11 +25,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WeeklyPerformance::class,
         BloodSugarReading::class,
         KetoneReading::class,
+        MealEntry::class,
+        HeartRateBucket::class,
         RestingHeartRate::class,
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -58,6 +60,60 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The v3 to v4 statements, exposed so a test can diff the schema they
+         * produce against the one Room generates from the entities.
+         *
+         * Room compares the two on every launch and refuses to open the database
+         * if they differ at all, so a typo here does not fail a build -- it bricks
+         * the app for anyone upgrading. `exportSchema` is off, which rules out
+         * Room's own MigrationTestHelper, hence checking them this way.
+         *
+         * Column types follow the converters: Instant is epoch millis (INTEGER)
+         * and an enum is its name (TEXT).
+         */
+        internal val migration3To4Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `MealEntry` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`timestamp` INTEGER NOT NULL, " +
+                    "`calories` INTEGER, " +
+                    "`proteinGrams` REAL, " +
+                    "`carbGrams` REAL, " +
+                    "`fatGrams` REAL, " +
+                    "`name` TEXT, " +
+                    "`source` TEXT NOT NULL, " +
+                    "`externalId` TEXT)",
+                "CREATE INDEX IF NOT EXISTS `index_MealEntry_timestamp` " +
+                    "ON `MealEntry` (`timestamp`)",
+                // Unique, so a repeated Health Connect sync cannot insert the same
+                // meal twice. SQLite treats NULLs as distinct, which leaves
+                // hand-entered rows unaffected.
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_MealEntry_externalId` " +
+                    "ON `MealEntry` (`externalId`)",
+                "CREATE TABLE IF NOT EXISTS `HeartRateBucket` (" +
+                    "`bucketStartMillis` INTEGER NOT NULL, " +
+                    "`bpm` INTEGER NOT NULL, " +
+                    "`sampleCount` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`bucketStartMillis`))",
+            )
+
+        /**
+         * Adds the two time series the master graph is drawn from: per-meal
+         * macros, and heart rate averaged into five-minute buckets.
+         *
+         * Both are new tables, so nothing already stored is touched. The daily
+         * macro totals on HealthDaySnapshot stay where they are -- MealEntry is
+         * not a replacement for them but the same nutrition kept a second way,
+         * because a daily total cannot say when the food was eaten.
+         */
+        private val MIGRATION_3_4 =
+            object : Migration(3, 4) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration3To4Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -72,7 +128,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 AppDatabase::class.java,
                                 "tracker_database",
                             )
-                            .addMigrations(MIGRATION_2_3)
+                            .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()
                             .also { instance = it }

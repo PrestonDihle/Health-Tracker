@@ -198,6 +198,67 @@ data class KetoneReading(
     val mmolL: Float,
 )
 
+/**
+ * One eaten meal with the time it was eaten.
+ *
+ * The daily macro totals on [HealthDaySnapshot] cannot answer *when*, and the
+ * master graph needs exactly that: an absorption curve has to start somewhere.
+ * So nutrition is cached twice over -- rolled up on the snapshot for the day's
+ * figures, and kept per-meal here for the timeline. Same cache rules as glucose:
+ * safe to delete and re-sync, with the unique index on [externalId] making a
+ * repeated sync idempotent while leaving hand-entered rows alone.
+ */
+@Entity(
+    indices = [
+        Index("timestamp"),
+        Index(value = ["externalId"], unique = true),
+    ]
+)
+data class MealEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Instant,
+    val calories: Int? = null,
+    val proteinGrams: Float? = null,
+    val carbGrams: Float? = null,
+    val fatGrams: Float? = null,
+    /** Whatever the writing app called it, when it named the meal at all. */
+    val name: String? = null,
+    val source: DataSourceEnum,
+    /** Health Connect's record id, for de-duplicating across syncs. */
+    val externalId: String? = null,
+)
+
+/**
+ * Heart rate averaged over a fixed bucket of wall-clock time.
+ *
+ * A watch writes a beat rate every few seconds, which is far more resolution
+ * than a chart spanning a day can draw and enough rows per day to make the table
+ * the largest thing in the database. Samples are therefore averaged into
+ * [BUCKET_MINUTES] windows on the way in.
+ *
+ * The bucket's start time *is* the primary key, which is what makes a re-sync
+ * idempotent without an external id: the same wall-clock window always lands on
+ * the same row and simply overwrites it.
+ */
+@Entity
+data class HeartRateBucket(
+    @PrimaryKey val bucketStartMillis: Long,
+    val bpm: Int,
+    /** How many raw samples the average came from, so a thin bucket can be spotted. */
+    val sampleCount: Int,
+) {
+    val timestamp: Instant
+        get() = Instant.ofEpochMilli(bucketStartMillis)
+
+    companion object {
+        /**
+         * Five minutes is fine enough to show a heart rate responding to a meal
+         * and coarse enough that a day is under 300 rows.
+         */
+        const val BUCKET_MINUTES = 5L
+    }
+}
+
 @Entity
 data class RestingHeartRate(
     @PrimaryKey val date: LocalDate,

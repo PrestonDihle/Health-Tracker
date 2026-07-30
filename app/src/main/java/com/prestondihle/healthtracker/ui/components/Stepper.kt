@@ -5,7 +5,9 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -95,6 +97,12 @@ fun Stepper(
     snap: (Float) -> Float = { it },
     valueFormatter: (Float) -> String = { it.roundToInt().toString() },
     supportingText: String? = null,
+    /**
+     * Optional slot after the arrows, for a commit action pinned inline with the
+     * value it logs. Kept separate from the arrows by a wider gap so the up arrow
+     * and a Log button are not mistaken for each other.
+     */
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -136,6 +144,11 @@ fun Stepper(
                 contentDescription = "Increase $label",
                 icon = Icons.Filled.KeyboardArrowUp,
             )
+
+            if (trailingContent != null) {
+                Spacer(Modifier.width(4.dp))
+                trailingContent()
+            }
         }
     }
 }
@@ -152,6 +165,7 @@ fun IntStepper(
     enabled: Boolean = true,
     supportingText: String? = null,
     valueFormatter: (Int) -> String = { it.toString() },
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Stepper(
         label = label,
@@ -163,5 +177,6 @@ fun IntStepper(
         enabled = enabled,
         valueFormatter = { valueFormatter(it.roundToInt()) },
         supportingText = supportingText,
+        trailingContent = trailingContent,
     )
 }

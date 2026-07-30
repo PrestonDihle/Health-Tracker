@@ -32,15 +32,19 @@ import com.prestondihle.healthtracker.ui.components.BarChart
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.LineChart
-import com.prestondihle.healthtracker.ui.components.StackedBar
+import com.prestondihle.healthtracker.ui.components.LineSeries
+import com.prestondihle.healthtracker.ui.components.LineStyle
+import com.prestondihle.healthtracker.ui.components.MultiLineChart
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.CarbSeries
 import com.prestondihle.healthtracker.ui.theme.DiastolicSeries
+import com.prestondihle.healthtracker.ui.theme.EnergySeries
 import com.prestondihle.healthtracker.ui.theme.FatSeries
+import com.prestondihle.healthtracker.ui.theme.FocusSeries
 import com.prestondihle.healthtracker.ui.theme.ProteinSeries
 import com.prestondihle.healthtracker.ui.theme.SystolicSeries
-import java.time.ZoneId
+import com.prestondihle.healthtracker.ui.theme.VibeSeries
 
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel) {
@@ -66,7 +70,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Steps", subtitle = "from Health Connect") {
                 BarChart(
-                    dataPoints = state.snapshots.mapNotNull { it.steps?.toFloat() },
+                    days = state.snapshotSeries { it.steps?.toFloat() },
                     goalLine = state.goals.dailyStepGoal?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
@@ -76,7 +80,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Waist", subtitle = "inches") {
                 LineChart(
-                    dataPoints = state.waists.map { Units.cmToInches(it.waistCm) },
+                    days = state.waistSeries(Units::cmToInches),
                     goalLine = state.goals.goalWaistCm?.let { Units.cmToInches(it) },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
@@ -86,7 +90,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Weight", subtitle = "pounds, Health Connect and manual") {
                 LineChart(
-                    dataPoints = state.weightByDay.map { Units.kgToLbs(it.second) },
+                    days = state.weightSeries(Units::kgToLbs),
                     goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
@@ -99,9 +103,9 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                 // are taken irregularly, and evenly spacing them would imply a
                 // cadence that is not there.
                 DualAxisTimeChart(
-                    windowStart = state.startDate.atStartOfDay(ZoneId.systemDefault()).toInstant(),
-                    windowEnd =
-                        state.endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant(),
+                    windowStart = state.startDate.atStartOfDay(state.zoneId).toInstant(),
+                    windowEnd = state.endDate.plusDays(1).atStartOfDay(state.zoneId).toInstant(),
+                    zoneId = state.zoneId,
                     series =
                         listOf(
                             ChartSeries(
@@ -131,7 +135,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Resting heart rate", subtitle = "bpm") {
                 LineChart(
-                    dataPoints = state.snapshots.mapNotNull { it.restingHeartRateBpm?.toFloat() },
+                    days = state.snapshotSeries { it.restingHeartRateBpm?.toFloat() },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
             }
@@ -140,7 +144,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Sleep", subtitle = "hours") {
                 BarChart(
-                    dataPoints = state.snapshots.mapNotNull { it.sleepMinutes?.let { m -> m / 60f } },
+                    days = state.snapshotSeries { snap -> snap.sleepMinutes?.let { it / 60f } },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
             }
@@ -149,10 +153,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Macros", subtitle = "calories from protein, carbs and fat") {
                 StackedBarChart(
-                    bars =
-                        state.macroCaloriesByDay.map { (protein, carbs, fat) ->
-                            StackedBar(listOf(protein, carbs, fat))
-                        },
+                    bars = state.macroBars,
                     colors = listOf(ProteinSeries, CarbSeries, FatSeries),
                     goalLine = state.goals.dailyCalorieTarget?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
@@ -181,7 +182,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Pushups", subtitle = "reps per day") {
                 BarChart(
-                    dataPoints = state.repsByDay(MovementType.PUSHUP).map { it.second.toFloat() },
+                    days = state.repSeries(MovementType.PUSHUP),
                     goalLine = state.goals.dailyPushupGoal?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
@@ -191,42 +192,44 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Air squats", subtitle = "reps per day") {
                 BarChart(
-                    dataPoints = state.repsByDay(MovementType.AIR_SQUAT).map { it.second.toFloat() },
+                    days = state.repSeries(MovementType.AIR_SQUAT),
                     goalLine = state.goals.dailySquatGoal?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
             }
         }
 
+        // One chart rather than three. The three scores are submitted together
+        // against the same 1-10 scale, and the question actually asked of them is
+        // whether they move together -- which stacked separately took three
+        // screenfuls of scrolling to answer.
         item {
-            TrendCard(title = "Vibe", subtitle = "1 to 10") {
-                LineChart(
-                    dataPoints = state.dailyLogs.mapNotNull { it.vibe?.toFloat() },
+            TrendCard(title = "Vibe, energy and focus", subtitle = "1 to 10") {
+                MultiLineChart(
+                    series =
+                        listOf(
+                            LineSeries(
+                                label = "Vibe",
+                                points = state.logSeries { it.vibe?.toFloat() },
+                                color = VibeSeries,
+                                style = LineStyle.SOLID,
+                            ),
+                            LineSeries(
+                                label = "Energy",
+                                points = state.logSeries { it.energy?.toFloat() },
+                                color = EnergySeries,
+                                style = LineStyle.DASHED,
+                            ),
+                            LineSeries(
+                                label = "Focus",
+                                points = state.logSeries { it.focus?.toFloat() },
+                                color = FocusSeries,
+                                style = LineStyle.DOTTED,
+                            ),
+                        ),
                     minY = 1f,
                     maxY = 10f,
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
-                )
-            }
-        }
-
-        item {
-            TrendCard(title = "Energy", subtitle = "1 to 10") {
-                LineChart(
-                    dataPoints = state.dailyLogs.mapNotNull { it.energy?.toFloat() },
-                    minY = 1f,
-                    maxY = 10f,
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
-                )
-            }
-        }
-
-        item {
-            TrendCard(title = "Focus", subtitle = "1 to 10") {
-                LineChart(
-                    dataPoints = state.dailyLogs.mapNotNull { it.focus?.toFloat() },
-                    minY = 1f,
-                    maxY = 10f,
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    modifier = Modifier.fillMaxWidth().height(170.dp),
                 )
             }
         }
@@ -234,7 +237,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         item {
             TrendCard(title = "Pages read", subtitle = "per day") {
                 BarChart(
-                    dataPoints = state.dailyLogs.mapNotNull { it.bookPagesRead?.toFloat() },
+                    days = state.logSeries { it.bookPagesRead?.toFloat() },
                     goalLine = state.goals.dailyPagesGoal?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
