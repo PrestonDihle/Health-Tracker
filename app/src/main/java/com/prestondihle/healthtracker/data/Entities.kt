@@ -191,11 +191,24 @@ data class BloodSugarReading(
     val externalId: String? = null,
 )
 
+/**
+ * One ketone reading, in parts per million of breath acetone.
+ *
+ * ppm rather than mmol/L because that is what the meter in use reports. The two
+ * are not the same measurement and there is no conversion between them: mmol/L
+ * is beta-hydroxybutyrate assayed in blood, ppm is acetone in exhaled breath.
+ * They correlate loosely and individually, so a stored number means whichever
+ * one the device produced and nothing else.
+ *
+ * The v4-to-v5 migration therefore renames the column and leaves every value
+ * exactly as it was -- the readings were always coming off a ppm meter, only the
+ * label was wrong.
+ */
 @Entity(indices = [Index("timestamp")])
 data class KetoneReading(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestamp: Instant,
-    val mmolL: Float,
+    val ppm: Float,
 )
 
 /**

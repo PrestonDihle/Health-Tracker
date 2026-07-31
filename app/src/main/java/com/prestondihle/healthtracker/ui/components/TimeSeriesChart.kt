@@ -376,9 +376,12 @@ private fun DrawScope.drawChart(
 
         val caption = marker.label ?: continue
         val laid = textMeasurer.measure(caption, labelStyle)
-        // Centred on the rule, but never pushed outside the canvas -- a marker
-        // near an edge would otherwise lose half its caption.
-        val left = (x - laid.size.width / 2f).coerceIn(0f, size.width - laid.size.width)
+        // Centred on the rule, but kept inside the plot -- a marker near the left
+        // edge would otherwise slide over the axis numbers, which sit in the
+        // gutter at the same height.
+        val left =
+            (x - laid.size.width / 2f)
+                .coerceIn(plotLeft, (size.width - laid.size.width).coerceAtLeast(plotLeft))
         if (left < lastLabelEnd) continue
 
         drawText(

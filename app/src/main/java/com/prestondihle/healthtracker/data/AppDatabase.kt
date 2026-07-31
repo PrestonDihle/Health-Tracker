@@ -31,7 +31,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -114,6 +114,51 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Renames KetoneReading.mmolL to ppm, keeping every stored value.
+         *
+         * Deliberately not a conversion. Breath acetone in ppm and blood
+         * beta-hydroxybutyrate in mmol/L are different analytes with only a loose,
+         * person-specific correlation, so there is no factor that could be applied
+         * without inventing data. The readings already came off a ppm meter; only
+         * the column name was wrong, so the numbers carry over untouched.
+         *
+         * Done by rebuild-and-copy rather than ALTER TABLE RENAME COLUMN, which
+         * SQLite only gained in 3.25 -- that ships with API 30, and this app runs
+         * back to 26.
+         *
+         * The old table is moved aside and the new one created under the real
+         * name, rather than the other way round. Renaming a table *into* place
+         * would work, but SQLite rewrites the stored DDL of a renamed table with
+         * double-quoted identifiers, leaving a schema that differs from Room's
+         * generated text in quoting alone -- harmless, since Room compares parsed
+         * columns, but it makes the schema impossible to diff. Creating the final
+         * table directly keeps the stored DDL identical to Room's.
+         */
+        internal val migration4To5Statements =
+            listOf(
+                // Indices follow their table through a rename and keep their
+                // names, so this one has to go before the name is reused.
+                "DROP INDEX IF EXISTS `index_KetoneReading_timestamp`",
+                "ALTER TABLE `KetoneReading` RENAME TO `KetoneReading_old`",
+                "CREATE TABLE IF NOT EXISTS `KetoneReading` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`timestamp` INTEGER NOT NULL, " +
+                    "`ppm` REAL NOT NULL)",
+                "INSERT INTO `KetoneReading` (`id`, `timestamp`, `ppm`) " +
+                    "SELECT `id`, `timestamp`, `mmolL` FROM `KetoneReading_old`",
+                "DROP TABLE `KetoneReading_old`",
+                "CREATE INDEX IF NOT EXISTS `index_KetoneReading_timestamp` " +
+                    "ON `KetoneReading` (`timestamp`)",
+            )
+
+        private val MIGRATION_4_5 =
+            object : Migration(4, 5) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration4To5Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -128,7 +173,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 AppDatabase::class.java,
                                 "tracker_database",
                             )
-                            .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()
                             .also { instance = it }

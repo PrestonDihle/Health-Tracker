@@ -251,8 +251,8 @@ class TrackerRepository(
     fun getKetonesBetween(start: LocalDate, end: LocalDate): Flow<List<KetoneReading>> =
         dao.getKetoneReadingsBetween(startOfDayMillis(start), endOfDayMillis(end))
 
-    suspend fun addKetone(mmolL: Float, at: Instant = Instant.now()) =
-        dao.insertKetoneReading(KetoneReading(timestamp = at, mmolL = mmolL))
+    suspend fun addKetone(ppm: Float, at: Instant = Instant.now()) =
+        dao.insertKetoneReading(KetoneReading(timestamp = at, ppm = ppm))
 
     suspend fun deleteKetone(reading: KetoneReading) = dao.deleteKetoneReading(reading)
 

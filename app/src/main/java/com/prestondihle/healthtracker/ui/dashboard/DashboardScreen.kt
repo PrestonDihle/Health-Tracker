@@ -50,8 +50,10 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
+import androidx.compose.material3.FilterChip
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
 import com.prestondihle.healthtracker.ui.components.ChartAxis
@@ -162,9 +164,10 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
         item {
             MetabolicCard(
                 state = state,
+                onWindowChange = viewModel::setGlucoseWindow,
                 onAddKetone = {
                     viewModel.addKetone(it)
-                    toast("Logged %.1f mmol/L".format(it))
+                    toast("Logged ${Ketones.format(it)} ${Ketones.UNIT}")
                 },
                 onAddGlucose = {
                     viewModel.addBloodSugar(it)
@@ -791,10 +794,24 @@ private fun CaffeineCard(
 @Composable
 private fun MetabolicCard(
     state: DashboardUiState,
+    onWindowChange: (GlucoseWindow) -> Unit,
     onAddKetone: (Float) -> Unit,
     onAddGlucose: (Int) -> Unit,
 ) {
     DashboardCard(title = "Glucose and ketones") {
+        // Zooming in is the point: a CGM trace over 24 hours flattens the swing
+        // around a single meal into a wiggle, and 6 hours is where that swing is
+        // actually readable.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlucoseWindow.entries.forEach { option ->
+                FilterChip(
+                    selected = state.glucoseWindow == option,
+                    onClick = { onWindowChange(option) },
+                    label = { Text(option.label) },
+                )
+            }
+        }
+
         DualAxisTimeChart(
             windowStart = state.glucoseWindowStart,
             windowEnd = state.now,
@@ -805,19 +822,25 @@ private fun MetabolicCard(
                         points = state.glucose.map { TimePoint(it.timestamp, it.mgDl.toFloat()) },
                         color = GlucoseSeries,
                         axis = ChartAxis.LEFT,
-                        // A CGM writes every few minutes; dots would merge into a band.
+                        // A CGM writes every few minutes; dots would merge into a
+                        // band. A short window holds few enough to mark, though.
                         showPoints = state.glucose.size <= 24,
                     ),
                     ChartSeries(
                         label = "Ketones",
-                        points = state.ketones.map { TimePoint(it.timestamp, it.mmolL) },
+                        points = state.ketones.map { TimePoint(it.timestamp, it.ppm) },
                         color = KetoneSeries,
                         axis = ChartAxis.RIGHT,
                     ),
                 ),
             leftAxis = AxisSpec(min = 60f, max = 200f, label = "mg/dL"),
             rightAxis =
-                AxisSpec(min = 0f, max = 5f, label = "mmol/L", format = { "%.1f".format(it) }),
+                AxisSpec(
+                    min = Ketones.PLOT_MIN,
+                    max = Ketones.PLOT_MAX,
+                    label = Ketones.UNIT,
+                    format = Ketones::format,
+                ),
             // An empty plot does not need a full-height canvas to say so.
             modifier =
                 Modifier.fillMaxWidth()
@@ -829,15 +852,15 @@ private fun MetabolicCard(
 
         HorizontalDivider()
 
-        var ketone by remember { mutableFloatStateOf(1.0f) }
+        var ketone by remember { mutableFloatStateOf(Ketones.DEFAULT_ENTRY) }
         Stepper(
             label = "Ketones",
             value = ketone,
             onValueChange = { ketone = it },
-            step = 0.1f,
-            range = 0f..10f,
-            valueFormatter = { "%.1f".format(it) },
-            supportingText = "mmol/L",
+            step = Ketones.ENTRY_STEP,
+            range = Ketones.ENTRY_RANGE,
+            valueFormatter = Ketones::format,
+            supportingText = "${Ketones.UNIT}, breath acetone",
             trailingContent = {
                 InlineLogButton(contentDescription = "Log ketones", onClick = { onAddKetone(ketone) })
             },

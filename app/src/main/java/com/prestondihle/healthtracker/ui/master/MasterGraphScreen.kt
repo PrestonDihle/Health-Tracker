@@ -3,6 +3,8 @@ package com.prestondihle.healthtracker.ui.master
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,17 +21,22 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.domain.Macro
+import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.ui.components.AxisSpec
@@ -93,7 +100,7 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
 
         item { NowCard(state = state, onRefresh = viewModel::refresh) }
 
-        item { CombinedChartCard(state) }
+        item { CombinedChartCard(state, viewModel::setSeriesVisible) }
 
         item { AbsorptionModelCard() }
 
@@ -174,7 +181,7 @@ private fun NowCard(state: MasterGraphUiState, onRefresh: () -> Unit) {
             )
             Metric(
                 label = "Ketones",
-                value = state.latestKetone?.let { "%.1f".format(it.mmolL) } ?: "--",
+                value = state.latestKetone?.let { Ketones.format(it.ppm) } ?: "--",
                 supporting = state.latestKetone?.timestamp?.asAgo(state.now),
                 modifier = Modifier.weight(1f),
             )
@@ -204,72 +211,84 @@ private fun NowCard(state: MasterGraphUiState, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun CombinedChartCard(state: MasterGraphUiState) {
+private fun CombinedChartCard(
+    state: MasterGraphUiState,
+    onToggleSeries: (MasterSeries, Boolean) -> Unit,
+) {
+    val allSeries =
+        mapOf(
+            MasterSeries.GLUCOSE to
+                ChartSeries(
+                    label = "Glucose",
+                    points = state.glucose.map { TimePoint(it.timestamp, it.mgDl.toFloat()) },
+                    color = GlucoseSeries,
+                    axis = ChartAxis.LEFT,
+                    // A CGM writes every few minutes; dots would merge into a band.
+                    showPoints = state.glucose.size <= 24,
+                ),
+            MasterSeries.CARBS to
+                ChartSeries(
+                    label = "Carbs",
+                    points = state.absorptionCurve(Macro.CARB).asPoints(),
+                    color = CarbAbsorptionSeries,
+                    axis = ChartAxis.RIGHT,
+                    showPoints = false,
+                    // Dashed throughout: these three are a model of what the food
+                    // is doing, not a measurement of it.
+                    dashed = true,
+                ),
+            MasterSeries.PROTEIN to
+                ChartSeries(
+                    label = "Protein",
+                    points = state.absorptionCurve(Macro.PROTEIN).asPoints(),
+                    color = ProteinAbsorptionSeries,
+                    axis = ChartAxis.RIGHT,
+                    showPoints = false,
+                    dashed = true,
+                ),
+            MasterSeries.FAT to
+                ChartSeries(
+                    label = "Fat",
+                    points = state.absorptionCurve(Macro.FAT).asPoints(),
+                    color = FatAbsorptionSeries,
+                    axis = ChartAxis.RIGHT,
+                    showPoints = false,
+                    dashed = true,
+                ),
+            // Heart rate and ketones carry scales of their own: the two drawn axes
+            // are already spoken for, and bpm on a mg/dL axis -- or ppm on a g/h
+            // one -- would misstate both.
+            MasterSeries.HEART_RATE to
+                ChartSeries(
+                    label = "Heart rate",
+                    points = state.heartRate.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
+                    color = HeartRateSeries,
+                    showPoints = false,
+                    scale = AxisSpec(min = 40f, max = 180f, label = "bpm"),
+                ),
+            MasterSeries.KETONES to
+                ChartSeries(
+                    label = "Ketones",
+                    points = state.ketones.map { TimePoint(it.timestamp, it.ppm) },
+                    color = KetoneSeries,
+                    scale =
+                        AxisSpec(
+                            min = Ketones.PLOT_MIN,
+                            max = Ketones.PLOT_MAX,
+                            label = Ketones.UNIT,
+                            format = Ketones::format,
+                        ),
+                ),
+        )
+
     MasterCard(title = "Food, blood and heart") {
         DualAxisTimeChart(
             windowStart = state.windowStart,
             windowEnd = state.now,
             zoneId = state.zoneId,
-            series =
-                listOf(
-                    ChartSeries(
-                        label = "Glucose",
-                        points = state.glucose.map { TimePoint(it.timestamp, it.mgDl.toFloat()) },
-                        color = GlucoseSeries,
-                        axis = ChartAxis.LEFT,
-                        // A CGM writes every few minutes; dots would merge into a band.
-                        showPoints = state.glucose.size <= 24,
-                    ),
-                    ChartSeries(
-                        label = "Carbs",
-                        points = state.absorptionCurve(Macro.CARB).asPoints(),
-                        color = CarbAbsorptionSeries,
-                        axis = ChartAxis.RIGHT,
-                        showPoints = false,
-                        // Dashed throughout: these three are a model of what the
-                        // food is doing, not a measurement of it.
-                        dashed = true,
-                    ),
-                    ChartSeries(
-                        label = "Protein",
-                        points = state.absorptionCurve(Macro.PROTEIN).asPoints(),
-                        color = ProteinAbsorptionSeries,
-                        axis = ChartAxis.RIGHT,
-                        showPoints = false,
-                        dashed = true,
-                    ),
-                    ChartSeries(
-                        label = "Fat",
-                        points = state.absorptionCurve(Macro.FAT).asPoints(),
-                        color = FatAbsorptionSeries,
-                        axis = ChartAxis.RIGHT,
-                        showPoints = false,
-                        dashed = true,
-                    ),
-                    // Heart rate and ketones carry scales of their own: the two
-                    // drawn axes are already spoken for, and bpm on a mg/dL axis
-                    // or mmol/L on a g/h one would misstate both.
-                    ChartSeries(
-                        label = "Heart rate",
-                        points =
-                            state.heartRate.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
-                        color = HeartRateSeries,
-                        showPoints = false,
-                        scale = AxisSpec(min = 40f, max = 180f, label = "bpm"),
-                    ),
-                    ChartSeries(
-                        label = "Ketones",
-                        points = state.ketones.map { TimePoint(it.timestamp, it.mmolL) },
-                        color = KetoneSeries,
-                        scale =
-                            AxisSpec(
-                                min = 0f,
-                                max = 5f,
-                                label = "mmol/L",
-                                format = { "%.1f".format(it) },
-                            ),
-                    ),
-                ),
+            // Filtered rather than drawn-then-hidden, so a switched-off series
+            // also stops stretching the axis it shares.
+            series = allSeries.filterKeys(state::isVisible).values.toList(),
             leftAxis = AxisSpec(min = 60f, max = 200f, label = "mg/dL"),
             rightAxis = AxisSpec(min = 0f, max = 40f, label = "g/h"),
             // A rule at each meal, so a rise in any of the other lines can be
@@ -280,8 +299,65 @@ private fun CombinedChartCard(state: MasterGraphUiState) {
                 },
             modifier = Modifier.fillMaxWidth().height(ChartHeight),
         )
+
+        HorizontalDivider()
+
+        SeriesToggles(state = state, onToggle = onToggleSeries)
     }
 }
+
+/**
+ * A switch per line, coloured to match it.
+ *
+ * The swatch is what ties a row to its line -- the labels alone would mean
+ * re-reading the legend to work out which switch does what.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SeriesToggles(
+    state: MasterGraphUiState,
+    onToggle: (MasterSeries, Boolean) -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        MasterSeries.entries.forEach { series ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Switch(
+                    checked = state.isVisible(series),
+                    onCheckedChange = { onToggle(series, it) },
+                    colors =
+                        SwitchDefaults.colors(
+                            checkedThumbColor = series.color,
+                            checkedTrackColor = series.color.copy(alpha = 0.4f),
+                        ),
+                    modifier = Modifier.scale(0.75f),
+                )
+                Text(
+                    series.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** The colour this series is drawn in, for its switch. */
+private val MasterSeries.color: Color
+    get() =
+        when (this) {
+            MasterSeries.GLUCOSE -> GlucoseSeries
+            MasterSeries.CARBS -> CarbAbsorptionSeries
+            MasterSeries.PROTEIN -> ProteinAbsorptionSeries
+            MasterSeries.FAT -> FatAbsorptionSeries
+            MasterSeries.HEART_RATE -> HeartRateSeries
+            MasterSeries.KETONES -> KetoneSeries
+        }
 
 /** Where the absorption curves come from, since they are the one modelled thing here. */
 @Composable

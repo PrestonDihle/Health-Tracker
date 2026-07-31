@@ -42,7 +42,21 @@ import java.time.temporal.TemporalAdjusters
 /** Default waist when nothing has ever been measured: 42 inches. */
 private const val DEFAULT_WAIST_CM = 106.68f
 
-private const val GLUCOSE_WINDOW_HOURS = 24L
+/** How far back the glucose and ketone chart looks. */
+enum class GlucoseWindow(val label: String, val hours: Long) {
+    SIX("6h", 6),
+    TWELVE("12h", 12),
+    DAY("24h", 24),
+}
+
+/**
+ * The widest window on offer, and so how much history the query has to fetch.
+ *
+ * Fetched once at the widest setting rather than re-queried per selection: the
+ * whole span is a few hundred CGM rows, and holding it means switching windows
+ * is an instant redraw instead of a database round trip.
+ */
+private val GLUCOSE_WINDOW_HOURS = GlucoseWindow.entries.maxOf { it.hours }
 
 /**
  * Half the caffeine window, extending equally either side of now.
@@ -88,6 +102,7 @@ data class DashboardUiState(
     val latestWaist: WaistEntry? = null,
     val glucose: List<BloodSugarReading> = emptyList(),
     val ketones: List<KetoneReading> = emptyList(),
+    val glucoseWindow: GlucoseWindow = GlucoseWindow.DAY,
     val caffeine: List<CaffeineIntake> = emptyList(),
     val latestBloodPressure: BloodPressureReading? = null,
     val pushupsToday: Int = 0,
@@ -136,7 +151,7 @@ data class DashboardUiState(
         get() = snapshot?.totalCalories?.let { caloriesEaten - it }
 
     val glucoseWindowStart: Instant
-        get() = now.minus(Duration.ofHours(GLUCOSE_WINDOW_HOURS))
+        get() = now.minus(Duration.ofHours(glucoseWindow.hours))
 
     val caffeineWindowStart: Instant
         get() = now.minus(Duration.ofHours(CAFFEINE_HALF_WINDOW_HOURS))
@@ -239,6 +254,7 @@ private data class MetabolicBundle(
     val glucose: List<BloodSugarReading>,
     val ketones: List<KetoneReading>,
     val caffeine: List<CaffeineIntake>,
+    val glucoseWindow: GlucoseWindow,
 )
 
 class DashboardViewModel(
@@ -249,6 +265,7 @@ class DashboardViewModel(
     private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
     private val syncing = MutableStateFlow(false)
     private val missingPermissions = MutableStateFlow<Set<String>>(emptySet())
+    private val glucoseWindow = MutableStateFlow(GlucoseWindow.DAY)
 
     /**
      * Drives the fast timer. One second is fine for a clock read-out; adherence
@@ -312,8 +329,12 @@ class DashboardViewModel(
                 repository.getBloodSugarSince(since),
                 repository.getKetonesSince(since),
                 repository.getCaffeineSince(caffeineSince),
-            ) { glucose, ketones, caffeine ->
-                MetabolicBundle(glucose, ketones, caffeine)
+                glucoseWindow,
+            ) { glucose, ketones, caffeine, window ->
+                // The query always covers the widest window; narrowing is left to
+                // the chart, which clips to its own bounds. Switching windows is
+                // then a redraw rather than a re-query.
+                MetabolicBundle(glucose, ketones, caffeine, window)
             }
         }
 
@@ -369,6 +390,7 @@ class DashboardViewModel(
                     latestWaist = todayBundle.waist,
                     glucose = metabolicBundle.glucose,
                     ketones = metabolicBundle.ketones,
+                    glucoseWindow = metabolicBundle.glucoseWindow,
                     caffeine = metabolicBundle.caffeine,
                     latestBloodPressure = todayBundle.bloodPressures.lastOrNull(),
                     pushupsToday = todayBundle.pushups,
@@ -473,8 +495,12 @@ class DashboardViewModel(
         viewModelScope.launch { repository.addBloodPressure(systolic, diastolic) }
     }
 
-    fun addKetone(mmolL: Float) {
-        viewModelScope.launch { repository.addKetone(mmolL) }
+    fun setGlucoseWindow(window: GlucoseWindow) {
+        glucoseWindow.value = window
+    }
+
+    fun addKetone(ppm: Float) {
+        viewModelScope.launch { repository.addKetone(ppm) }
     }
 
     fun addBloodSugar(mgDl: Int) {

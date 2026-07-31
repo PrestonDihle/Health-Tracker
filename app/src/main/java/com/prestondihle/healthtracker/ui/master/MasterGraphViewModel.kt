@@ -31,6 +31,22 @@ enum class MasterRange(val label: String, val hours: Long) {
     TWO_DAYS("48h", 48),
 }
 
+/**
+ * One switchable line on the master graph.
+ *
+ * Six series on one plot is a lot to read at once, and most questions only
+ * involve two or three of them -- carbs against glucose, or fat against heart
+ * rate. Turning the rest off is what makes those comparisons legible.
+ */
+enum class MasterSeries(val label: String) {
+    GLUCOSE("Glucose"),
+    CARBS("Carbs"),
+    PROTEIN("Protein"),
+    FAT("Fat"),
+    HEART_RATE("Heart rate"),
+    KETONES("Ketones"),
+}
+
 data class MasterGraphUiState(
     val range: MasterRange = MasterRange.DAY,
     val now: Instant = Instant.now(),
@@ -41,7 +57,11 @@ data class MasterGraphUiState(
     val healthState: HealthPermissionState = HealthPermissionState.NOT_GRANTED,
     val isSyncing: Boolean = false,
     val zoneId: ZoneId = ZoneId.systemDefault(),
+    /** Everything starts on; the switches are for narrowing, not for building up. */
+    val visibleSeries: Set<MasterSeries> = MasterSeries.entries.toSet(),
 ) {
+    fun isVisible(series: MasterSeries): Boolean = series in visibleSeries
+
     val windowStart: Instant
         get() = now.minus(Duration.ofHours(range.hours))
 
@@ -122,6 +142,7 @@ class MasterGraphViewModel(
     private val range = MutableStateFlow(MasterRange.DAY)
     private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
     private val syncing = MutableStateFlow(false)
+    private val visibleSeries = MutableStateFlow(MasterSeries.entries.toSet())
 
     /**
      * Recomputed on a coarse tick rather than every second.
@@ -153,12 +174,15 @@ class MasterGraphViewModel(
         }
 
     val uiState: StateFlow<MasterGraphUiState> =
-        combine(seriesFlow, range, minuteTicker, healthState, syncing) {
-                series,
-                selected,
-                now,
-                permission,
-                isSyncing ->
+        combine(
+                seriesFlow,
+                range,
+                minuteTicker,
+                healthState,
+                // Paired up because combine's typed overloads stop at five sources.
+                combine(syncing, visibleSeries) { isSyncing, visible -> isSyncing to visible },
+            ) { series, selected, now, permission, syncAndVisible ->
+                val (isSyncing, visible) = syncAndVisible
                 MasterGraphUiState(
                     range = selected,
                     now = now,
@@ -169,6 +193,7 @@ class MasterGraphViewModel(
                     healthState = permission,
                     isSyncing = isSyncing,
                     zoneId = zoneId,
+                    visibleSeries = visible,
                 )
             }
             .stateIn(
@@ -184,6 +209,11 @@ class MasterGraphViewModel(
     fun setRange(selected: MasterRange) {
         range.value = selected
         refresh()
+    }
+
+    fun setSeriesVisible(series: MasterSeries, visible: Boolean) {
+        visibleSeries.value =
+            if (visible) visibleSeries.value + series else visibleSeries.value - series
     }
 
     /**
