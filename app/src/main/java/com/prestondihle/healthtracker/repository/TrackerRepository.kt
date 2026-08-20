@@ -26,6 +26,7 @@ import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeeklyPerformance
 import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.health.HeartRateSample
@@ -307,6 +308,18 @@ class TrackerRepository(
         dao.getStepBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
 
     /**
+     * Moves a meal to when it was actually eaten.
+     *
+     * Needed because a nutrition source is free to record only the date: every
+     * meal then arrives stamped midnight, and an absorption curve anchored there
+     * describes a night nobody ate through. The correction survives re-syncing
+     * -- meals are only ever inserted, never updated, and the unique index on
+     * `externalId` makes the original a no-op the next time round.
+     */
+    suspend fun setMealTime(meal: MealEntry, at: Instant) =
+        dao.updateMeal(meal.copy(timestamp = at))
+
+    /**
      * Pulls the meal and heart rate time series for an arbitrary window into the
      * local cache.
      *
@@ -334,7 +347,12 @@ class TrackerRepository(
                             externalId = it.externalId,
                         )
                     }
-            if (fresh.isNotEmpty()) dao.insertMeals(fresh)
+            // A second filter, on content rather than on id: the index catches
+            // the same *record* arriving twice, but not a source that writes one
+            // meal as several records with a stable id each. See [MealDuplicates].
+            val stored = dao.getMealsInRange(from.toEpochMilli(), to.toEpochMilli())
+            val unseen = MealDuplicates.notAlreadyStored(fresh, stored)
+            if (unseen.isNotEmpty()) dao.insertMeals(unseen)
         }
 
         // Heart rate is read as raw samples, and a watch writes one every few

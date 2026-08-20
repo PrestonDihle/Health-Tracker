@@ -81,6 +81,31 @@ Glucose is the exception to the snapshot pattern: it is a time series, not a dai
 are inserted as `BloodSugarReading` rows. Re-sync safety comes from the unique index on
 `externalId` (SQLite treats NULLs as distinct, so manual readings are unaffected).
 
+**A nutrition source may record the date and nothing finer.** Real data from the author's phone had
+every `NutritionRecord.startTime` at exactly midnight UTC, so every meal in the database sat at
+`00:00`, and the absorption curves were all anchored to a night nobody ate through. This is not
+something the app can compute its way out of — the clock time was never written. Two things follow
+from it:
+
+- `MasterGraphUiState.hasClockTime` treats a meal landing on an exact midnight, in the device's zone
+  or in UTC, as dated rather than placed. The list says "set time" instead of printing a
+  plausible-looking `1:00 AM`, and the card says how many curves are anchored to midnight.
+- Meals are **editable**, uniquely among the Health Connect caches. `TrackerRepository.setMealTime`
+  moves one to when it was actually eaten, which re-anchors its curve. The correction survives
+  re-syncing for free: meals are only ever inserted, never updated, so the unique `externalId` index
+  makes the midnight-stamped original a no-op the next time round.
+
+**The same source may also write one meal as several records.** One day carried six records that were
+two meals repeated three times, each with a Health Connect id of its own — so the unique index saw
+six legitimately distinct rows and trebled that day's carbohydrate. `domain/MealDuplicates.kt`
+collapses records agreeing on timestamp, energy, all three macros *and* name; anything differing at
+all is kept, so a genuine second helping survives. Nulls take part in the comparison, because "no
+protein recorded" and "zero protein" are different statements. It runs on both sides: on insert to
+stop the table accumulating, and on read to fix days already stored. **Nothing deletes a row** — the
+duplicates stay on disk and are simply not counted twice, which leaves the decision reversible. The
+screen says how many it merged, since a total that moved without explanation is worse than the
+duplicate it corrected.
+
 `MealEntry`, `HeartRateBucket` and `StepBucket` are the other three time series, added for the master
 graph, and they follow the same cache rules. `MealEntry` deliberately duplicates nutrition that is
 *also* rolled up on the snapshot — that is not redundancy to clean up: a daily macro total cannot say
@@ -302,16 +327,23 @@ range there would print a ceiling the plot stopped using the moment anything exc
 
 ## Testing
 
-`FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest` and
-`GlucoseSmoothingTest` are the pure-JVM suites. Adherence covers the midnight-wrapping window,
+`FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
+`GlucoseSmoothingTest` and `MealDuplicatesTest` are the pure-JVM suites. Adherence covers the midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
 decay, dose accumulation and curve shape. Absorption covers the gastric lag, per-macro peak ordering,
 the normalisation that makes the area under a curve equal the grams eaten, and the documented
 completion times. Smoothing pins what the filter may do to a reading: timestamps preserved, no
 overshoot beyond the readings' own range, no lag on a rise, and isolated readings returned untouched.
-New adherence, interval, stats, decay, absorption or smoothing behaviour belongs there.
+Duplicates pins the line between one meal written twice and two similar meals, in both directions.
+New adherence, interval, stats, decay, absorption, smoothing or duplicate behaviour belongs there.
 `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
+
+Awkwardly, the duplicate-collapse cannot be reached through the repository any more: the sync rejects
+duplicates on the way in, so a render test that needs rows in the state a *previous* version left
+them has to plant them through the DAO. `MasterGraphRenderTest` keeps a `dao` field for that, and its
+`DateOnlyDuplicatedMeals` reproduces the source behaviour by delegating `HealthDataSource` and
+overriding only `readMeals` — which keeps the oddity in the test rather than in the shared mock.
 
 A note on writing smoothing tests: assert peak *timing* against a trace that is symmetric about its
 peak. On an asymmetric one the two samples either side of a near-plateau come out within a tenth of

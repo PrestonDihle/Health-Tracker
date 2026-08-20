@@ -227,9 +227,27 @@ interface TrackerDao {
     @Query("SELECT * FROM MealEntry WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp ASC")
     fun getMealsBetween(start: Long, end: Long): Flow<List<MealEntry>>
 
+    /**
+     * Meals in a window as a one-shot read.
+     *
+     * The Flow above is for screens; a sync needs the current contents once, to
+     * compare what it is about to write against what is already there.
+     */
+    @Query("SELECT * FROM MealEntry WHERE timestamp >= :start AND timestamp < :end")
+    suspend fun getMealsInRange(start: Long, end: Long): List<MealEntry>
+
     /** Ignores rows whose externalId is already present, so a repeated sync cannot duplicate meals. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMeals(meals: List<MealEntry>)
+
+    /**
+     * Rewrites one meal, for correcting a time the source never recorded.
+     *
+     * Safe against a later sync: [insertMeals] ignores anything whose externalId
+     * is already present, so a corrected row is never overwritten by the
+     * midnight-stamped original coming round again.
+     */
+    @Update suspend fun updateMeal(meal: MealEntry)
 
     @Query("SELECT externalId FROM MealEntry WHERE externalId IS NOT NULL AND timestamp >= :start AND timestamp < :end")
     suspend fun getKnownMealExternalIds(start: Long, end: Long): List<String>

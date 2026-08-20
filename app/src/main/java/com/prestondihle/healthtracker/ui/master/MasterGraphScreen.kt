@@ -1,5 +1,6 @@
 package com.prestondihle.healthtracker.ui.master
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -26,6 +27,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -46,6 +50,7 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.InstantPickerDialog
 import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.CarbAbsorptionSeries
@@ -113,7 +118,7 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
         item { AbsorptionModelCard() }
 
         if (state.mealsInWindow.isNotEmpty()) {
-            item { MealListCard(state) }
+            item { MealListCard(state = state, onSetTime = viewModel::setMealTime) }
         }
     }
 }
@@ -430,12 +435,36 @@ private fun AbsorptionModelCard() {
     }
 }
 
+/**
+ * The window's meals, each tappable to say when it was eaten.
+ *
+ * Editable because a nutrition source is free to record only the date. When it
+ * does, every meal arrives stamped midnight and the absorption curves are
+ * anchored to a night nobody ate through -- so a meal without a time says so
+ * rather than printing a plausible-looking `1:00 AM`, and one tap fixes it.
+ */
 @Composable
-private fun MealListCard(state: MasterGraphUiState) {
+private fun MealListCard(state: MasterGraphUiState, onSetTime: (MealEntry, Instant) -> Unit) {
+    var editing by remember { mutableStateOf<MealEntry?>(null) }
+
     MasterCard(title = "Meals in this window") {
+        val undated = state.undatedMealsInWindow.size
+        if (undated > 0) {
+            Text(
+                "$undated of these arrived with a date but no time, so ${
+                    if (undated == 1) "its curve is" else "their curves are"
+                } anchored to midnight. Tap one to say when you ate it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         state.mealsInWindow.forEach { meal ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .clickable { editing = meal }
+                        .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -451,14 +480,51 @@ private fun MealListCard(state: MasterGraphUiState) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                val placed = state.hasClockTime(meal)
                 Text(
-                    DateTimeFormatter.ofPattern("EEE h:mm a")
-                        .format(meal.timestamp.atZone(state.zoneId)),
+                    if (placed) {
+                        DateTimeFormatter.ofPattern("EEE h:mm a")
+                            .format(meal.timestamp.atZone(state.zoneId))
+                    } else {
+                        DateTimeFormatter.ofPattern("EEE").format(
+                            meal.timestamp.atZone(state.zoneId)
+                        ) + " · set time"
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color =
+                        if (placed) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
                 )
             }
         }
+
+        // Said out loud rather than quietly applied: collapsing changes the day's
+        // totals, and a figure that moved without explanation is worse than the
+        // duplicate it corrected.
+        if (state.duplicatesCollapsed > 0) {
+            Text(
+                "${state.duplicatesCollapsed} repeated record" +
+                    "${if (state.duplicatesCollapsed == 1) "" else "s"} from the source " +
+                    "merged; each meal is counted once.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    editing?.let { meal ->
+        InstantPickerDialog(
+            title = meal.name?.takeIf { it.isNotBlank() } ?: "Meal eaten",
+            // A date-only meal opens on its own midnight, which is the right date
+            // and an obviously wrong time -- exactly the two things to correct.
+            initial = meal.timestamp,
+            zoneId = state.zoneId,
+            onDismiss = { editing = null },
+            onConfirm = {
+                onSetTime(meal, it)
+                editing = null
+            },
+        )
     }
 }
 

@@ -13,6 +13,7 @@ import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.domain.MacroServing
+import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +27,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
@@ -118,6 +120,21 @@ data class MasterGraphUiState(
         }
 
     /**
+     * The meals as they should be counted: one row per meal actually eaten.
+     *
+     * A source that writes the same meal as several separate records would
+     * otherwise be believed, and the day's carbohydrate drawn at three times its
+     * real height. Collapsed once here so the curves, the marker rules and the
+     * list under the chart all agree.
+     */
+    private val distinctMeals: List<MealEntry>
+        get() = MealDuplicates.collapse(meals.sortedBy { it.id })
+
+    /** How many records the collapse absorbed, so the screen can own up to it. */
+    val duplicatesCollapsed: Int
+        get() = meals.size - distinctMeals.size
+
+    /**
      * Meals inside the window, newest first.
      *
      * [meals] itself reaches further back than the plot, because a meal eaten
@@ -125,11 +142,35 @@ data class MasterGraphUiState(
      * actually visible belong in the list under the chart.
      */
     val mealsInWindow: List<MealEntry>
-        get() = meals.filter { !it.timestamp.isBefore(windowStart) }.sortedByDescending { it.timestamp }
+        get() =
+            distinctMeals
+                .filter { !it.timestamp.isBefore(windowStart) }
+                .sortedByDescending { it.timestamp }
+
+    /**
+     * Whether a meal carries a real clock time or only the date it was eaten on.
+     *
+     * Some nutrition sources record the day and nothing finer, and hand every
+     * meal over stamped midnight. An absorption curve anchored there describes a
+     * night nobody ate through, so the screen has to be able to say which meals
+     * are placed and which are merely dated.
+     *
+     * Midnight is checked in both the device's zone and UTC, since a source may
+     * mean either by "the start of the day" -- and it is checked to the second,
+     * because a meal landing on an exact midnight by coincidence is not something
+     * that happens.
+     */
+    fun hasClockTime(meal: MealEntry): Boolean =
+        meal.timestamp != meal.timestamp.truncatedTo(ChronoUnit.DAYS) &&
+            meal.timestamp.atZone(zoneId).toLocalTime() != LocalTime.MIDNIGHT
+
+    /** Meals in the window still anchored to a date rather than a time. */
+    val undatedMealsInWindow: List<MealEntry>
+        get() = mealsInWindow.filterNot(::hasClockTime)
 
     private val servings: List<MacroServing>
         get() =
-            meals.map {
+            distinctMeals.map {
                 MacroServing(
                     time = it.timestamp,
                     proteinGrams = it.proteinGrams ?: 0f,
@@ -160,7 +201,7 @@ data class MasterGraphUiState(
      * to answer and is otherwise left to eyeballing the slope.
      */
     val lastMeal: MealEntry?
-        get() = meals.maxByOrNull { it.timestamp }
+        get() = distinctMeals.maxByOrNull { it.timestamp }
 
     /** How much of [lastMeal]'s carbohydrate has reached the blood, as a fraction. */
     fun lastMealAbsorbed(macro: Macro): Float? =
@@ -315,6 +356,17 @@ class MasterGraphViewModel(
     fun setSeriesVisible(series: MasterSeries, visible: Boolean) {
         visibleSeries.value =
             if (visible) visibleSeries.value + series else visibleSeries.value - series
+    }
+
+    /**
+     * Records when a meal was actually eaten.
+     *
+     * The only way to place a meal whose source recorded a date and no time. It
+     * re-anchors that meal's absorption curve, which is the whole reason the
+     * timestamp matters here rather than being a caption.
+     */
+    fun setMealTime(meal: MealEntry, at: Instant) {
+        viewModelScope.launch { repository.setMealTime(meal, at) }
     }
 
     /**
