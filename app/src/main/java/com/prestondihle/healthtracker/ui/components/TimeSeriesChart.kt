@@ -67,6 +67,15 @@ data class ChartSeries(
     val dashed: Boolean = false,
     val kind: SeriesKind = SeriesKind.LINE,
     /**
+     * Break the line where the series stops being measured, instead of joining
+     * across the gap. See [SeriesGaps].
+     *
+     * For measured series only. A modelled curve is a continuous function
+     * sampled evenly and has no gaps to find; switching this on for one would
+     * only ever misread its own sampling interval.
+     */
+    val breakOnGaps: Boolean = false,
+    /**
      * The interval one bar covers, starting at its point's timestamp.
      *
      * Required in practice for [SeriesKind.BAR], because the gaps between points
@@ -316,9 +325,8 @@ private fun List<TimePoint>.downsampleFactor(): Int =
     if (size <= MAX_RENDERED_POINTS) 1
     else ceil(size.toDouble() / MAX_RENDERED_POINTS).toInt()
 
-private fun List<TimePoint>.downsampled(): List<TimePoint> {
-    val bucket = downsampleFactor()
-    if (bucket == 1) return this
+private fun List<TimePoint>.downsampled(bucket: Int): List<TimePoint> {
+    if (bucket <= 1) return this
     return chunked(bucket) { chunk ->
         TimePoint(
             time = chunk[chunk.size / 2].time,
@@ -600,52 +608,72 @@ private fun DrawScope.drawChart(
 
     for (drawn in series.filter { it.spec.kind == SeriesKind.LINE }) {
         val item = drawn.spec
-        val points = drawn.points.downsampled()
-        if (points.isEmpty()) continue
+        if (drawn.points.isEmpty()) continue
         val axis =
             item.scale?.expandedFor(drawn.points)
                 ?: if (item.axis == ChartAxis.LEFT) leftAxis else rightAxis ?: leftAxis
 
-        if (points.size == 1) {
-            drawCircle(
-                color = item.color,
-                radius = 4.dp.toPx(),
-                center =
-                    androidx.compose.ui.geometry.Offset(
-                        xFor(points.first().time),
-                        yFor(points.first().value, axis),
-                    ),
-            )
-            continue
-        }
+        // Split before thinning, so the split is judged on the cadence the series
+        // was actually recorded at. Downsampling first would widen every spacing
+        // by the same factor and leave a real dropout looking ordinary.
+        //
+        // The thinning factor still comes from the whole series rather than each
+        // run, or a trace broken into many runs would be drawn at many different
+        // resolutions.
+        val bucket = drawn.points.downsampleFactor()
+        val runs =
+            if (item.breakOnGaps) SeriesGaps.segments(drawn.points) else listOf(drawn.points)
 
-        val path = Path()
-        points.forEachIndexed { index, point ->
-            val x = xFor(point.time)
-            val y = yFor(point.value, axis)
-            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        drawPath(
-            path = path,
-            color = item.color,
-            style =
-                Stroke(
-                    width = 2.dp.toPx(),
-                    cap = StrokeCap.Round,
-                    pathEffect =
-                        if (item.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
-                        else null,
-                ),
-        )
+        for (run in runs) {
+            val points = run.downsampled(bucket)
+            if (points.isEmpty()) continue
 
-        if (item.showPoints) {
-            points.forEach {
+            // A run of one is an isolated reading with nothing to join it to.
+            // Drawn as a dot rather than dropped: it was still measured.
+            if (points.size == 1) {
                 drawCircle(
                     color = item.color,
-                    radius = 3.dp.toPx(),
+                    radius = 4.dp.toPx(),
                     center =
-                        androidx.compose.ui.geometry.Offset(xFor(it.time), yFor(it.value, axis)),
+                        androidx.compose.ui.geometry.Offset(
+                            xFor(points.first().time),
+                            yFor(points.first().value, axis),
+                        ),
                 )
+                continue
+            }
+
+            val path = Path()
+            points.forEachIndexed { index, point ->
+                val x = xFor(point.time)
+                val y = yFor(point.value, axis)
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(
+                path = path,
+                color = item.color,
+                style =
+                    Stroke(
+                        width = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        pathEffect =
+                            if (item.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                            else null,
+                    ),
+            )
+
+            if (item.showPoints) {
+                points.forEach {
+                    drawCircle(
+                        color = item.color,
+                        radius = 3.dp.toPx(),
+                        center =
+                            androidx.compose.ui.geometry.Offset(
+                                xFor(it.time),
+                                yFor(it.value, axis),
+                            ),
+                    )
+                }
             }
         }
     }

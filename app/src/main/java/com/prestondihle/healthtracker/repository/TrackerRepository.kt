@@ -319,6 +319,51 @@ class TrackerRepository(
     suspend fun setMealTime(meal: MealEntry, at: Instant) =
         dao.updateMeal(meal.copy(timestamp = at))
 
+    /** Rewrites a meal's macros and time together, for correcting one by hand. */
+    suspend fun updateMeal(meal: MealEntry) = dao.updateMeal(meal)
+
+    /**
+     * Records a meal that was not synced from anywhere.
+     *
+     * Manual entries carry no `externalId`, which is what keeps them clear of
+     * the sync's de-duplication: SQLite treats NULLs as distinct, so no number
+     * of Health Connect records can collide with one.
+     */
+    suspend fun addMeal(
+        at: Instant,
+        calories: Int?,
+        proteinGrams: Float?,
+        carbGrams: Float?,
+        fatGrams: Float?,
+        name: String? = null,
+    ) =
+        dao.insertMeal(
+            MealEntry(
+                timestamp = at,
+                calories = calories,
+                proteinGrams = proteinGrams,
+                carbGrams = carbGrams,
+                fatGrams = fatGrams,
+                name = name,
+                source = DataSourceEnum.MANUAL,
+            )
+        )
+
+    /**
+     * Removes a meal, in whichever of the two senses actually makes it stay gone.
+     *
+     * A hand-entered meal has no upstream record, so the row goes. A synced one
+     * is only hidden: deleting the row outright would leave the next sync
+     * reading the same record out of Health Connect and inserting it again --
+     * both the `externalId` index and the content check look for rows that would
+     * no longer be there. The kept row is the evidence that this record has
+     * already been dealt with.
+     */
+    suspend fun deleteMeal(meal: MealEntry) {
+        if (meal.externalId == null) dao.deleteMeal(meal)
+        else dao.updateMeal(meal.copy(hidden = true))
+    }
+
     /**
      * Pulls the meal and heart rate time series for an arbitrary window into the
      * local cache.

@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +51,8 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
-import com.prestondihle.healthtracker.ui.components.InstantPickerDialog
+import com.prestondihle.healthtracker.ui.components.MealDraft
+import com.prestondihle.healthtracker.ui.components.MealEntryDialog
 import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.CarbAbsorptionSeries
@@ -67,6 +69,9 @@ import java.time.format.DateTimeFormatter
 private val CardGap = 10.dp
 private val CardPadding = 12.dp
 private val ChartHeight = 300.dp
+
+/** Sized to sit on a card's title row without stretching it. */
+private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
 /**
  * Everything on one timeline: the macros of each meal spread into the hours they
@@ -117,8 +122,16 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
 
         item { AbsorptionModelCard() }
 
-        if (state.mealsInWindow.isNotEmpty()) {
-            item { MealListCard(state = state, onSetTime = viewModel::setMealTime) }
+        // Shown even when empty: it carries the only way to log a meal by hand,
+        // and hiding that behind "there is already a meal here" would make the
+        // control appear only once it was least needed.
+        item {
+            MealListCard(
+                state = state,
+                onAdd = viewModel::addMeal,
+                onUpdate = viewModel::updateMeal,
+                onDelete = viewModel::deleteMeal,
+            )
         }
     }
 }
@@ -246,6 +259,7 @@ private fun CombinedChartCard(
                     axis = ChartAxis.LEFT,
                     // A CGM writes every few minutes; dots would merge into a band.
                     showPoints = state.glucose.size <= 24,
+                    breakOnGaps = true,
                 ),
             MasterSeries.CARBS to
                 ChartSeries(
@@ -285,6 +299,10 @@ private fun CombinedChartCard(
                     points = state.heartRate.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
                     color = HeartRateSeries,
                     showPoints = false,
+                    // A watch off the wrist leaves hours unrecorded, and joining
+                    // across them drew a smooth diagonal through the night that
+                    // looked exactly like a measurement.
+                    breakOnGaps = true,
                     scale = AxisSpec(min = 40f, max = 180f, label = "bpm"),
                 ),
             MasterSeries.KETONES to
@@ -439,21 +457,45 @@ private fun AbsorptionModelCard() {
  * The window's meals, each tappable to say when it was eaten.
  *
  * Editable because a nutrition source is free to record only the date. When it
- * does, every meal arrives stamped midnight and the absorption curves are
- * anchored to a night nobody ate through -- so a meal without a time says so
- * rather than printing a plausible-looking `1:00 AM`, and one tap fixes it.
+ * does, every meal arrives at one fixed time of day and the absorption curves
+ * are anchored to an hour nobody ate in -- so such a meal says so rather than
+ * printing a plausible-looking clock time, and one tap fixes it.
  */
 @Composable
-private fun MealListCard(state: MasterGraphUiState, onSetTime: (MealEntry, Instant) -> Unit) {
+private fun MealListCard(
+    state: MasterGraphUiState,
+    onAdd: (calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) -> Unit,
+    onUpdate: (MealEntry, Int, Int, Int, Int, Instant) -> Unit,
+    onDelete: (MealEntry) -> Unit,
+) {
     var editing by remember { mutableStateOf<MealEntry?>(null) }
+    var adding by remember { mutableStateOf(false) }
 
-    MasterCard(title = "Meals in this window") {
+    MasterCard(
+        title = "Meals in this window",
+        action = {
+            TextButton(onClick = { adding = true }, contentPadding = CompactButtonPadding) {
+                Text("Log meal")
+            }
+        },
+    ) {
+        if (state.mealsInWindow.isEmpty()) {
+            Text(
+                "Nothing eaten in this window, or nothing that reached Health Connect. " +
+                    "Log a meal to put it on the chart.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         val undated = state.undatedMealsInWindow.size
         if (undated > 0) {
             Text(
-                "$undated of these arrived with a date but no time, so ${
-                    if (undated == 1) "its curve is" else "their curves are"
-                } anchored to midnight. Tap one to say when you ate it.",
+                "$undated of these carry a stamped time rather than the one ${
+                    if (undated == 1) "it was" else "they were"
+                } eaten at, so ${
+                    if (undated == 1) "its curve sits" else "their curves sit"
+                } in the wrong hour. Tap one to say when you actually ate it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -513,20 +555,50 @@ private fun MealListCard(state: MasterGraphUiState, onSetTime: (MealEntry, Insta
     }
 
     editing?.let { meal ->
-        InstantPickerDialog(
-            title = meal.name?.takeIf { it.isNotBlank() } ?: "Meal eaten",
-            // A date-only meal opens on its own midnight, which is the right date
-            // and an obviously wrong time -- exactly the two things to correct.
-            initial = meal.timestamp,
+        MealEntryDialog(
+            initial = meal.asDraft(),
             zoneId = state.zoneId,
             onDismiss = { editing = null },
             onConfirm = {
-                onSetTime(meal, it)
+                onUpdate(meal, it.calories, it.proteinGrams, it.carbGrams, it.fatGrams, it.at)
+                editing = null
+            },
+            onDelete = {
+                onDelete(meal)
                 editing = null
             },
         )
     }
+
+    if (adding) {
+        MealEntryDialog(
+            initial = MealDraft(calories = 0, proteinGrams = 0, carbGrams = 0, fatGrams = 0, at = state.now),
+            zoneId = state.zoneId,
+            onDismiss = { adding = false },
+            onConfirm = {
+                onAdd(it.calories, it.proteinGrams, it.carbGrams, it.fatGrams, it.at)
+                adding = false
+            },
+        )
+    }
 }
+
+/**
+ * A stored meal as the editor's fields.
+ *
+ * A macro the source never recorded opens at zero, since a stepper has to start
+ * somewhere -- but saving then writes that zero as a real figure, which is the
+ * honest outcome: the dialog is a statement of what was eaten, and anything left
+ * untouched has been confirmed as none.
+ */
+private fun MealEntry.asDraft() =
+    MealDraft(
+        calories = calories ?: 0,
+        proteinGrams = proteinGrams?.toInt() ?: 0,
+        carbGrams = carbGrams?.toInt() ?: 0,
+        fatGrams = fatGrams?.toInt() ?: 0,
+        at = timestamp,
+    )
 
 // ---------------------------------------------------------------------------
 

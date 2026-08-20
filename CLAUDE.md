@@ -82,18 +82,36 @@ are inserted as `BloodSugarReading` rows. Re-sync safety comes from the unique i
 `externalId` (SQLite treats NULLs as distinct, so manual readings are unaffected).
 
 **A nutrition source may record the date and nothing finer.** Real data from the author's phone had
-every `NutritionRecord.startTime` at exactly midnight UTC, so every meal in the database sat at
-`00:00`, and the absorption curves were all anchored to a night nobody ate through. This is not
-something the app can compute its way out of — the clock time was never written. Two things follow
-from it:
+every `NutritionRecord.startTime` on one fixed time of day — 10:00:00 local, to the second, including
+three separate meals on one Tuesday — so every absorption curve was anchored to an hour nobody ate
+in. This is not something the app can compute its way out of; the clock time was never written. Two
+things follow from it:
 
-- `MasterGraphUiState.hasClockTime` treats a meal landing on an exact midnight, in the device's zone
-  or in UTC, as dated rather than placed. The list says "set time" instead of printing a
-  plausible-looking `1:00 AM`, and the card says how many curves are anchored to midnight.
-- Meals are **editable**, uniquely among the Health Connect caches. `TrackerRepository.setMealTime`
-  moves one to when it was actually eaten, which re-anchors its curve. The correction survives
-  re-syncing for free: meals are only ever inserted, never updated, so the unique `externalId` index
-  makes the midnight-stamped original a no-op the next time round.
+- `MasterGraphUiState.hasClockTime` calls a time of day **shared to the second by two different
+  meals** a stamp rather than a measurement. Genuine timestamps land on a different second every
+  time; a source that knows only the date lands on the same one for ever. Midnight counts
+  unconditionally, since a lone meal at exactly `00:00:00` is a date too. The list says "set time"
+  instead of printing a plausible-looking clock time. **Do not narrow this back to a midnight
+  check** — that was the first attempt, and the phone's 10:00 stamp sails straight past it. The
+  repeat is the signal; the particular hour is not. It is judged over the meals loaded, so it is
+  quieter on a 3h window than a 7d one, which is the right way round.
+- Meals are **editable and deletable**, uniquely among the Health Connect caches — and a meal can be
+  logged by hand outright. A source that stamps the wrong time, writes a meal twice, or records one
+  that was never eaten cannot be argued with, so the curves are only worth reading if the meals
+  under them can be corrected. Edits survive re-syncing for free: meals are only ever inserted,
+  never updated, so the unique `externalId` index makes the original a no-op the next time round.
+
+**Deleting a synced meal hides the row rather than removing it** (`MealEntry.hidden`). Removing it
+outright does not work: the next sync reads the same record from Health Connect and puts it back,
+because both the `externalId` lookup and the content check search for rows that would no longer be
+there. The kept row *is* the evidence that this record has already been dealt with. A hand-entered
+meal has no upstream record to return from, so that one is deleted for real. `MealDeletionTest` pins
+both, including the re-sync — nothing in the type system stops a later change from "tidying up" the
+flag into a real delete, which would pass every other test and quietly resurrect the meal.
+
+Reads split accordingly: `getMealsBetween` (screens and curves) excludes hidden rows;
+`getMealsInRange` (the sync's content check) includes them, so a deleted meal also keeps out the
+upstream duplicate of itself arriving later under a different record id.
 
 **The same source may also write one meal as several records.** One day carried six records that were
 two meals repeated three times, each with a Health Connect id of its own — so the unique index saw
@@ -199,11 +217,13 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 6, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 7, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
-tables; `MIGRATION_5_6` does both at once. All three are covered by `MigrationSchemaTest`.
+tables; `MIGRATION_5_6` does both at once; `MIGRATION_6_7` adds a non-null one. All are covered by
+`MigrationSchemaTest` — note that a table built by one migration and altered by a later one has to be
+checked across **both**, which is why the MealEntry test replays 3-to-4 and then 6-to-7.
 `fallbackToDestructiveMigration` is still registered, but only covers the v1 schema, which kept
 steps, sleep, macros and rep counts on `DailyLog` and has no sensible column-wise mapping to today's
 tables.
@@ -305,6 +325,15 @@ The same rule sorts out the other three chart primitives:
   reveal it: an aggregator reports nothing for an interval it has no records in, so a night of no
   walking arrives as a hole rather than as zeroes. Downsampling sums them; averaging would halve a
   fortnight of steps.
+- **Gaps** (`ChartSeries.breakOnGaps`, `SeriesGaps`) break a *measured* line where it stopped being
+  measured. Joining across a hole draws a straight run through hours that were never recorded, in the
+  same ink as the readings either side — a watch taken off overnight produced an eight-hour diagonal
+  that looked exactly like data. **The threshold is derived from each series' own cadence** (four
+  times its median spacing), because a fixed one is wrong for somebody: twenty minutes of silence is
+  a dropout for a monitor writing every five minutes and completely normal for three fingersticks a
+  day, and both arrive as "blood sugar". Splitting happens *before* downsampling, or thinning would
+  widen every spacing equally and leave a real dropout looking ordinary. Modelled curves must leave
+  this off: they are continuous functions sampled evenly, so there is nothing to find.
 - **Target bands** (`AxisSpec.band`) shade a range behind the data. A filled area answers "was it in
   range" at a glance where two threshold rules leave the reader working out which side of each the
   trace is on.
@@ -328,14 +357,17 @@ range there would print a ceiling the plot stopped using the moment anything exc
 ## Testing
 
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
-`GlucoseSmoothingTest` and `MealDuplicatesTest` are the pure-JVM suites. Adherence covers the midnight-wrapping window,
+`GlucoseSmoothingTest`, `MealDuplicatesTest` and `SeriesGapsTest` are the pure-JVM suites. Adherence covers the midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
 decay, dose accumulation and curve shape. Absorption covers the gastric lag, per-macro peak ordering,
 the normalisation that makes the area under a curve equal the grams eaten, and the documented
 completion times. Smoothing pins what the filter may do to a reading: timestamps preserved, no
 overshoot beyond the readings' own range, no lag on a rise, and isolated readings returned untouched.
-Duplicates pins the line between one meal written twice and two similar meals, in both directions.
+Duplicates pins the line between one meal written twice and two similar meals, in both directions,
+and `MealTimeStampTest` pins the one between a measured meal time and a stamped one — including that
+three copies of a single meal must *not* make its own timestamp look invented, which only holds
+because the collapse runs first.
 New adherence, interval, stats, decay, absorption, smoothing or duplicate behaviour belongs there.
 `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
 
@@ -348,6 +380,10 @@ overriding only `readMeals` — which keeps the oddity in the test rather than i
 A note on writing smoothing tests: assert peak *timing* against a trace that is symmetric about its
 peak. On an asymmetric one the two samples either side of a near-plateau come out within a tenth of
 each other, and which of them wins is the input's shape rather than the filter's.
+
+`MealDeletionTest` is a Robolectric test with no UI in it, exercising the repository against an
+in-memory database and a stubborn data source that keeps re-offering the meal that was deleted. Any
+behaviour that only shows up *across* a sync belongs there rather than in a render test.
 
 `MigrationSchemaTest` diffs the hand-written migration SQL against the schema Room generates from the
 entities. This matters more than it looks: `exportSchema = false` rules out Room's own

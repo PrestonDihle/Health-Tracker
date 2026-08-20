@@ -259,6 +259,19 @@ data class MealEntry(
     val source: DataSourceEnum,
     /** Health Connect's record id, for de-duplicating across syncs. */
     val externalId: String? = null,
+    /**
+     * Deleted by hand, and kept only so it stays deleted.
+     *
+     * A synced meal cannot simply be removed: the next sync reads the same
+     * record from Health Connect and puts it straight back, because both the
+     * `externalId` index and the content check look for rows that are no longer
+     * there. Keeping the row and hiding it is what makes the deletion stick --
+     * the row is precisely the evidence that this record was already dealt with.
+     *
+     * Only synced meals need it. A hand-entered meal has no upstream record to
+     * come back from, so it is deleted outright.
+     */
+    val hidden: Boolean = false,
 )
 
 /**

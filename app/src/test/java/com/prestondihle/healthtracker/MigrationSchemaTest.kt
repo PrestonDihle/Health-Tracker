@@ -88,12 +88,43 @@ class MigrationSchemaTest {
         }
     }
 
+    /**
+     * MealEntry is built by v3-to-v4 and then altered by v6-to-v7, so it has to
+     * be checked across both.
+     *
+     * By columns rather than by DDL text, for the reason [columnsOf] explains: a
+     * column added by `ALTER TABLE` carries a SQLite default the migration spells
+     * out and Room's own `CREATE TABLE` does not, so the two texts differ by
+     * design. Indices are unaffected by an ALTER and are still diffed literally.
+     */
     @Test
-    fun `migration builds MealEntry exactly as Room expects`() {
-        assertEquals(
-            roomSchema("MealEntry"),
-            migrationSchema("MealEntry", AppDatabase.migration3To4Statements),
-        )
+    fun `the migrations build MealEntry exactly as Room expects`() {
+        val expectedColumns = roomColumns("MealEntry")
+        val expectedIndices = roomSchema("MealEntry").filter { it.startsWith("CREATE INDEX") ||
+            it.startsWith("CREATE UNIQUE INDEX") }
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `MealEntry`")
+            AppDatabase.migration3To4Statements
+                .filter { it.contains("MealEntry") }
+                .forEach { raw.execSQL(it) }
+            AppDatabase.migration6To7Statements.forEach { raw.execSQL(it) }
+
+            assertEquals(expectedColumns, columnsOf(raw, "MealEntry"))
+            assertEquals(
+                expectedIndices,
+                schemaOf(raw, "MealEntry").filter {
+                    it.startsWith("CREATE INDEX") || it.startsWith("CREATE UNIQUE INDEX")
+                },
+            )
+        } finally {
+            db.close()
+        }
     }
 
     @Test
@@ -334,6 +365,60 @@ class MigrationSchemaTest {
                 .build()
         return try {
             columnsOf(db.openHelper.writableDatabase, table)
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * MealEntry as Room built it at v6, before deletion became possible.
+     *
+     * Spelled out rather than derived, for the same reason [ketoneV4] is.
+     */
+    private val mealV6 =
+        listOf(
+            "CREATE TABLE IF NOT EXISTS `MealEntry` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`timestamp` INTEGER NOT NULL, " +
+                "`calories` INTEGER, " +
+                "`proteinGrams` REAL, " +
+                "`carbGrams` REAL, " +
+                "`fatGrams` REAL, " +
+                "`name` TEXT, " +
+                "`source` TEXT NOT NULL, " +
+                "`externalId` TEXT)",
+            "CREATE INDEX IF NOT EXISTS `index_MealEntry_timestamp` ON `MealEntry` (`timestamp`)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_MealEntry_externalId` " +
+                "ON `MealEntry` (`externalId`)",
+        )
+
+    @Test
+    fun `the hidden column lands on the shape Room expects and leaves meals visible`() {
+        val expected = roomColumns("MealEntry")
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `MealEntry`")
+            mealV6.forEach { raw.execSQL(it) }
+            raw.execSQL(
+                "INSERT INTO `MealEntry` (`timestamp`, `calories`, `source`, `externalId`) " +
+                    "VALUES (1000, 602, 'HEALTH_CONNECT', 'hc-1')"
+            )
+
+            AppDatabase.migration6To7Statements.forEach { raw.execSQL(it) }
+
+            assertEquals(expected, columnsOf(raw, "MealEntry"))
+            // Nothing has been deleted yet, so every meal already logged has to
+            // come through the migration still visible.
+            raw.query("SELECT `calories`, `hidden` FROM `MealEntry`").use {
+                it.moveToNext()
+                assertEquals(602, it.getInt(0))
+                assertEquals(0, it.getInt(1))
+            }
         } finally {
             db.close()
         }

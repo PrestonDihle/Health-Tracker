@@ -93,19 +93,25 @@ class MasterGraphRenderTest {
      * meal twice.
      *
      * Both halves are copied from what a real phone produced: every
-     * `NutritionRecord` stamped midnight, and the same two meals arriving as four
-     * records with four distinct Health Connect ids. Delegating the rest of the
-     * interface keeps the oddity in the test rather than in the shared mock.
+     * `NutritionRecord` landing on one fixed time of day, and the same two meals
+     * arriving as four records with four distinct Health Connect ids. Delegating
+     * the rest of the interface keeps the oddity in the test rather than in the
+     * shared mock.
+     *
+     * Deliberately *not* midnight. Midnight has its own rule, so stamping there
+     * would let a broken shared-time-of-day check still pass — the real phone's
+     * meals all sat at 10:00, which is exactly the shape that has to be caught on
+     * the repeat alone.
      */
     private class DateOnlyDuplicatedMeals(private val delegate: MockHealthDataSource) :
         HealthDataSource by delegate {
         override suspend fun readMeals(from: Instant, to: Instant): List<MealSample> {
-            val midnight = to.truncatedTo(ChronoUnit.DAYS)
-            if (midnight.isBefore(from)) return emptyList()
+            val stamped = stampedTime(to)
+            if (stamped.isBefore(from)) return emptyList()
             return (0..1).flatMap { copy ->
                 listOf(
                     MealSample(
-                        time = midnight,
+                        time = stamped,
                         calories = 602,
                         proteinGrams = 30f,
                         carbGrams = 16.5f,
@@ -113,7 +119,7 @@ class MasterGraphRenderTest {
                         externalId = "duplicated-a-$copy",
                     ),
                     MealSample(
-                        time = midnight,
+                        time = stamped,
                         calories = 573,
                         proteinGrams = 25f,
                         carbGrams = 9.3f,
@@ -266,13 +272,13 @@ class MasterGraphRenderTest {
         // the same four. The sync rejects its copies as already stored, and the
         // four that were there before the fix are collapsed on the way to the
         // screen rather than deleted.
-        val midnight = Instant.now().truncatedTo(ChronoUnit.DAYS)
+        val stamped = stampedTime(Instant.now())
         renderScreen(repository(DateOnlyDuplicatedMeals(MockHealthDataSource()))) {
             dao.insertMeals(
                 (0..1).flatMap { copy ->
                     listOf(
                         MealEntry(
-                            timestamp = midnight,
+                            timestamp = stamped,
                             calories = 602,
                             proteinGrams = 30f,
                             carbGrams = 16.5f,
@@ -281,7 +287,7 @@ class MasterGraphRenderTest {
                             externalId = "duplicated-a-$copy",
                         ),
                         MealEntry(
-                            timestamp = midnight,
+                            timestamp = stamped,
                             calories = 573,
                             proteinGrams = 25f,
                             carbGrams = 9.3f,
@@ -320,7 +326,7 @@ class MasterGraphRenderTest {
 
         composeRule.onNodeWithText("Meals in this window").assertIsDisplayed()
         composeRule
-            .onNodeWithText("arrived with a date but no time", substring = true)
+            .onNodeWithText("carry a stamped time", substring = true)
             .assertIsDisplayed()
         // Four records in, two meals out, and the screen owns up to the merge
         // rather than quietly halving the day's carbohydrate.
@@ -356,3 +362,14 @@ class MasterGraphRenderTest {
         composeRule.onNodeWithText("No readings in this window").assertIsDisplayed()
     }
 }
+
+/**
+ * The instant a date-only source is pretending a meal happened at.
+ *
+ * A round hour a couple back: always in the past, inside even the narrowest
+ * window on offer, and -- landing on the hour with no seconds -- the shape a
+ * stamped time actually has. Top-level because the fake data source is a nested
+ * class and cannot reach the test's own members.
+ */
+private fun stampedTime(reference: Instant): Instant =
+    reference.truncatedTo(ChronoUnit.HOURS).minus(Duration.ofHours(2))

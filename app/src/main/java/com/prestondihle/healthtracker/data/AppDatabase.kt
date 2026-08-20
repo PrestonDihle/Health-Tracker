@@ -33,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -200,6 +200,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Adds the flag that lets a synced meal stay deleted.
+         *
+         * `NOT NULL` because the field is a non-null Boolean, so the rows that
+         * already exist have to be told what they hold: nothing has been deleted
+         * yet, which is 0.
+         */
+        internal val migration6To7Statements =
+            listOf("ALTER TABLE `MealEntry` ADD COLUMN `hidden` INTEGER NOT NULL DEFAULT 0")
+
+        private val MIGRATION_6_7 =
+            object : Migration(6, 7) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration6To7Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -219,6 +236,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_3_4,
                                 MIGRATION_4_5,
                                 MIGRATION_5_6,
+                                MIGRATION_6_7,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

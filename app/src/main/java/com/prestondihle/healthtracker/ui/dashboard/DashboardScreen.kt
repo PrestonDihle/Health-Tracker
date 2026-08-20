@@ -845,6 +845,9 @@ private fun MetabolicCard(
                         // A CGM writes every few minutes; dots would merge into a
                         // band. A short window holds few enough to mark, though.
                         showPoints = state.glucose.size <= 24,
+                        // A sensor dropout is not a straight line between the
+                        // readings either side of it.
+                        breakOnGaps = true,
                     ),
                     ChartSeries(
                         label = "Ketones",
@@ -1030,8 +1033,13 @@ private fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) ->
 
         HorizontalDivider()
 
+        // "Other hand" rather than "Non-dominant": a stepper's label shares its
+        // row with two arrows, a value and a log button, which on a phone at a
+        // large font scale leaves it too narrow for a twelve-character word --
+        // it wrapped mid-word into "Non-domina / nt". The full term is still on
+        // the summary line below and in the Trends legend, where there is room.
         Stepper(
-            label = "Non-dominant",
+            label = "Other hand",
             value = nonDominant,
             onValueChange = { nonDominant = it },
             step = 1f,

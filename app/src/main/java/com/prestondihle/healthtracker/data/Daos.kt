@@ -224,17 +224,28 @@ interface TrackerDao {
 
     // ----- Meals and heart rate time series ----------------------------------
 
-    @Query("SELECT * FROM MealEntry WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp ASC")
+    /**
+     * Meals to show. Hidden rows are deletions, kept only so a sync cannot undo
+     * them, and must never reach a screen or a curve.
+     */
+    @Query(
+        "SELECT * FROM MealEntry WHERE timestamp >= :start AND timestamp < :end " +
+            "AND hidden = 0 ORDER BY timestamp ASC"
+    )
     fun getMealsBetween(start: Long, end: Long): Flow<List<MealEntry>>
 
     /**
-     * Meals in a window as a one-shot read.
+     * Meals in a window as a one-shot read, **including hidden ones**.
      *
      * The Flow above is for screens; a sync needs the current contents once, to
-     * compare what it is about to write against what is already there.
+     * compare what it is about to write against what is already there. Hidden
+     * rows count for that: a meal deleted by hand must also keep out the
+     * upstream duplicate of itself arriving later under a different record id.
      */
     @Query("SELECT * FROM MealEntry WHERE timestamp >= :start AND timestamp < :end")
     suspend fun getMealsInRange(start: Long, end: Long): List<MealEntry>
+
+    @Insert suspend fun insertMeal(meal: MealEntry)
 
     /** Ignores rows whose externalId is already present, so a repeated sync cannot duplicate meals. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
