@@ -7,11 +7,15 @@ import com.prestondihle.healthtracker.data.BloodSugarReading
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MealEntry
+import com.prestondihle.healthtracker.data.StepBucket
+import com.prestondihle.healthtracker.data.UserGoals
+import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.domain.MacroServing
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,19 +27,30 @@ import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
-/** How much of the recent past the master graph covers. */
+/**
+ * How much of the recent past the master graph covers.
+ *
+ * The short end is for reading one meal: three hours is roughly a carbohydrate
+ * curve start to finish, so the rise and the fall of a single glucose response
+ * fill the plot. The long end is for reading a pattern rather than an event --
+ * across a week the individual meals are illegible, but a habit is not.
+ */
 enum class MasterRange(val label: String, val hours: Long) {
+    THREE("3h", 3),
+    SIX("6h", 6),
     TWELVE("12h", 12),
     DAY("24h", 24),
     TWO_DAYS("48h", 48),
+    WEEK("7d", 24 * 7),
 }
 
 /**
- * One switchable line on the master graph.
+ * One switchable series on the master graph.
  *
- * Six series on one plot is a lot to read at once, and most questions only
- * involve two or three of them -- carbs against glucose, or fat against heart
+ * Seven series on one plot is a lot to read at once, and most questions only
+ * involve two or three of them -- carbs against glucose, or steps against heart
  * rate. Turning the rest off is what makes those comparisons legible.
  */
 enum class MasterSeries(val label: String) {
@@ -45,7 +60,22 @@ enum class MasterSeries(val label: String) {
     FAT("Fat"),
     HEART_RATE("Heart rate"),
     KETONES("Ketones"),
+    STEPS("Steps"),
 }
+
+/**
+ * Roughly how many points an absorption curve is sampled at across the window.
+ *
+ * The step is derived from this rather than fixed, and then clamped: a fixed ten
+ * minutes leaves a three-hour plot drawing a 45-minute carbohydrate peak from
+ * four samples, while the same ten minutes across a week is four times more
+ * points than the plot can render. One minute is the floor because nothing here
+ * moves faster; ten is the ceiling because the curves are smooth and a coarser
+ * sample starts to miss peaks rather than merely round them.
+ */
+private const val CURVE_SAMPLES = 180L
+private const val CURVE_STEP_MIN_SECONDS = 60L
+private const val CURVE_STEP_MAX_SECONDS = 600L
 
 data class MasterGraphUiState(
     val range: MasterRange = MasterRange.DAY,
@@ -54,6 +84,10 @@ data class MasterGraphUiState(
     val glucose: List<BloodSugarReading> = emptyList(),
     val ketones: List<KetoneReading> = emptyList(),
     val heartRate: List<HeartRateBucket> = emptyList(),
+    val steps: List<StepBucket> = emptyList(),
+    val goals: UserGoals = UserGoals(),
+    /** Drawn smoothed only when the user has asked for it in settings. */
+    val smoothGlucose: Boolean = false,
     val healthState: HealthPermissionState = HealthPermissionState.NOT_GRANTED,
     val isSyncing: Boolean = false,
     val zoneId: ZoneId = ZoneId.systemDefault(),
@@ -64,6 +98,24 @@ data class MasterGraphUiState(
 
     val windowStart: Instant
         get() = now.minus(Duration.ofHours(range.hours))
+
+    /**
+     * The blood sugar trace as it should be drawn: raw, or run through the
+     * smoother when the setting is on.
+     */
+    val glucoseCurve: List<Pair<Instant, Float>>
+        get() {
+            val raw = glucose.map { it.timestamp to it.mgDl.toFloat() }
+            return if (smoothGlucose) GlucoseSmoothing.smooth(raw) else raw
+        }
+
+    /** The shaded target, or null while either edge is unset or inverted. */
+    val glucoseTarget: ClosedFloatingPointRange<Float>?
+        get() {
+            val low = goals.glucoseTargetLowMgDl ?: return null
+            val high = goals.glucoseTargetHighMgDl ?: return null
+            return if (high > low) low.toFloat()..high.toFloat() else null
+        }
 
     /**
      * Meals inside the window, newest first.
@@ -88,7 +140,15 @@ data class MasterGraphUiState(
 
     /** Grams per hour of one macro reaching the blood, sampled across the window. */
     fun absorptionCurve(macro: Macro): List<Pair<Instant, Float>> =
-        MacroAbsorption.curve(servings, macro, windowStart, now)
+        MacroAbsorption.curve(servings, macro, windowStart, now, curveStep)
+
+    /** Sampling interval for the curves, scaled to the window. See [CURVE_SAMPLES]. */
+    private val curveStep: Duration
+        get() =
+            Duration.ofSeconds(
+                (range.hours * 3_600 / CURVE_SAMPLES)
+                    .coerceIn(CURVE_STEP_MIN_SECONDS, CURVE_STEP_MAX_SECONDS)
+            )
 
     /** What is entering the blood right now, for the read-out above the chart. */
     fun rateNow(macro: Macro): Float = MacroAbsorption.rateAt(servings, macro, now)
@@ -115,12 +175,28 @@ data class MasterGraphUiState(
     val latestHeartRate: HeartRateBucket?
         get() = heartRate.maxByOrNull { it.bucketStartMillis }
 
+    /**
+     * Steps in the last complete hour, for the read-out above the chart.
+     *
+     * The hour in progress is deliberately skipped: it is a fraction of an hour's
+     * walking quoted as an hourly figure, so it reads as a collapse in activity
+     * for fifty-nine minutes out of every sixty.
+     */
+    val stepsLastHour: StepBucket?
+        get() {
+            val currentHourStart =
+                now.atZone(zoneId).truncatedTo(ChronoUnit.HOURS).toInstant().toEpochMilli()
+            return steps.filter { it.hourStartMillis < currentHourStart }
+                .maxByOrNull { it.hourStartMillis }
+        }
+
     val hasAnything: Boolean
         get() =
             meals.isNotEmpty() ||
                 glucose.isNotEmpty() ||
                 ketones.isNotEmpty() ||
-                heartRate.isNotEmpty()
+                heartRate.isNotEmpty() ||
+                steps.isNotEmpty()
 }
 
 private data class SeriesBundle(
@@ -128,6 +204,15 @@ private data class SeriesBundle(
     val glucose: List<BloodSugarReading>,
     val ketones: List<KetoneReading>,
     val heartRate: List<HeartRateBucket>,
+    val steps: List<StepBucket>,
+)
+
+/** Everything that shapes how the series are drawn rather than what is in them. */
+private data class PreferenceBundle(
+    val isSyncing: Boolean,
+    val visibleSeries: Set<MasterSeries>,
+    val goals: UserGoals,
+    val smoothGlucose: Boolean,
 )
 
 /**
@@ -168,34 +253,50 @@ class MasterGraphViewModel(
                 repository.getBloodSugarSince(windowStart),
                 repository.getKetonesSince(windowStart),
                 repository.getHeartRateSince(windowStart),
-            ) { meals, glucose, ketones, heartRate ->
-                SeriesBundle(meals, glucose, ketones, heartRate)
+                repository.getStepBucketsSince(windowStart),
+            ) { meals, glucose, ketones, heartRate, steps ->
+                SeriesBundle(meals, glucose, ketones, heartRate, steps)
             }
         }
 
+    /** Bundled because combine's typed overloads stop at five sources. */
+    private val preferences: Flow<PreferenceBundle> =
+        combine(syncing, visibleSeries, repository.getUserGoals(), repository.getUserSettings()) {
+            isSyncing,
+            visible,
+            goals,
+            settings ->
+            PreferenceBundle(
+                isSyncing = isSyncing,
+                visibleSeries = visible,
+                goals = goals ?: UserGoals(),
+                smoothGlucose = settings?.smoothGlucose ?: false,
+            )
+        }
+
     val uiState: StateFlow<MasterGraphUiState> =
-        combine(
-                seriesFlow,
-                range,
-                minuteTicker,
-                healthState,
-                // Paired up because combine's typed overloads stop at five sources.
-                combine(syncing, visibleSeries) { isSyncing, visible -> isSyncing to visible },
-            ) { series, selected, now, permission, syncAndVisible ->
-                val (isSyncing, visible) = syncAndVisible
-                MasterGraphUiState(
-                    range = selected,
-                    now = now,
-                    meals = series.meals,
-                    glucose = series.glucose,
-                    ketones = series.ketones,
-                    heartRate = series.heartRate,
-                    healthState = permission,
-                    isSyncing = isSyncing,
-                    zoneId = zoneId,
-                    visibleSeries = visible,
-                )
-            }
+        combine(seriesFlow, range, minuteTicker, healthState, preferences) {
+            series,
+            selected,
+            now,
+            permission,
+            prefs ->
+            MasterGraphUiState(
+                range = selected,
+                now = now,
+                meals = series.meals,
+                glucose = series.glucose,
+                ketones = series.ketones,
+                heartRate = series.heartRate,
+                steps = series.steps,
+                goals = prefs.goals,
+                smoothGlucose = prefs.smoothGlucose,
+                healthState = permission,
+                isSyncing = prefs.isSyncing,
+                zoneId = zoneId,
+                visibleSeries = prefs.visibleSeries,
+            )
+        }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

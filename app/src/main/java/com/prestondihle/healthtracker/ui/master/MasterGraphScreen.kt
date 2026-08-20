@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.MealEntry
+import com.prestondihle.healthtracker.data.StepBucket
+import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.MacroAbsorption
@@ -44,6 +46,7 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.CarbAbsorptionSeries
 import com.prestondihle.healthtracker.ui.theme.FatAbsorptionSeries
@@ -51,6 +54,7 @@ import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
 import com.prestondihle.healthtracker.ui.theme.HeartRateSeries
 import com.prestondihle.healthtracker.ui.theme.KetoneSeries
 import com.prestondihle.healthtracker.ui.theme.ProteinAbsorptionSeries
+import com.prestondihle.healthtracker.ui.theme.StepsSeries
 import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -61,9 +65,10 @@ private val ChartHeight = 300.dp
 
 /**
  * Everything on one timeline: the macros of each meal spread into the hours they
- * are actually being absorbed over, drawn against the blood sugar, ketones and
- * heart rate they are meant to explain.
+ * are actually being absorbed over, drawn against the blood sugar, ketones,
+ * heart rate and walking they are meant to explain.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -74,7 +79,10 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
         contentPadding = PaddingValues(vertical = CardGap),
     ) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Six windows do not fit on one row of a phone, and a row that
+            // scrolls sideways hides the widest options behind a gesture nobody
+            // knows is there. Wrapping shows all six at once.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MasterRange.entries.forEach { option ->
                     FilterChip(
                         selected = state.range == option,
@@ -191,6 +199,14 @@ private fun NowCard(state: MasterGraphUiState, onRefresh: () -> Unit) {
                 supporting = state.latestHeartRate?.timestamp?.asAgo(state.now),
                 modifier = Modifier.weight(1f),
             )
+            Metric(
+                label = "Steps",
+                value = state.stepsLastHour?.let { "${it.steps}" } ?: "--",
+                // "last hour" rather than an age, because this is a count over an
+                // interval and not a reading taken at a moment.
+                supporting = state.stepsLastHour?.let { "last hour" },
+                modifier = Modifier.weight(1f),
+            )
         }
 
         // How far along the most recent meal is. Carbs are quoted because they
@@ -219,8 +235,8 @@ private fun CombinedChartCard(
         mapOf(
             MasterSeries.GLUCOSE to
                 ChartSeries(
-                    label = "Glucose",
-                    points = state.glucose.map { TimePoint(it.timestamp, it.mgDl.toFloat()) },
+                    label = if (state.smoothGlucose) "Glucose (smoothed)" else "Glucose",
+                    points = state.glucoseCurve.map { TimePoint(it.first, it.second) },
                     color = GlucoseSeries,
                     axis = ChartAxis.LEFT,
                     // A CGM writes every few minutes; dots would merge into a band.
@@ -279,9 +295,22 @@ private fun CombinedChartCard(
                             format = Ketones::format,
                         ),
                 ),
+            // Bars, not a line: a step count belongs to the hour it was
+            // accumulated over, and joining the hours would claim a walking rate
+            // at instants when nothing was counted.
+            MasterSeries.STEPS to
+                ChartSeries(
+                    label = "Steps",
+                    points = state.steps.map { TimePoint(it.timestamp, it.steps.toFloat()) },
+                    color = StepsSeries,
+                    kind = SeriesKind.BAR,
+                    barWidth = Duration.ofMinutes(StepBucket.BUCKET_MINUTES),
+                    showPoints = false,
+                    scale = AxisSpec(min = 0f, max = 1_200f, label = "steps/h"),
+                ),
         )
 
-    MasterCard(title = "Food, blood and heart") {
+    MasterCard(title = "Food, blood and body") {
         DualAxisTimeChart(
             windowStart = state.windowStart,
             windowEnd = state.now,
@@ -289,13 +318,25 @@ private fun CombinedChartCard(
             // Filtered rather than drawn-then-hidden, so a switched-off series
             // also stops stretching the axis it shares.
             series = allSeries.filterKeys(state::isVisible).values.toList(),
-            leftAxis = AxisSpec(min = 60f, max = 200f, label = "mg/dL"),
+            leftAxis =
+                AxisSpec(
+                    min = Glucose.PLOT_MIN,
+                    max = Glucose.PLOT_MAX,
+                    label = Glucose.UNIT,
+                    band = state.glucoseTarget,
+                ),
             rightAxis = AxisSpec(min = 0f, max = 40f, label = "g/h"),
             // A rule at each meal, so a rise in any of the other lines can be
-            // read against the moment the food went in.
+            // read against the moment the food went in. Subdued, because at full
+            // weight these were read as a carbohydrate spike -- and went on being
+            // read as one after the carbohydrate line was switched off.
             markers =
                 state.mealsInWindow.map { meal ->
-                    ChartMarker(time = meal.timestamp, label = meal.markerLabel())
+                    ChartMarker(
+                        time = meal.timestamp,
+                        label = meal.markerLabel(),
+                        subdued = true,
+                    )
                 },
             modifier = Modifier.fillMaxWidth().height(ChartHeight),
         )
@@ -357,6 +398,7 @@ private val MasterSeries.color: Color
             MasterSeries.FAT -> FatAbsorptionSeries
             MasterSeries.HEART_RATE -> HeartRateSeries
             MasterSeries.KETONES -> KetoneSeries
+            MasterSeries.STEPS -> StepsSeries
         }
 
 /** Where the absorption curves come from, since they are the one modelled thing here. */

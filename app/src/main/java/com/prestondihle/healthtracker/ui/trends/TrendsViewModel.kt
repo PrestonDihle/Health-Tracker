@@ -6,12 +6,14 @@ import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.ExerciseSet
+import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.StackedBar
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -26,8 +28,18 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
+/**
+ * How far back the trends charts reach.
+ *
+ * A week is what a change made on Monday has actually had time to show up in; a
+ * quarter is where a body measurement's real slope separates from the noise of
+ * daily weighing. The two in between exist because most questions asked here are
+ * neither.
+ */
 enum class TrendsRange(val label: String, val days: Long) {
+    WEEK("7 days", 7),
     TWO_WEEKS("14 days", 14),
+    MONTH("30 days", 30),
     THREE_MONTHS("90 days", 90),
 }
 
@@ -39,6 +51,7 @@ data class TrendsUiState(
     val snapshots: List<HealthDaySnapshot> = emptyList(),
     val weights: List<WeightEntry> = emptyList(),
     val waists: List<WaistEntry> = emptyList(),
+    val grips: List<GripStrengthEntry> = emptyList(),
     val hydration: List<HydrationEntry> = emptyList(),
     val exerciseSets: List<ExerciseSet> = emptyList(),
     val bloodPressure: List<BloodPressureReading> = emptyList(),
@@ -83,6 +96,18 @@ data class TrendsUiState(
     /** [convert] receives kilograms. */
     fun weightSeries(convert: (Float) -> Float): List<DayPoint> =
         series(weightByDay, { it.first }) { convert(it.second) }
+
+    /**
+     * One hand's grip per day in pounds, null on days it was not measured.
+     *
+     * Null rather than zero: grip is measured every few days at most, and a zero
+     * would draw as a total loss of strength on every day in between.
+     */
+    fun gripSeries(dominant: Boolean): List<DayPoint> =
+        series(grips, { it.date }) {
+            val kg = if (dominant) it.dominantKg else it.nonDominantKg
+            kg?.let(Units::kgToLbs)
+        }
 
     /**
      * Daily rep totals for one movement, zero on a day with no logged sets.
@@ -155,10 +180,12 @@ class TrendsViewModel(
                 combine(
                     repository.getDailyLogs(start, end),
                     repository.getHealthSnapshots(start, end),
-                    combine(repository.getWeights(start, end), repository.getWaists(start, end)) {
-                        weights,
-                        waists ->
-                        weights to waists
+                    combine(
+                        repository.getWeights(start, end),
+                        repository.getWaists(start, end),
+                        repository.getGripStrengths(start, end),
+                    ) { weights, waists, grips ->
+                        Triple(weights, waists, grips)
                     },
                     combine(
                         repository.getHydrationBetween(start, end),
@@ -177,6 +204,7 @@ class TrendsViewModel(
                         snapshots = snapshots,
                         weights = body.first,
                         waists = body.second,
+                        grips = body.third,
                         hydration = activity.first,
                         exerciseSets = activity.second,
                         bloodPressure = activity.third,

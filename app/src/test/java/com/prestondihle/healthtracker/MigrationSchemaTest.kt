@@ -175,6 +175,171 @@ class MigrationSchemaTest {
     }
 
     @Test
+    fun `migration builds StepBucket exactly as Room expects`() {
+        assertEquals(
+            roomSchema("StepBucket"),
+            migrationSchema("StepBucket", AppDatabase.migration5To6Statements.forTable("StepBucket")),
+        )
+    }
+
+    @Test
+    fun `migration builds GripStrengthEntry exactly as Room expects`() {
+        assertEquals(
+            roomSchema("GripStrengthEntry"),
+            migrationSchema(
+                "GripStrengthEntry",
+                AppDatabase.migration5To6Statements.forTable("GripStrengthEntry"),
+            ),
+        )
+    }
+
+    /**
+     * Only the statements that touch one table.
+     *
+     * The v5-to-v6 migration both creates tables and alters two that already
+     * exist, and replaying an `ALTER TABLE ADD COLUMN` against a database Room
+     * has already built fails on the duplicate column.
+     */
+    private fun List<String>.forTable(table: String): List<String> = filter { it.contains(table) }
+
+    /**
+     * Name, type, nullability and primary-key position for every column.
+     *
+     * What the two table-creating tests diff is the stored DDL text, which cannot
+     * be used for a column added by `ALTER TABLE`: the migration spells out a
+     * SQLite default and Room's own `CREATE TABLE` does not, so the text differs
+     * by design. This compares the four properties Room actually validates
+     * instead. A default is deliberately not among them -- Room only enforces one
+     * when the entity declares it, and neither of these does.
+     */
+    private fun columnsOf(db: SupportSQLiteDatabase, table: String): List<String> {
+        val columns = mutableListOf<String>()
+        db.query("PRAGMA table_info(`$table`)").use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(1)
+                val declaredType = cursor.getString(2)
+                val notNull = cursor.getInt(3)
+                val primaryKeyPosition = cursor.getInt(5)
+                columns.add("$name|$declaredType|$notNull|$primaryKeyPosition")
+            }
+        }
+        return columns.sorted()
+    }
+
+    /**
+     * The two settings tables as Room built them at v5.
+     *
+     * Written out rather than derived from today's entities, for the same reason
+     * [ketoneV4] is: a schema generated from the current code would make the
+     * migration pass against itself.
+     */
+    private val settingsV5 =
+        listOf(
+            "CREATE TABLE IF NOT EXISTS `UserGoals` (" +
+                "`id` INTEGER NOT NULL, " +
+                "`goalWeightKg` REAL, " +
+                "`goalWaistCm` REAL, " +
+                "`dailyPushupGoal` INTEGER, " +
+                "`weeklyPushupGoal` INTEGER, " +
+                "`dailySquatGoal` INTEGER, " +
+                "`weeklySquatGoal` INTEGER, " +
+                "`weeklyRunMinutesGoal` INTEGER, " +
+                "`dailyStepGoal` INTEGER, " +
+                "`dailyWaterMlGoal` INTEGER, " +
+                "`dailyCalorieTarget` INTEGER, " +
+                "`dailyProteinTarget` INTEGER, " +
+                "`dailyPagesGoal` INTEGER, " +
+                "PRIMARY KEY(`id`))",
+            "CREATE TABLE IF NOT EXISTS `UserSettings` (" +
+                "`id` INTEGER NOT NULL, " +
+                "`unitSystem` TEXT NOT NULL, " +
+                "`weekStartsOn` TEXT NOT NULL, " +
+                "`preferredStepsPackage` TEXT, " +
+                "PRIMARY KEY(`id`))",
+        )
+
+    @Test
+    fun `the added settings columns land on the shape Room expects`() {
+        val expectedGoals = roomColumns("UserGoals")
+        val expectedSettings = roomColumns("UserSettings")
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `UserGoals`")
+            raw.execSQL("DROP TABLE IF EXISTS `UserSettings`")
+            settingsV5.forEach { raw.execSQL(it) }
+
+            AppDatabase.migration5To6Statements
+                .filter { it.startsWith("ALTER TABLE") }
+                .forEach { raw.execSQL(it) }
+
+            assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
+            assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `the added settings columns carry defaults onto rows that already exist`() {
+        // An upgrading user has a UserGoals row already. Without the SQLite
+        // defaults the new columns arrive null on it, and the glucose target that
+        // is supposed to ship pre-set would be blank on their phone alone.
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `UserGoals`")
+            raw.execSQL("DROP TABLE IF EXISTS `UserSettings`")
+            settingsV5.forEach { raw.execSQL(it) }
+            raw.execSQL("INSERT INTO `UserGoals` (`id`, `dailyStepGoal`) VALUES (1, 12000)")
+            raw.execSQL(
+                "INSERT INTO `UserSettings` (`id`, `unitSystem`, `weekStartsOn`) " +
+                    "VALUES (1, 'IMPERIAL', 'MONDAY')"
+            )
+
+            AppDatabase.migration5To6Statements
+                .filter { it.startsWith("ALTER TABLE") }
+                .forEach { raw.execSQL(it) }
+
+            raw.query(
+                    "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl` " +
+                        "FROM `UserGoals`"
+                )
+                .use {
+                    it.moveToNext()
+                    assertEquals(12_000, it.getInt(0))
+                    assertEquals(70, it.getInt(1))
+                    assertEquals(140, it.getInt(2))
+                }
+            raw.query("SELECT `smoothGlucose` FROM `UserSettings`").use {
+                it.moveToNext()
+                assertEquals(0, it.getInt(0))
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    private fun roomColumns(table: String): List<String> {
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        return try {
+            columnsOf(db.openHelper.writableDatabase, table)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
     fun `the meal external id index is unique`() {
         // What makes a repeated Health Connect sync idempotent. A non-unique index
         // here would still open fine and silently duplicate every meal.

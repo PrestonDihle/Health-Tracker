@@ -88,6 +88,26 @@ data class WeightEntry(@PrimaryKey val date: LocalDate, val weightKg: Float)
 @Entity
 data class WaistEntry(@PrimaryKey val date: LocalDate, val waistCm: Float)
 
+/**
+ * One day's dynamometer readings, one column per hand.
+ *
+ * Stored in kilograms and presented in pounds, like weight. Health Connect has
+ * no grip strength record at all, so nothing external forces the unit -- but a
+ * second storage unit in the same database is how rounding error gets in, and
+ * the display boundary already knows how to convert.
+ *
+ * Dominant and non-dominant rather than left and right: the pair is read as a
+ * ratio (a dominant hand normally squeezes about a tenth harder), and that
+ * comparison survives a reader who does not remember which hand this person
+ * writes with. Both are nullable so one hand can be logged without the other.
+ */
+@Entity
+data class GripStrengthEntry(
+    @PrimaryKey val date: LocalDate,
+    val dominantKg: Float? = null,
+    val nonDominantKg: Float? = null,
+)
+
 @Entity(indices = [Index("timestamp")])
 data class HydrationEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -272,6 +292,30 @@ data class HeartRateBucket(
     }
 }
 
+/**
+ * Steps taken inside one wall-clock hour.
+ *
+ * The daily total on [HealthDaySnapshot] cannot say *when* the walking happened,
+ * and "when" is the only question the master graph asks. Same cache rules as
+ * [HeartRateBucket] and the same reason for keying on the bucket's start rather
+ * than an external id: the same hour always lands on the same row, so a re-sync
+ * that overlaps a window rewrites it instead of laying a second, offset copy of
+ * the same day beside it.
+ *
+ * An hour is the resolution a step count is actually meaningful at. Five-minute
+ * step buckets are mostly zeroes with occasional spikes, which draws as noise
+ * rather than as activity.
+ */
+@Entity
+data class StepBucket(@PrimaryKey val hourStartMillis: Long, val steps: Int) {
+    val timestamp: Instant
+        get() = Instant.ofEpochMilli(hourStartMillis)
+
+    companion object {
+        const val BUCKET_MINUTES = 60L
+    }
+}
+
 @Entity
 data class RestingHeartRate(
     @PrimaryKey val date: LocalDate,
@@ -295,6 +339,17 @@ data class UserGoals(
     val dailyCalorieTarget: Int? = null,
     val dailyProteinTarget: Int? = null,
     val dailyPagesGoal: Int? = null,
+    /**
+     * The blood sugar band shaded on the glucose charts, in mg/dL.
+     *
+     * Two columns rather than one range so either edge can be cleared on its
+     * own; the band is drawn only when both are set and the low is below the
+     * high. The seeded 70-140 is the non-diabetic fasting-to-postprandial span
+     * most continuous monitors quote, and is a starting point rather than
+     * clinical advice -- which is why it is editable at all.
+     */
+    val glucoseTargetLowMgDl: Int? = 70,
+    val glucoseTargetHighMgDl: Int? = 140,
 )
 
 @Entity
@@ -312,4 +367,13 @@ data class UserSettings(
      * match what the watch itself reports.
      */
     val preferredStepsPackage: String? = null,
+    /**
+     * Whether the blood sugar line is drawn smoothed.
+     *
+     * Off by default. Every other line on these charts is either a measurement
+     * or is dashed to say it is a model, and a solid line that quietly differs
+     * from the readings under it would break that rule without announcing it.
+     * Turning it on is a deliberate act, and the chart says so while it is on.
+     */
+    val smoothGlucose: Boolean = false,
 )

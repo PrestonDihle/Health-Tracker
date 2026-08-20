@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.UnitSystemEnum
+import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.Stepper
@@ -169,6 +170,55 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     step = 5,
                     range = 0..500,
                     valueFormatter = { "$it g" },
+                )
+            }
+        }
+
+        item {
+            SettingsCard(title = "Blood sugar target") {
+                Text(
+                    "Shaded as a grey band behind the glucose line on the Today and Master " +
+                        "screens. A starting range rather than a clinical one — set it to " +
+                        "whatever you are actually aiming at.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val low = state.goals.glucoseTargetLowMgDl ?: Glucose.DEFAULT_TARGET_LOW
+                val high = state.goals.glucoseTargetHighMgDl ?: Glucose.DEFAULT_TARGET_HIGH
+
+                IntStepper(
+                    label = "Low",
+                    value = low,
+                    // Kept below the high end as it moves, so the pair can never
+                    // be dialled into a range that inverts and draws nothing.
+                    onValueChange = {
+                        viewModel.saveGoals(
+                            state.goals.copy(
+                                glucoseTargetLowMgDl = it.coerceAtMost(high - 1),
+                                glucoseTargetHighMgDl = high,
+                            )
+                        )
+                    },
+                    step = 5,
+                    range = Glucose.ENTRY_RANGE,
+                    valueFormatter = { "$it ${Glucose.UNIT}" },
+                )
+                HorizontalDivider()
+                IntStepper(
+                    label = "High",
+                    value = high,
+                    onValueChange = {
+                        viewModel.saveGoals(
+                            state.goals.copy(
+                                glucoseTargetLowMgDl = low,
+                                glucoseTargetHighMgDl = it.coerceAtLeast(low + 1),
+                            )
+                        )
+                    },
+                    step = 5,
+                    range = Glucose.ENTRY_RANGE,
+                    valueFormatter = { "$it ${Glucose.UNIT}" },
                 )
             }
         }

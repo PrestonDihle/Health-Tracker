@@ -3,6 +3,8 @@
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,10 +44,13 @@ import com.prestondihle.healthtracker.ui.theme.DiastolicSeries
 import com.prestondihle.healthtracker.ui.theme.EnergySeries
 import com.prestondihle.healthtracker.ui.theme.FatSeries
 import com.prestondihle.healthtracker.ui.theme.FocusSeries
+import com.prestondihle.healthtracker.ui.theme.GripDominantSeries
+import com.prestondihle.healthtracker.ui.theme.GripNonDominantSeries
 import com.prestondihle.healthtracker.ui.theme.ProteinSeries
 import com.prestondihle.healthtracker.ui.theme.SystolicSeries
 import com.prestondihle.healthtracker.ui.theme.VibeSeries
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -56,7 +61,9 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Four spelled-out labels overrun a phone's width; wrapping keeps
+            // them all visible rather than clipping the longest.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TrendsRange.entries.forEach { option ->
                     FilterChip(
                         selected = state.range == option,
@@ -92,6 +99,32 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                 LineChart(
                     days = state.weightSeries(Units::kgToLbs),
                     goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                )
+            }
+        }
+
+        // Both hands on one chart, because the comparison between them is the
+        // point: a gap that widens over months says something neither line says
+        // on its own.
+        item {
+            TrendCard(title = "Grip strength", subtitle = "pounds") {
+                MultiLineChart(
+                    series =
+                        listOf(
+                            LineSeries(
+                                label = "Dominant",
+                                points = state.gripSeries(dominant = true),
+                                color = GripDominantSeries,
+                                style = LineStyle.SOLID,
+                            ),
+                            LineSeries(
+                                label = "Non-dominant",
+                                points = state.gripSeries(dominant = false),
+                                color = GripNonDominantSeries,
+                                style = LineStyle.DASHED,
+                            ),
+                        ),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
             }

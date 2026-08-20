@@ -10,6 +10,7 @@ import com.prestondihle.healthtracker.data.ExerciseSet
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
 import com.prestondihle.healthtracker.data.FastingType
+import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.HydrationEntry
@@ -18,6 +19,7 @@ import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.RestingHeartRate
+import com.prestondihle.healthtracker.data.StepBucket
 import com.prestondihle.healthtracker.data.TrackerDao
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
@@ -30,9 +32,16 @@ import com.prestondihle.healthtracker.health.HeartRateSample
 import com.prestondihle.healthtracker.health.StepSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+
+/**
+ * How far back one sync will re-read raw heart rate, however wide the window
+ * being drawn is. See [TrackerRepository.syncTimeSeries].
+ */
+private val HEART_RATE_SYNC_HORIZON: Duration = Duration.ofHours(48)
 
 /**
  * Single entry point for data. Owns the conversion between the domain's
@@ -103,6 +112,30 @@ class TrackerRepository(
         dao.getLatestWaistOnOrBefore(date)
 
     suspend fun setWaistCm(date: LocalDate, cm: Float) = dao.upsertWaist(WaistEntry(date, cm))
+
+    // ----- Grip strength -----------------------------------------------------
+
+    fun getGripStrength(date: LocalDate): Flow<GripStrengthEntry?> = dao.getGripStrength(date)
+
+    fun getGripStrengths(start: LocalDate, end: LocalDate): Flow<List<GripStrengthEntry>> =
+        dao.getGripStrengths(start, end)
+
+    fun getLatestGripStrengthOnOrBefore(date: LocalDate): Flow<GripStrengthEntry?> =
+        dao.getLatestGripStrengthOnOrBefore(date)
+
+    /**
+     * Records one hand's reading for [date], leaving the other hand alone.
+     *
+     * Read-modify-write rather than a plain upsert: the two hands are squeezed
+     * one at a time, and writing a whole row from the value of the hand just
+     * measured would blank the one measured a minute earlier.
+     */
+    suspend fun setGripStrengthKg(date: LocalDate, dominant: Boolean, kg: Float) {
+        val current = dao.getGripStrength(date).first() ?: GripStrengthEntry(date)
+        dao.upsertGripStrength(
+            if (dominant) current.copy(dominantKg = kg) else current.copy(nonDominantKg = kg)
+        )
+    }
 
     // ----- Hydration ---------------------------------------------------------
 
@@ -270,6 +303,9 @@ class TrackerRepository(
     fun getHeartRateSince(since: Instant): Flow<List<HeartRateBucket>> =
         dao.getHeartRateBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
 
+    fun getStepBucketsSince(since: Instant): Flow<List<StepBucket>> =
+        dao.getStepBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
+
     /**
      * Pulls the meal and heart rate time series for an arbitrary window into the
      * local cache.
@@ -301,9 +337,38 @@ class TrackerRepository(
             if (fresh.isNotEmpty()) dao.insertMeals(fresh)
         }
 
+        // Heart rate is read as raw samples, and a watch writes one every few
+        // seconds -- a week of them is hundreds of thousands of records to fetch
+        // and throw away, since they are averaged into five-minute buckets on
+        // arrival anyway. Only the recent end is re-read; the buckets already
+        // cached by earlier syncs are what fills a wider window in, which is also
+        // why this caps the sync and not the chart.
+        val heartRateFrom = maxOf(from, to.minus(HEART_RATE_SYNC_HORIZON))
         val samples =
-            runCatching { healthDataSource.readHeartRate(from, to) }.getOrDefault(emptyList())
+            runCatching { healthDataSource.readHeartRate(heartRateFrom, to) }
+                .getOrDefault(emptyList())
         if (samples.isNotEmpty()) dao.upsertHeartRateBuckets(samples.bucketed())
+
+        val preferredSteps = dao.getUserSettings().first()?.preferredStepsPackage
+        val hours =
+            runCatching { healthDataSource.readStepsByHour(from, to, preferredSteps) }
+                .getOrDefault(emptyList())
+        if (hours.isNotEmpty()) {
+            // Cleared first because an hour can genuinely drop to zero between
+            // syncs -- a pinned source changed, a duplicate walk deleted upstream
+            // -- and an upsert has no way to say "this hour no longer exists".
+            // Bounded by what was actually read so a failed read leaves the cache
+            // as it was rather than emptying it, and by the extremes rather than
+            // the ends of the list, so nothing outside the read span can be
+            // deleted whatever order the source returned.
+            dao.deleteStepBucketsBetween(
+                hours.minOf { it.hourStart.toEpochMilli() },
+                hours.maxOf { it.hourStart.toEpochMilli() } + 1,
+            )
+            dao.upsertStepBuckets(
+                hours.map { StepBucket(hourStartMillis = it.hourStart.toEpochMilli(), steps = it.steps) }
+            )
+        }
     }
 
     /**

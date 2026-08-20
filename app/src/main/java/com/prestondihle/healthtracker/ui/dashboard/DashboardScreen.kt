@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +33,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,6 +46,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,6 +54,7 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
@@ -165,18 +170,30 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
             MetabolicCard(
                 state = state,
                 onWindowChange = viewModel::setGlucoseWindow,
+                onSmoothChange = viewModel::setSmoothGlucose,
                 onAddKetone = {
                     viewModel.addKetone(it)
                     toast("Logged ${Ketones.format(it)} ${Ketones.UNIT}")
                 },
                 onAddGlucose = {
                     viewModel.addBloodSugar(it)
-                    toast("Logged $it mg/dL")
+                    toast("Logged $it ${Glucose.UNIT}")
                 },
             )
         }
 
         item { BodyCard(state = state, onWaistChange = viewModel::setWaistCm) }
+
+        item {
+            GripStrengthCard(
+                state = state,
+                onLog = { dominant, lbs ->
+                    viewModel.logGripStrengthKg(dominant, Units.lbsToKg(lbs))
+                    val hand = if (dominant) "dominant" else "non-dominant"
+                    toast("Logged ${lbs.toInt()} lb $hand grip")
+                },
+            )
+        }
 
         item {
             BloodPressureCard(
@@ -791,18 +808,21 @@ private fun CaffeineCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MetabolicCard(
     state: DashboardUiState,
     onWindowChange: (GlucoseWindow) -> Unit,
+    onSmoothChange: (Boolean) -> Unit,
     onAddKetone: (Float) -> Unit,
     onAddGlucose: (Int) -> Unit,
 ) {
     DashboardCard(title = "Glucose and ketones") {
         // Zooming in is the point: a CGM trace over 24 hours flattens the swing
-        // around a single meal into a wiggle, and 6 hours is where that swing is
-        // actually readable.
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // around a single meal into a wiggle, and 3 to 6 hours is where that
+        // swing is actually readable. Wrapped because six chips do not fit on one
+        // row of a phone.
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GlucoseWindow.entries.forEach { option ->
                 FilterChip(
                     selected = state.glucoseWindow == option,
@@ -818,8 +838,8 @@ private fun MetabolicCard(
             series =
                 listOf(
                     ChartSeries(
-                        label = "Glucose",
-                        points = state.glucose.map { TimePoint(it.timestamp, it.mgDl.toFloat()) },
+                        label = if (state.settings.smoothGlucose) "Glucose (smoothed)" else "Glucose",
+                        points = state.glucoseCurve.map { TimePoint(it.first, it.second) },
                         color = GlucoseSeries,
                         axis = ChartAxis.LEFT,
                         // A CGM writes every few minutes; dots would merge into a
@@ -833,7 +853,13 @@ private fun MetabolicCard(
                         axis = ChartAxis.RIGHT,
                     ),
                 ),
-            leftAxis = AxisSpec(min = 60f, max = 200f, label = "mg/dL"),
+            leftAxis =
+                AxisSpec(
+                    min = Glucose.PLOT_MIN,
+                    max = Glucose.PLOT_MAX,
+                    label = Glucose.UNIT,
+                    band = state.glucoseTarget,
+                ),
             rightAxis =
                 AxisSpec(
                     min = Ketones.PLOT_MIN,
@@ -849,6 +875,37 @@ private fun MetabolicCard(
                         else ChartHeight
                     ),
         )
+
+        // The switch sits on the chart rather than in settings because it is a
+        // way of looking at the data, not a fact about it -- and because a line
+        // that no longer matches its readings has to be one tap from being
+        // turned back into them.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (state.glucoseTarget != null) {
+                    "Grey band is the target set in Settings"
+                } else {
+                    "Set a target range in Settings"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Smooth",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Switch(
+                checked = state.settings.smoothGlucose,
+                onCheckedChange = onSmoothChange,
+                modifier = Modifier.scale(0.75f),
+            )
+        }
 
         HorizontalDivider()
 
@@ -874,8 +931,8 @@ private fun MetabolicCard(
             value = glucose,
             onValueChange = { glucose = it },
             step = 1,
-            range = 20..500,
-            supportingText = "mg/dL, for manual fingersticks",
+            range = Glucose.ENTRY_RANGE,
+            supportingText = "${Glucose.UNIT}, for manual fingersticks",
             trailingContent = {
                 InlineLogButton(
                     contentDescription = "Log blood sugar",
@@ -922,6 +979,89 @@ private fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/** Starting point for a grip stepper when nothing has ever been measured, in pounds. */
+private const val DEFAULT_GRIP_LBS = 90f
+
+/**
+ * A dynamometer reading per hand.
+ *
+ * Two steppers rather than one with a hand selector: both hands are squeezed in
+ * the same sitting, and a selector would make the second reading a mode switch
+ * away. Each logs independently, so measuring one hand does not blank the other.
+ *
+ * The steppers seed from the last measurement rather than from a constant --
+ * grip barely moves week to week, so the previous value is nearly always within
+ * a couple of presses of the new one.
+ */
+@Composable
+private fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) -> Unit) {
+    DashboardCard(title = "Grip strength") {
+        var dominant by
+            remember(state.latestGrip?.dominantKg) {
+                mutableFloatStateOf(
+                    state.latestGrip?.dominantKg?.let { Units.kgToLbs(it) } ?: DEFAULT_GRIP_LBS
+                )
+            }
+        var nonDominant by
+            remember(state.latestGrip?.nonDominantKg) {
+                mutableFloatStateOf(
+                    state.latestGrip?.nonDominantKg?.let { Units.kgToLbs(it) } ?: DEFAULT_GRIP_LBS
+                )
+            }
+
+        Stepper(
+            label = "Dominant",
+            value = dominant,
+            onValueChange = { dominant = it },
+            step = 1f,
+            range = 0f..250f,
+            valueFormatter = { "${it.toInt()} lb" },
+            trailingContent = {
+                InlineLogButton(
+                    contentDescription = "Log dominant hand grip",
+                    onClick = { onLog(true, dominant) },
+                )
+            },
+        )
+
+        HorizontalDivider()
+
+        Stepper(
+            label = "Non-dominant",
+            value = nonDominant,
+            onValueChange = { nonDominant = it },
+            step = 1f,
+            range = 0f..250f,
+            valueFormatter = { "${it.toInt()} lb" },
+            trailingContent = {
+                InlineLogButton(
+                    contentDescription = "Log non-dominant hand grip",
+                    onClick = { onLog(false, nonDominant) },
+                )
+            },
+        )
+
+        // Like waist, this is measured every few days at most, so the reading
+        // that matters is the last one on record with the date it was taken --
+        // and it doubles as confirmation that the tap landed.
+        state.latestGrip?.let { last ->
+            val parts = buildList {
+                last.dominantKg?.let { add("${Units.kgToLbs(it).toInt()} lb dominant") }
+                last.nonDominantKg?.let { add("${Units.kgToLbs(it).toInt()} lb non-dominant") }
+            }
+            if (parts.isNotEmpty()) {
+                Text(
+                    (if (state.hasGripToday) "Today: " else "Last: ") +
+                        parts.joinToString(" · ") +
+                        if (state.hasGripToday) "" else " on ${last.date.asShortDate()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

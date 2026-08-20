@@ -72,6 +72,22 @@ interface TrackerDao {
 
     @Upsert suspend fun upsertWaist(entry: WaistEntry)
 
+    // ----- Grip strength -----------------------------------------------------
+
+    @Query("SELECT * FROM GripStrengthEntry WHERE date = :date")
+    fun getGripStrength(date: LocalDate): Flow<GripStrengthEntry?>
+
+    @Query(
+        "SELECT * FROM GripStrengthEntry WHERE date BETWEEN :startDate AND :endDate ORDER BY date ASC"
+    )
+    fun getGripStrengths(startDate: LocalDate, endDate: LocalDate): Flow<List<GripStrengthEntry>>
+
+    /** Most recent measurement at or before [date], for seeding the steppers. */
+    @Query("SELECT * FROM GripStrengthEntry WHERE date <= :date ORDER BY date DESC LIMIT 1")
+    fun getLatestGripStrengthOnOrBefore(date: LocalDate): Flow<GripStrengthEntry?>
+
+    @Upsert suspend fun upsertGripStrength(entry: GripStrengthEntry)
+
     // ----- Hydration ---------------------------------------------------------
 
     @Query("SELECT * FROM HydrationEntry WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp ASC")
@@ -229,6 +245,26 @@ interface TrackerDao {
 
     /** Upsert keyed on the bucket's start time, so re-syncing a window rewrites it in place. */
     @Upsert suspend fun upsertHeartRateBuckets(buckets: List<HeartRateBucket>)
+
+    @Query(
+        "SELECT * FROM StepBucket " +
+            "WHERE hourStartMillis >= :start AND hourStartMillis < :end " +
+            "ORDER BY hourStartMillis ASC"
+    )
+    fun getStepBucketsBetween(start: Long, end: Long): Flow<List<StepBucket>>
+
+    @Upsert suspend fun upsertStepBuckets(buckets: List<StepBucket>)
+
+    /**
+     * Clears a span before it is rewritten.
+     *
+     * Unlike heart rate, an hour's step count can legitimately fall to zero
+     * between syncs -- a source is switched in settings, or a duplicate walk is
+     * removed upstream. Upsert alone cannot express that: the stale row for an
+     * hour the new read no longer reports would simply survive.
+     */
+    @Query("DELETE FROM StepBucket WHERE hourStartMillis >= :start AND hourStartMillis < :end")
+    suspend fun deleteStepBucketsBetween(start: Long, end: Long)
 
     // ----- Resting heart rate ------------------------------------------------
 

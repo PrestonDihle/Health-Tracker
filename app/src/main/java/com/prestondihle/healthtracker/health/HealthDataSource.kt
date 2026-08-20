@@ -41,6 +41,9 @@ data class MealSample(
 /** One heart rate reading at one instant, before bucketing. */
 data class HeartRateSample(val time: Instant, val bpm: Int)
 
+/** Steps counted inside one wall-clock hour, keyed by the hour's start. */
+data class HourlySteps(val hourStart: Instant, val steps: Int)
+
 /**
  * Steps contributed by one writing app on a given day.
  *
@@ -117,4 +120,21 @@ interface HealthDataSource {
 
     /** Every heart rate sample in a window, unaggregated. */
     suspend fun readHeartRate(from: Instant, to: Instant): List<HeartRateSample>
+
+    /**
+     * Steps in a window, split into wall-clock hours.
+     *
+     * Aligned to the hour rather than to [from] so the same hour always produces
+     * the same bucket, which is what lets a re-sync overwrite rows instead of
+     * accumulating shifted duplicates of the same walk.
+     *
+     * [preferredStepsPackage] pins one writing app, exactly as [readDay] does --
+     * hourly bars that summed every source while the daily total trusted one
+     * would be two different step counts on two screens.
+     */
+    suspend fun readStepsByHour(
+        from: Instant,
+        to: Instant,
+        preferredStepsPackage: String? = null,
+    ): List<HourlySteps>
 }

@@ -27,11 +27,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         KetoneReading::class,
         MealEntry::class,
         HeartRateBucket::class,
+        StepBucket::class,
+        GripStrengthEntry::class,
         RestingHeartRate::class,
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -159,6 +161,45 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The v5 to v6 statements, exposed for the same schema diff as the two
+         * table-creating migrations above.
+         *
+         * Two new tables and three added columns. Nothing already stored is read
+         * or rewritten, so there is no data-loss path here at all.
+         *
+         * The added columns carry SQLite defaults even though the entities do
+         * not declare any. Room only compares a column's default when the entity
+         * spells one out, so this is invisible to schema validation -- but
+         * without it every row that already exists gets a NULL, and an upgrading
+         * user would find the glucose target blank on a screen that is supposed
+         * to arrive with a sensible one. `smoothGlucose` is NOT NULL because the
+         * field is a non-null Boolean, and a NOT NULL column added to a
+         * populated table has to say what the existing rows hold.
+         */
+        internal val migration5To6Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `StepBucket` (" +
+                    "`hourStartMillis` INTEGER NOT NULL, " +
+                    "`steps` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`hourStartMillis`))",
+                "CREATE TABLE IF NOT EXISTS `GripStrengthEntry` (" +
+                    "`date` INTEGER NOT NULL, " +
+                    "`dominantKg` REAL, " +
+                    "`nonDominantKg` REAL, " +
+                    "PRIMARY KEY(`date`))",
+                "ALTER TABLE `UserGoals` ADD COLUMN `glucoseTargetLowMgDl` INTEGER DEFAULT 70",
+                "ALTER TABLE `UserGoals` ADD COLUMN `glucoseTargetHighMgDl` INTEGER DEFAULT 140",
+                "ALTER TABLE `UserSettings` ADD COLUMN `smoothGlucose` INTEGER NOT NULL DEFAULT 0",
+            )
+
+        private val MIGRATION_5_6 =
+            object : Migration(5, 6) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration5To6Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -173,7 +214,12 @@ abstract class AppDatabase : RoomDatabase() {
                                 AppDatabase::class.java,
                                 "tracker_database",
                             )
-                            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                            .addMigrations(
+                                MIGRATION_2_3,
+                                MIGRATION_3_4,
+                                MIGRATION_4_5,
+                                MIGRATION_5_6,
+                            )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()
                             .also { instance = it }

@@ -9,20 +9,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.data.DailyLog
+import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import java.time.ZoneId
@@ -84,6 +88,17 @@ class ScreenRenderTest {
                         bookPagesRead = seed.nextInt(0, 40),
                     )
                 )
+                // Grip is hand-logged too, and every third day rather than daily
+                // -- which is what actually exercises the trend chart's gaps.
+                if (offset % 3 == 0L) {
+                    val dominantKg = Units.lbsToKg(95f + seed.nextInt(-6, 7))
+                    repository.setGripStrengthKg(date, dominant = true, kg = dominantKg)
+                    repository.setGripStrengthKg(
+                        date,
+                        dominant = false,
+                        kg = dominantKg * 0.9f,
+                    )
+                }
             }
         }
         return repository
@@ -119,6 +134,52 @@ class ScreenRenderTest {
         composeRule.onRoot().captureRoboImage("build/screenshots/trends_mood.png")
     }
 
+    @Test
+    fun `the grip strength trend renders both hands`() {
+        val vm = TrendsViewModel(seededRepository(), zone)
+        render { TrendsScreen(vm) }
+
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("Grip strength"))
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Grip strength").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/trends_grip.png")
+    }
+
+    @Test
+    fun `every trends range renders`() {
+        val vm = TrendsViewModel(seededRepository(), zone)
+        render { TrendsScreen(vm) }
+
+        // Seven days is narrower than the seeded fortnight and ninety is wider
+        // than it, so between them these cover both the cropping and the
+        // mostly-empty ends of every chart's day-slot arithmetic.
+        TrendsRange.entries.forEach { option ->
+            composeRule.onNodeWithText(option.label).performClick()
+            // The range drives a database query, so waiting on the chip coming up
+            // selected is what proves the charts were rebuilt -- `waitForIdle`
+            // alone returns while the flow is still in flight, and every
+            // assertion after it would be about the previous range.
+            composeRule.waitUntil(10_000) {
+                composeRule
+                    .onAllNodes(hasText(option.label) and isSelected())
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            composeRule.onNodeWithText("Steps").assertIsDisplayed()
+        }
+    }
+
+    /**
+     * The dashboard is captured where it opens, without scrolling.
+     *
+     * Not an oversight: `DashboardViewModel` runs a one-second ticker to drive
+     * the live fast timer, so the screen never reaches the idle state
+     * `performScrollToNode` waits for -- it retries, times out after a minute and
+     * throws `AppNotIdleException`. Anything below the fold here has to be
+     * asserted somewhere that does not tick; the glucose chart's smoothing and
+     * target band are covered on the master graph for exactly that reason.
+     */
     @Test
     fun `dashboard renders`() {
         val vm = DashboardViewModel(seededRepository(), zone)

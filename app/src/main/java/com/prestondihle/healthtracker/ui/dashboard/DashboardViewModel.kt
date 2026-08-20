@@ -10,16 +10,19 @@ import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
 import com.prestondihle.healthtracker.data.FastingType
+import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.UserGoals
+import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.domain.AdherenceResult
 import com.prestondihle.healthtracker.domain.Caffeine
 import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.FastingAdherence
+import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import kotlinx.coroutines.flow.Flow
@@ -42,11 +45,21 @@ import java.time.temporal.TemporalAdjusters
 /** Default waist when nothing has ever been measured: 42 inches. */
 private const val DEFAULT_WAIST_CM = 106.68f
 
-/** How far back the glucose and ketone chart looks. */
+/**
+ * How far back the glucose and ketone chart looks.
+ *
+ * Three hours at the short end is one meal's response start to finish. Seventy-
+ * two at the long end is the span a fasting experiment is actually judged over:
+ * a single day cannot show ketones climbing while glucose settles, because that
+ * takes longer than a day to happen.
+ */
 enum class GlucoseWindow(val label: String, val hours: Long) {
+    THREE("3h", 3),
     SIX("6h", 6),
     TWELVE("12h", 12),
     DAY("24h", 24),
+    TWO_DAYS("48h", 48),
+    THREE_DAYS("72h", 72),
 }
 
 /**
@@ -103,7 +116,10 @@ data class DashboardUiState(
     val glucose: List<BloodSugarReading> = emptyList(),
     val ketones: List<KetoneReading> = emptyList(),
     val glucoseWindow: GlucoseWindow = GlucoseWindow.DAY,
+    val settings: UserSettings = UserSettings(),
     val caffeine: List<CaffeineIntake> = emptyList(),
+    /** Most recent grip measurement on or before today, with the date it was taken. */
+    val latestGrip: GripStrengthEntry? = null,
     val latestBloodPressure: BloodPressureReading? = null,
     val pushupsToday: Int = 0,
     val squatsToday: Int = 0,
@@ -152,6 +168,25 @@ data class DashboardUiState(
 
     val glucoseWindowStart: Instant
         get() = now.minus(Duration.ofHours(glucoseWindow.hours))
+
+    /** The blood sugar trace as drawn: raw, or run through the smoother. */
+    val glucoseCurve: List<Pair<Instant, Float>>
+        get() {
+            val raw = glucose.map { it.timestamp to it.mgDl.toFloat() }
+            return if (settings.smoothGlucose) GlucoseSmoothing.smooth(raw) else raw
+        }
+
+    /** The shaded target from settings, or null while either edge is unset or inverted. */
+    val glucoseTarget: ClosedFloatingPointRange<Float>?
+        get() {
+            val low = goals.glucoseTargetLowMgDl ?: return null
+            val high = goals.glucoseTargetHighMgDl ?: return null
+            return if (high > low) low.toFloat()..high.toFloat() else null
+        }
+
+    /** True only when the most recent grip measurement is today's. */
+    val hasGripToday: Boolean
+        get() = latestGrip?.date == today
 
     val caffeineWindowStart: Instant
         get() = now.minus(Duration.ofHours(CAFFEINE_HALF_WINDOW_HOURS))
@@ -241,6 +276,7 @@ private data class TodayBundle(
     val bloodPressures: List<BloodPressureReading>,
     val pushups: Int,
     val squats: Int,
+    val grip: GripStrengthEntry?,
 )
 
 private data class SettingsBundle(
@@ -255,6 +291,7 @@ private data class MetabolicBundle(
     val ketones: List<KetoneReading>,
     val caffeine: List<CaffeineIntake>,
     val glucoseWindow: GlucoseWindow,
+    val settings: UserSettings,
 )
 
 class DashboardViewModel(
@@ -311,9 +348,10 @@ class DashboardViewModel(
                 combine(
                     repository.getRepTotalForDate(MovementType.PUSHUP, date),
                     repository.getRepTotalForDate(MovementType.AIR_SQUAT, date),
-                ) { pushups, squats -> pushups to squats },
-            ) { log, hydration, waist, bps, reps ->
-                TodayBundle(log, hydration, waist, bps, reps.first, reps.second)
+                    repository.getLatestGripStrengthOnOrBefore(date),
+                ) { pushups, squats, grip -> Triple(pushups, squats, grip) },
+            ) { log, hydration, waist, bps, body ->
+                TodayBundle(log, hydration, waist, bps, body.first, body.second, body.third)
             }
         }
 
@@ -330,11 +368,12 @@ class DashboardViewModel(
                 repository.getKetonesSince(since),
                 repository.getCaffeineSince(caffeineSince),
                 glucoseWindow,
-            ) { glucose, ketones, caffeine, window ->
+                repository.getUserSettings(),
+            ) { glucose, ketones, caffeine, window, settings ->
                 // The query always covers the widest window; narrowing is left to
                 // the chart, which clips to its own bounds. Switching windows is
                 // then a redraw rather than a re-query.
-                MetabolicBundle(glucose, ketones, caffeine, window)
+                MetabolicBundle(glucose, ketones, caffeine, window, settings ?: UserSettings())
             }
         }
 
@@ -391,7 +430,9 @@ class DashboardViewModel(
                     glucose = metabolicBundle.glucose,
                     ketones = metabolicBundle.ketones,
                     glucoseWindow = metabolicBundle.glucoseWindow,
+                    settings = metabolicBundle.settings,
                     caffeine = metabolicBundle.caffeine,
+                    latestGrip = todayBundle.grip,
                     latestBloodPressure = todayBundle.bloodPressures.lastOrNull(),
                     pushupsToday = todayBundle.pushups,
                     squatsToday = todayBundle.squats,
@@ -497,6 +538,25 @@ class DashboardViewModel(
 
     fun setGlucoseWindow(window: GlucoseWindow) {
         glucoseWindow.value = window
+    }
+
+    /**
+     * Turns the blood sugar smoothing on or off.
+     *
+     * Written to settings rather than held in the ViewModel so the master graph
+     * draws the same line as this one -- two screens disagreeing about whether a
+     * trace is filtered would be worse than either choice.
+     */
+    fun setSmoothGlucose(smooth: Boolean) {
+        viewModelScope.launch {
+            val current = repository.getUserSettings().first() ?: UserSettings()
+            repository.upsertUserSettings(current.copy(smoothGlucose = smooth))
+        }
+    }
+
+    /** Records one hand's grip for today, leaving the other hand's reading alone. */
+    fun logGripStrengthKg(dominant: Boolean, kg: Float) {
+        viewModelScope.launch { repository.setGripStrengthKg(today, dominant, kg) }
     }
 
     fun addKetone(ppm: Float) {

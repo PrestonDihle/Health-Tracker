@@ -53,6 +53,14 @@ fraction) are computed as `get()` properties on the UiState rather than stored. 
 additionally combines in a one-second `ticker` flow to drive the live fast timer. ViewModels take an
 injectable `ZoneId` defaulting to `systemDefault()`, which is what makes the time maths testable.
 
+**Window and range enums are the single source of a screen's query span.** `MasterRange`
+(3h/6h/12h/24h/48h/7d), `GlucoseWindow` (3h/6h/12h/24h/48h/72h) and `TrendsRange`
+(7/14/30/90 days) each drive both the chips and the query, so adding an entry widens the fetch with
+no second edit — `GLUCOSE_WINDOW_HOURS` is derived as the maximum, and the dashboard queries once at
+that width so switching windows is a redraw rather than a round trip. Six chips no longer fit one row
+of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the widest
+options behind a gesture nobody knows is there.
+
 **`TrackerRepository` is the only data entry point** and owns the conversion between the domain's
 `Instant`/`LocalDate` vocabulary and the epoch-millisecond bounds the DAO queries expect
 (`startOfDayMillis` / `endOfDayMillis`). Callers never do that arithmetic themselves.
@@ -73,13 +81,31 @@ Glucose is the exception to the snapshot pattern: it is a time series, not a dai
 are inserted as `BloodSugarReading` rows. Re-sync safety comes from the unique index on
 `externalId` (SQLite treats NULLs as distinct, so manual readings are unaffected).
 
-`MealEntry` and `HeartRateBucket` are the other two time series, added for the master graph, and they
-follow the same cache rules. `MealEntry` deliberately duplicates nutrition that is *also* rolled up on
-the snapshot — that is not redundancy to clean up: a daily macro total cannot say *when* the food was
-eaten, and an absorption curve has to start somewhere. It dedupes on `externalId` like glucose.
-`HeartRateBucket` averages raw samples into five-minute windows keyed on the bucket's start time,
-which is what makes a re-sync idempotent without an external id; a watch writes a beat rate every few
-seconds, which is more resolution than any chart here draws and enough rows to dominate the database.
+`MealEntry`, `HeartRateBucket` and `StepBucket` are the other three time series, added for the master
+graph, and they follow the same cache rules. `MealEntry` deliberately duplicates nutrition that is
+*also* rolled up on the snapshot — that is not redundancy to clean up: a daily macro total cannot say
+*when* the food was eaten, and an absorption curve has to start somewhere. It dedupes on `externalId`
+like glucose. `HeartRateBucket` averages raw samples into five-minute windows keyed on the bucket's
+start time, which is what makes a re-sync idempotent without an external id; a watch writes a beat
+rate every few seconds, which is more resolution than any chart here draws and enough rows to
+dominate the database. `StepBucket` is the same idea at hourly resolution, and the same argument
+against the snapshot's daily total: it cannot say *when* the walking happened.
+
+`StepBucket` is the one cache that is **deleted before it is rewritten**. An hour's step count can
+legitimately fall to zero between syncs — the pinned source changes in Settings, or a duplicate walk
+is removed upstream — and an upsert has no way to express "this hour no longer holds what it did".
+The delete is bounded by what the read actually returned, so a failed read leaves the cache alone
+rather than emptying it.
+
+Raw heart rate is re-read over at most `HEART_RATE_SYNC_HORIZON` (48 h) however wide the window being
+drawn is, because a week of raw samples is hundreds of thousands of records fetched only to be
+averaged into five-minute buckets. That is a cap on the *sync*, not on the chart: wider windows draw
+from buckets already cached by earlier syncs. Meals and steps have no such cap — both are cheap.
+
+`GripStrengthEntry` is manual, one row per day, with a nullable column per hand so one hand can be
+logged without blanking the other — which is why the repository read-modify-writes it instead of
+upserting a whole row. Stored in kilograms and shown in pounds: Health Connect has no grip strength
+record, so nothing outside forces the unit, but a second storage unit is how rounding error gets in.
 
 Weight exists on both sides and is merged at read time, not at write time: `WeightEntry` is the
 manual table, `HealthDaySnapshot.weightKg` is the synced value, and `TrendsUiState.weightByDay`
@@ -103,12 +129,25 @@ The manifest also needs the `<queries>` entry for `com.google.android.apps.healt
 visibility on Android 13 and below) and the exported `ViewPermissionUsageActivity` alias (the
 Android 14+ rationale entry point the platform launches from the system permission screen).
 
-**Steps are read from raw records, not `COUNT_TOTAL`.** Several apps commonly write steps at once (a
-watch's companion app plus the phone's own health app), and the aggregate sums them all — counting
-the same walk twice. `stepsByPackage` groups raw `StepsRecord`s by `metadata.dataOrigin.packageName`
-so `UserSettings.preferredStepsPackage` can pin one source, with Settings showing the per-app
-breakdown. Raw reads are paginated; `readAllRecords` loops `pageToken` because a single day from a
-watch exceeds one page and taking only the first would silently undercount.
+**Steps are attributed per writing app, not summed blindly.** Several apps commonly write steps at
+once (a watch's companion app plus the phone's own health app), and an unfiltered aggregate sums them
+all — counting the same walk twice. `stepsByPackage` derives the contributing packages from the
+combined aggregate's own `dataOrigins` and re-aggregates per source, so
+`UserSettings.preferredStepsPackage` can pin one, with Settings showing the per-app breakdown. Doing
+this by reading raw `StepsRecord`s is not survivable: the client validates every record as it
+converts it, a zero-count step record is rejected outright, and one such record from any installed
+app throws away the entire page. Aggregates never construct records, so they are immune. Raw reads
+elsewhere are paginated; `readAllRecords` loops `pageToken` because a single day from a watch exceeds
+one page and taking only the first would silently undercount.
+
+`readStepsByHour` slices the same aggregate with `AggregateGroupByDurationRequest` and honours the
+same pinned source — hourly bars that summed every app while the daily total trusted one would be two
+different step counts on two screens. **The window's start is snapped down to the hour in the local
+zone before slicing**, because the slicer counts forward from whatever instant it is handed: a sync
+begun at 14:37 would otherwise produce buckets running :37 to :37, which no later sync lines up with
+and `StepBucket`'s primary key could never overwrite. Health Connect omits a slice entirely when it
+has no records in it, so an hour with no walking arrives as a *hole*, not a zero — which is why a bar
+series has to declare its own `barWidth` rather than infer one from the spacing.
 
 Health Connect has no mile-split concept. `bestMileSeconds` is elapsed time divided by distance,
 normalised to a mile, over runs of at least a mile — so it is *average pace*, not a PR, and is
@@ -135,13 +174,23 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 4, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 6, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
-tables, and is covered by `MigrationSchemaTest`. `fallbackToDestructiveMigration` is still registered,
-but only covers the v1 schema, which kept steps, sleep, macros and rep counts on `DailyLog` and has
-no sensible column-wise mapping to today's tables.
+tables; `MIGRATION_5_6` does both at once. All three are covered by `MigrationSchemaTest`.
+`fallbackToDestructiveMigration` is still registered, but only covers the v1 schema, which kept
+steps, sleep, macros and rep counts on `DailyLog` and has no sensible column-wise mapping to today's
+tables.
+
+An added column may carry a SQLite `DEFAULT` even where the entity declares none — `MIGRATION_5_6`
+seeds the glucose target that way, so an upgrading user does not find blank a setting that ships
+pre-filled. Room only compares a column's default when the entity spells one out with
+`@ColumnInfo(defaultValue = …)`, so this is invisible to schema validation. It does mean an
+`ALTER TABLE`-added column **cannot** be checked by diffing DDL text the way a new table is: the
+migration's text says `DEFAULT 70` and Room's `CREATE TABLE` does not. `MigrationSchemaTest` therefore
+compares `PRAGMA table_info` — name, type, nullability, primary-key position — for those, which is
+exactly the set Room validates.
 
 `Converters` stores `LocalDate` as epoch day, `Instant` as epoch millis, `LocalTime` as
 second-of-day, and enums by `name`.
@@ -150,7 +199,15 @@ second-of-day, and enums by `name`.
 
 Everything is **stored in metric** to match Health Connect and converted at the display boundary by
 `domain/Units.kt` — converting once keeps rounding error out of stored data. Waist is stored in cm
-but presented in exact quarter-inches (`roundToQuarter`, `formatInches` renders `42 1/4"`).
+but presented in exact quarter-inches (`roundToQuarter`, `formatInches` renders `42 1/4"`). Grip
+strength follows the same rule: kilograms in the database, pounds on every screen.
+
+`domain/Glucose.kt` and `domain/Ketones.kt` own their axes for the same reason: the entry stepper,
+the dashboard chart, the master graph and the settings target all have to agree on what the scale
+means, and four copies of the numbers drift. The glucose plot is **60–180 mg/dL**, not 60–200 —
+the top fifth of a 200 ceiling is never reached and spending it flattens the 30 mg/dL swing around a
+meal into a wiggle. Both charts still widen an axis to fit an outlier, so a 210 reading plots; it is
+simply not budgeted for.
 
 The theme is light-only and dynamic color is deliberately absent — leaving it on would let Android
 12+ derive the palette from the user's wallpaper and discard the brand colors entirely. Palette:
@@ -201,16 +258,64 @@ which is why the master graph draws all three dashed and says so on the screen. 
 are loaded from further back than the window plots (`RELEVANT_HISTORY_HOURS`), because a meal eaten
 before the left edge is still being absorbed inside it.
 
+The sampling step is derived from the window rather than fixed (`CURVE_SAMPLES`, clamped to 1–10
+minutes). A fixed ten minutes drew a 45-minute carbohydrate peak from four samples on the 3 h window,
+and four times more points than the plot can render on the 7 d one.
+
+### Drawing weight, and what gets read as data
+
+Meal markers on the master graph are `subdued`, which draws them hairline in the gridline grey
+instead of full-weight in the axis colour. That is not decoration. At full weight they were
+near-black full-height rules, one per meal, each captioned with that meal's carbohydrate grams — and
+they were read as a carbohydrate spike. Worse, they went on being read as one after the carbohydrate
+curve was switched off, because a marker never belonged to a series at all: they vanish only when
+*every* series is off and the plot stops drawing entirely. **Anything that marks context rather than
+reporting a measurement has to be lighter than the data**, or it becomes data.
+
+The same rule sorts out the other three chart primitives:
+
+- **Bars** (`SeriesKind.BAR`) are for a quantity accumulated *over* an interval, not measured *at* an
+  instant. Steps per hour joined into a line would claim a walking rate at moments when nothing was
+  counted. They declare their own `barWidth`, because the gaps between points cannot be trusted to
+  reveal it: an aggregator reports nothing for an interval it has no records in, so a night of no
+  walking arrives as a hole rather than as zeroes. Downsampling sums them; averaging would halve a
+  fortnight of steps.
+- **Target bands** (`AxisSpec.band`) shade a range behind the data. A filled area answers "was it in
+  range" at a glance where two threshold rules leave the reader working out which side of each the
+  trace is on.
+- **Smoothing** (`domain/GlucoseSmoothing.kt`) is a Gaussian-weighted moving average in *time*, not
+  in sample index — index weighting would treat two fingersticks a week apart as neighbours and
+  average them together. It never resamples or interpolates: one output per input reading at that
+  reading's own timestamp, so the line still ends at *now*. Because it is a weighted mean of real
+  readings, it cannot overshoot their range. It defaults to **off**, is stored in `UserSettings` so
+  both charts agree, and relabels the series "Glucose (smoothed)" while on — every other line here is
+  either a measurement or dashed to say it is a model, and a solid line quietly differing from the
+  readings under it would break that rule without saying so.
+
+`DualAxisTimeChart` clips every series to the window **once**, up front, and every axis, legend
+caption and empty check is computed from the clipped points. This matters because series here are
+routinely queried wider than they are drawn — meals reach back an absorption window, a heart rate or
+step bucket survives from a previous sync at a wider setting — and a point that is not on the chart
+setting the chart's ceiling flattens every point that is. The legend runs the same expansion, since
+for a series carrying its own `AxisSpec.scale` the caption *is* its axis: quoting the configured
+range there would print a ceiling the plot stopped using the moment anything exceeded it.
+
 ## Testing
 
-`FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest` and `MacroAbsorptionTest` are the pure-JVM
-suites. Adherence covers the midnight-wrapping window, extended fasts overriding the daily plan,
-no-eating days, and the future-time exclusion. Stats covers overlap de-duplication, midnight splits,
-streak rules and open sessions. Caffeine covers half-life decay, dose accumulation and curve shape.
-Absorption covers the gastric lag, per-macro peak ordering, the normalisation that makes the area
-under a curve equal the grams eaten, and the documented completion times. New adherence, interval,
-stats, decay or absorption behaviour belongs there. `ExampleUnitTest` and `ExampleRobolectricTest`
-are scaffolding.
+`FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest` and
+`GlucoseSmoothingTest` are the pure-JVM suites. Adherence covers the midnight-wrapping window,
+extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
+overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
+decay, dose accumulation and curve shape. Absorption covers the gastric lag, per-macro peak ordering,
+the normalisation that makes the area under a curve equal the grams eaten, and the documented
+completion times. Smoothing pins what the filter may do to a reading: timestamps preserved, no
+overshoot beyond the readings' own range, no lag on a rise, and isolated readings returned untouched.
+New adherence, interval, stats, decay, absorption or smoothing behaviour belongs there.
+`ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
+
+A note on writing smoothing tests: assert peak *timing* against a trace that is symmetric about its
+peak. On an asymmetric one the two samples either side of a near-plateau come out within a tenth of
+each other, and which of them wins is the input's shape rather than the filter's.
 
 `MigrationSchemaTest` diffs the hand-written migration SQL against the schema Room generates from the
 entities. This matters more than it looks: `exportSchema = false` rules out Room's own
@@ -222,15 +327,30 @@ Unit tests run with `isIncludeAndroidResources = true`, so Robolectric tests can
 `MasterGraphRenderTest` and `ScreenRenderTest` compose whole screens against an in-memory Room
 database and `MockHealthDataSource`, asserting on the rendered tree and capturing images through
 Roborazzi. The chart canvas does a lot of arithmetic that only runs under a real layout pass, so
-these catch empty-list and divide-by-zero crashes no pure-JVM test reaches. Record images with:
+these catch empty-list and divide-by-zero crashes no pure-JVM test reaches.
+
+**The dashboard cannot be scrolled in a test.** `DashboardViewModel` runs a one-second ticker for the
+live fast timer, so the screen never reaches the idle state `performScrollToNode` waits on — it
+retries, times out after a minute, and throws `AppNotIdleException`. Anything below the fold there
+has to be asserted on a screen that does not tick, which is why the glucose smoothing and target band
+are covered in `MasterGraphRenderTest` even though they also appear on the dashboard. The drawing
+code is shared, so covering it once covers both.
+
+**Waiting on `waitForIdle` alone is not enough for anything a query drives.** Both render suites
+select a window by clicking its chip and then `waitUntil` that chip comes up `isSelected` — without
+it the assertions run against the *previous* range and a capture silently records the old window
+under the new window's filename. The master suite waits for the not-connected prompt to disappear for
+the same reason: the first sync runs off the composition. Record images with:
 
 ```
 ./gradlew :app:recordRoborazziDebug
 ```
 
 They land in `app/build/screenshots/`. Nothing is compared against a golden — they exist to be looked
-at. Seeding matters: the subjective 1-10 scores are hand-logged, so `syncHealthData` alone leaves the
-combined mood chart empty and its three line styles unexercised.
+at. Seeding matters: the subjective 1-10 scores and grip strength are hand-logged, so
+`syncHealthData` alone leaves the combined mood chart empty and its three line styles unexercised,
+and the grip trend blank. Glucose is a third case on the master graph: that screen syncs only meals,
+heart rate and steps, so a test that wants a blood sugar line has to insert the readings itself.
 
 ## Conventions
 

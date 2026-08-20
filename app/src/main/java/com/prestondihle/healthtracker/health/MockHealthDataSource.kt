@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -102,6 +103,38 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
             val awake = 14.0 * sin((hourOfDay - 4.0) / 24.0 * 2 * Math.PI).coerceAtLeast(0.0)
             HeartRateSample(time = time, bpm = (58 + awake + random.nextInt(-3, 4)).toInt())
         }
+    }
+
+    /**
+     * A waking day of walking: nothing overnight, a commute-shaped morning and
+     * evening, and a trickle in between.
+     *
+     * Zero hours are emitted rather than omitted, because a chart that draws a
+     * gap where the answer is "none" is saying something different.
+     */
+    override suspend fun readStepsByHour(
+        from: Instant,
+        to: Instant,
+        preferredStepsPackage: String?,
+    ): List<HourlySteps> {
+        val start = from.atZone(zoneId).truncatedTo(ChronoUnit.HOURS).toInstant()
+        if (!start.isBefore(to)) return emptyList()
+
+        return generateSequence(start) { it.plus(Duration.ofHours(1)) }
+            .takeWhile { it.isBefore(to) }
+            .map { hourStart ->
+                val local = hourStart.atZone(zoneId)
+                val random = Random(hourStart.epochSecond)
+                val steps =
+                    when (local.hour) {
+                        in 0..5 -> 0
+                        7, 8, 17, 18 -> random.nextInt(900, 2_200)
+                        in 6..21 -> random.nextInt(60, 700)
+                        else -> random.nextInt(0, 120)
+                    }
+                HourlySteps(hourStart, steps)
+            }
+            .toList()
     }
 
     /** Two sources that disagree, which is the situation the picker exists to resolve. */

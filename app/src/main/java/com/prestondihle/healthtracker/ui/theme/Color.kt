@@ -127,3 +127,20 @@ val FatAbsorptionSeries = Color(0xFF6F5AA6)
  * would have it read as a macro curve.
  */
 val HeartRateSeries = Color(0xFF8C4A3C)
+
+/**
+ * Steps per hour, drawn as columns behind everything else.
+ *
+ * A slate green-grey: it is the only series on the plot that is a block of fill
+ * rather than a stroke, so it has to sit back far enough not to compete with six
+ * lines drawn over it while still being legible on its own at 45% alpha.
+ */
+val StepsSeries = Color(0xFF5F7A6B)
+
+// ---------------------------------------------------------------------------
+// Grip strength. Two lines on one chart that track each other closely, so they
+// need the same separation the blood pressure pair does.
+// ---------------------------------------------------------------------------
+
+val GripDominantSeries = BalticBlue
+val GripNonDominantSeries = OliveBark

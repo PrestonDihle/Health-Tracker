@@ -20,6 +20,7 @@ import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.request.AggregateGroupByDurationRequest
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -27,6 +28,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import kotlin.reflect.KClass
 
 /** Metres in a statute mile. */
@@ -265,6 +267,61 @@ class HealthConnectDataSource(
             .filter { !it.time.isBefore(from) && it.time.isBefore(to) }
             .sortedBy { it.time }
     }
+
+    /**
+     * Steps split into wall-clock hours.
+     *
+     * Aggregated per slice rather than read as raw [StepsRecord]s for the same
+     * reason [stepsByPackage] is: the client validates every record it converts,
+     * and one zero-count record written by any installed app throws away the
+     * whole page. Aggregates never construct records.
+     *
+     * The window's start is snapped down to the hour in the local zone before
+     * slicing, because the slicer counts forward from whatever instant it is
+     * given -- a sync begun at 14:37 would otherwise produce buckets running
+     * :37 to :37, which no later sync would line up with.
+     */
+    override suspend fun readStepsByHour(
+        from: Instant,
+        to: Instant,
+        preferredStepsPackage: String?,
+    ): List<HourlySteps> {
+        val active = client ?: return emptyList()
+        val alignedFrom = from.atZone(zoneId).truncatedTo(ChronoUnit.HOURS).toInstant()
+        if (!alignedFrom.isBefore(to)) return emptyList()
+
+        if (preferredStepsPackage != null) {
+            val pinned =
+                active.hourlySteps(alignedFrom, to, setOf(DataOrigin(preferredStepsPackage)))
+            // A pinned app that wrote nothing across the whole window falls back
+            // to the combined total, matching how the daily count behaves.
+            if (pinned.any { it.steps > 0 }) return pinned
+        }
+        return active.hourlySteps(alignedFrom, to, emptySet())
+    }
+
+    private suspend fun HealthConnectClient.hourlySteps(
+        from: Instant,
+        to: Instant,
+        dataOriginFilter: Set<DataOrigin>,
+    ): List<HourlySteps> =
+        runCatching {
+                aggregateGroupByDuration(
+                        AggregateGroupByDurationRequest(
+                            metrics = setOf(StepsRecord.COUNT_TOTAL),
+                            timeRangeFilter = TimeRangeFilter.between(from, to),
+                            timeRangeSlicer = Duration.ofHours(1),
+                            dataOriginFilter = dataOriginFilter,
+                        )
+                    )
+                    .mapNotNull { slice ->
+                        slice.result[StepsRecord.COUNT_TOTAL]?.let {
+                            HourlySteps(slice.startTime, it.toInt())
+                        }
+                    }
+            }
+            .onFailure { Log.d(TAG, "hourly step read failed", it) }
+            .getOrDefault(emptyList())
 
     /** The day's last weigh-in, which is the one a scale-synced app means by "weight". */
     private suspend fun HealthConnectClient.readLatestWeightKg(range: TimeRangeFilter): Float? =
