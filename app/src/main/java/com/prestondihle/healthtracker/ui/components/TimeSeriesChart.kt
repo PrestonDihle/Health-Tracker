@@ -369,12 +369,15 @@ fun DualAxisTimeChart(
      */
     onPan: ((Duration) -> Unit)? = null,
     /**
-     * One line naming the plot for a screen reader.
+     * One line naming the plot, for a screen reader.
      *
      * A Canvas is a blank to TalkBack, which mattered less while a chart was only
      * something to look at. It is a control now -- tapping it reads the lines out
      * and dragging it moves the window -- and a control with no name is a control
      * that is not there at all for anyone using one.
+     *
+     * This names the plot's *purpose*; what is on it is described automatically
+     * from the series themselves, so the two cannot drift apart as the data does.
      */
     contentDescription: String? = null,
 ) {
@@ -407,6 +410,13 @@ fun DualAxisTimeChart(
     val currentDrawn by rememberUpdatedState(drawn)
     val currentHasRightAxis by rememberUpdatedState(rightAxis != null)
     val currentOnPan by rememberUpdatedState(onPan)
+
+    val spokenDescription =
+        listOfNotNull(
+                contentDescription,
+                spokenSummary(drawn, windowStart, windowEnd, leftAxis, rightAxis, zoneId),
+            )
+            .joinToString(" ")
 
     Column(modifier = modifier) {
         Box(
@@ -457,10 +467,11 @@ fun DualAxisTimeChart(
                                 }
                         }
                     }
-                    .then(
-                        if (contentDescription == null) Modifier
-                        else Modifier.semantics { this.contentDescription = contentDescription }
-                    )
+                    // Always applied, whether or not the caller named the plot:
+                    // the summary below is derived from the series and is the
+                    // part that carries the data, which is the whole of what a
+                    // Canvas otherwise fails to say.
+                    .semantics { this.contentDescription = spokenDescription }
                     .then(
                         if (onPan == null) Modifier
                         else
@@ -530,6 +541,58 @@ fun DualAxisTimeChart(
             onSeriesTap = onSeriesTap,
         )
     }
+}
+
+/**
+ * What the plot currently shows, in words, for a screen reader.
+ *
+ * A Canvas says nothing at all to TalkBack: without this a chart is a blank
+ * rectangle and every number on it is unreachable. Derived from the drawn series
+ * rather than written by the caller, so it cannot go stale as the data moves --
+ * a hand-written description is right on the day it is typed and wrong every day
+ * after.
+ *
+ * Deliberately a *summary* rather than a reading-out. Eight series at CGM
+ * resolution is thousands of points, and a screen reader that recites them is
+ * worse than one that says nothing. Each line gets what the legend gives a
+ * sighted reader plus where it ended up: its name, its range, and its latest
+ * value. "What was it at 4 PM" is the crosshair's question, and the crosshair is
+ * reached by tapping the very element this describes.
+ */
+private fun spokenSummary(
+    series: List<DrawnSeries>,
+    windowStart: Instant,
+    windowEnd: Instant,
+    leftAxis: AxisSpec,
+    rightAxis: AxisSpec?,
+    zoneId: ZoneId,
+): String {
+    val window = Duration.between(windowStart, windowEnd)
+    val span =
+        when {
+            window.toHours() < 1 -> "${window.toMinutes()} minutes"
+            window.toHours() < 48 -> "${window.toHours()} hours"
+            else -> "${window.toDays()} days"
+        }
+    val ending = INSPECT_TIME_FORMAT.format(windowEnd.atZone(zoneId))
+    val drawn = series.filter { it.points.isNotEmpty() }
+    if (drawn.isEmpty()) return "$span to $ending. No readings in this window."
+
+    val lines =
+        drawn.joinToString(" ") { entry ->
+            val item = entry.spec
+            val axis =
+                item.scale ?: if (item.axis == ChartAxis.LEFT) leftAxis else rightAxis ?: leftAxis
+            val values = entry.points.map { it.value }
+            val unit = axis.label.takeIf { it.isNotBlank() }?.let { " $it" } ?: ""
+            // The last point rather than the highest: where a line has got to is
+            // what a glance at the right-hand edge answers, and it is the one
+            // thing a range cannot say.
+            val latest = axis.format(entry.points.last().value)
+            "${item.label}, ${axis.format(values.min())} to ${axis.format(values.max())}$unit," +
+                " latest $latest$unit."
+        }
+    return "$span to $ending. $lines"
 }
 
 /**

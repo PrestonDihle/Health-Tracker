@@ -177,6 +177,29 @@ prefers the manual entry on any day that has both. A sync must never overwrite a
 substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
 Grouping burn figures next to protein/carbs/fat is what originally made the dashboard read as intake.
 
+### Backup
+
+`data/CsvBackup.kt` writes every table to a zip of CSVs, handed to the share sheet through a
+`FileProvider`. Everything this app knows lives in one SQLite file in one app's private storage, and
+none of it -- fasting history, hand-typed weights, blood sugar, the stack -- exists anywhere else.
+
+**The table list comes from `sqlite_master`, not from a list in the source.** A hand-maintained list
+is correct on the day it is written and quietly incomplete from the next migration onward, which is
+the one thing a backup cannot be: nobody looks at one until they need it. That is also why the DAO
+has a single `@RawQuery` returning a `Cursor` rather than fifteen `SELECT *` methods -- and why that
+one method is deliberately *not* `suspend`, since Room will not build a suspending raw query
+returning a cursor it cannot know when to close. The caller closes it and moves the work to IO.
+
+`domain/Csv.kt` holds the escaping, separately and tested, because it is the part that fails
+silently: a supplement called `Vitamin D3, 5000 IU` written unquoted becomes two columns and shifts
+every later column on that row. A backup that loads without complaint and is wrong is worse than one
+that fails outright. Values are written in their stored form -- epoch millis stay epoch millis --
+rather than formatted, which would be a second date format to keep in step with `Converters`.
+
+The provider is scoped to `cache/exports/` rather than the whole cache, so nothing else the app
+writes is reachable through a `content://` URI, and the share carries
+`FLAG_GRANT_READ_URI_PERMISSION` so the receiving app gets that one file for that one send.
+
 ### Supplements
 
 Two tables, and the split is the same one the weight waypoints made: `Supplement` is a **standing
@@ -500,10 +523,16 @@ a plain local read inside one is the value the chart had when it first composed,
 real bug that was written and caught here -- the crosshair would not dismiss, because the "is there
 one standing?" check was reading `null` from the first composition.
 
-The plot takes an optional `contentDescription`, which the master graph fills in. A Canvas is a blank
-to TalkBack, and that mattered less while a chart was only something to look at; it is a control now,
-and a control with no name is not there at all for anyone using one. It is also the only handle the
-render tests have on the plot, since nothing inside it carries text.
+The plot takes an optional `contentDescription` naming its *purpose*, and always appends a
+`spokenSummary` describing what is on it -- the window, then each drawn series with its range and its
+latest value. A Canvas is a blank to TalkBack, so without this a chart is an empty rectangle and
+every number on it is unreachable. The summary is **derived from the series rather than written by
+the caller**, because a hand-written description is right on the day it is typed and wrong every day
+after. It is a summary and not a reading-out: eight series at CGM resolution is thousands of points,
+and a screen reader reciting them is worse than one saying nothing -- "what was it at 4 PM" is the
+crosshair's question, and the crosshair is reached by tapping the very element this describes. The
+description is also the only handle the render tests have on the plot, since nothing inside it
+carries text.
 
 `DualAxisTimeChart` clips every series to the window **once**, up front, and every axis, legend
 caption and empty check is computed from the clipped points. This matters because series here are
@@ -536,7 +565,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest` and `PanWindowTest`
-are the pure-JVM suites. `SupplementsTest` is a Robolectric repository suite alongside
+and `CsvTest` are the pure-JVM suites. `CsvBackupTest` and `SupplementsTest` are Robolectric
+repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
 thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,
 and removing a supplement takes its ticks with it. Adherence

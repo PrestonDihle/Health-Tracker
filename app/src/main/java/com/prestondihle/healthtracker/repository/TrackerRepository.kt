@@ -4,6 +4,7 @@ import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.BloodSugarReading
 import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.CreatineIntake
+import com.prestondihle.healthtracker.data.CsvBackup
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.ExerciseSet
@@ -36,6 +37,7 @@ import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.health.HeartRateSample
 import com.prestondihle.healthtracker.health.StepSource
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -129,6 +131,14 @@ class TrackerRepository(
     suspend fun setWaistCm(date: LocalDate, cm: Float) = dao.upsertWaist(WaistEntry(date, cm))
 
     // ----- Supplements -------------------------------------------------------
+
+    /**
+     * Writes every table to [destination] as a zip of CSVs.
+     *
+     * Reads the schema rather than a list of tables, so it goes on covering the
+     * whole database as that schema grows. See [CsvBackup].
+     */
+    suspend fun writeCsvBackup(destination: File) = CsvBackup.writeZip(dao, destination)
 
     fun getSupplements(): Flow<List<Supplement>> = dao.getSupplements()
 

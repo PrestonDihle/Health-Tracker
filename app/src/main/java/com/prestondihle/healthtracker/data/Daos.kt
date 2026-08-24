@@ -1,12 +1,15 @@
 package com.prestondihle.healthtracker.data
 
+import android.database.Cursor
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Update
 import androidx.room.Upsert
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 
@@ -98,6 +101,24 @@ interface TrackerDao {
     @Upsert suspend fun upsertWaist(entry: WaistEntry)
 
     // ----- Supplements -------------------------------------------------------
+
+    /**
+     * A raw cursor, for dumping a table to CSV without a method per table.
+     *
+     * The alternative is fifteen hand-written `SELECT *` queries plus a list of
+     * them kept in step by hand -- a backup that silently stops covering a table
+     * on the day one is added, and nobody looks at a backup until they need it.
+     * Driving the export off `sqlite_master` instead means the file follows the
+     * schema on its own.
+     *
+     * Only ever called with table names read back out of `sqlite_master`, so no
+     * caller-supplied string goes anywhere near it.
+     *
+     * Not `suspend`: Room will not build a suspending `@RawQuery` that returns a
+     * `Cursor`, since it cannot know when to close it. The caller does the
+     * closing, and moves the whole export onto an IO dispatcher.
+     */
+    @RawQuery fun rawCursor(query: SupportSQLiteQuery): Cursor
 
     /**
      * The whole stack, in the order it is taken.

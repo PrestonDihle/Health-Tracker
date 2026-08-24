@@ -9,12 +9,12 @@ reps and reading.
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, supplements, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
+| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, creatine, supplements, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
 | **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour |
 | **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading — each against its own reference line |
 | **History** | Backfill or correct any past day |
-| **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints |
+| **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
 
 ## Reference lines
 
@@ -224,6 +224,12 @@ alone, so the screen goes on scrolling. Panning shows what is already on the
 phone; the refresh button re-syncs whatever window is on screen when it is
 pressed.
 
+Charts also describe themselves to a screen reader: the window, then each drawn
+line with its range and its latest value. A Canvas is otherwise a blank
+rectangle to TalkBack, with every number on it out of reach. It is a summary
+rather than a reading-out — the crosshair is what answers "what was it at 4 PM",
+and it is reached by tapping the same thing that speaks.
+
 **A switch per line** sits under the chart, coloured to match it, and that is the
 control: it shows every line whether or not it is currently drawn. **Tapping a
 name in the key** is the shortcut — it puts that line away without leaving the
@@ -291,6 +297,28 @@ This is a different threshold from the one above, on purpose. Breaking a line
 asks "was this measured"; going back to the source asks "is it worth a query",
 and a reader taking three fingersticks a day has hours of genuine emptiness that
 no re-read will ever fill.
+
+## Backup
+
+Everything the app knows is one SQLite file in one app's private storage. An
+uninstall, a lost handset or a corrupted page takes fasting history, hand-typed
+weights and waists, blood sugar and the stack with it, and none of that exists
+anywhere else. **Settings → Backup** writes every table to a zip of CSV files and
+hands it to the share sheet; where it goes from there is your business, and the
+app has no network permission to have an opinion about it.
+
+The tables come from the schema rather than from a list in the source, so the
+export keeps covering the whole database as that database grows. CSV rather than
+a copy of the file, because the point is that it opens in something that is not
+this app, on a day this app may no longer install.
+
+## Creatine
+
+A running daily total with quick +5 g and +1 g buttons, and every dose removable
+— a loading week is four doses a day and a maintenance week is one, so what
+matters is *how much*, not whether. The table for this existed from the first
+commit and nothing was ever wired to it; it was in the database and not on the
+phone.
 
 ## Supplements
 

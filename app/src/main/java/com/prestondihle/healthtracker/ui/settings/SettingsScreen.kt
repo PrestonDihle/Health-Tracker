@@ -1,5 +1,7 @@
 ﻿package com.prestondihle.healthtracker.ui.settings
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,8 +30,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.UnitSystemEnum
 import com.prestondihle.healthtracker.data.WeightSubGoal
@@ -37,6 +41,9 @@ import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.Stepper
+import java.io.File
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
@@ -405,6 +412,76 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 onAdd = viewModel::addWeightSubGoalLbs,
                 onDelete = viewModel::deleteWeightSubGoal,
             )
+        }
+        item {
+            BackupCard(isExporting = state.isExporting, onExport = viewModel::exportBackup)
+        }
+    }
+}
+
+/**
+ * Getting the data off the phone.
+ *
+ * Everything this app knows lives in one SQLite file in one app's private
+ * storage: an uninstall, a lost handset or a corrupted page takes fasting
+ * history, hand-typed weights and waists, blood sugar and the supplement stack
+ * with it, and none of that exists anywhere else. The share sheet is the whole
+ * feature -- where the file goes afterwards is the reader's business, and the
+ * app deliberately has no opinion and no network permission to have one with.
+ *
+ * A zip of CSVs rather than a copy of the database, because the point is that it
+ * can be opened by something that is not this app, on a day this app may no
+ * longer install.
+ */
+@Composable
+private fun BackupCard(isExporting: Boolean, onExport: (File, (Throwable?) -> Unit) -> Unit) {
+    val context = LocalContext.current
+
+    SettingsCard(title = "Backup") {
+        Text(
+            "Writes every table to a zip of CSV files and hands it to the share " +
+                "sheet. Nothing leaves the phone unless you send it somewhere.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        TextButton(
+            enabled = !isExporting,
+            onClick = {
+                // Named for the day it was taken, so a folder of them reads as a
+                // history rather than as one file repeatedly overwritten.
+                val stamp = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                val destination = File(context.cacheDir, "exports/health-tracker-$stamp.zip")
+                onExport(destination) { failure ->
+                    if (failure != null) {
+                        Toast.makeText(
+                                context,
+                                "Export failed: ${failure.message ?: "unknown error"}",
+                                Toast.LENGTH_LONG,
+                            )
+                            .show()
+                        return@onExport
+                    }
+                    val uri =
+                        FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            destination,
+                        )
+                    val share =
+                        Intent(Intent.ACTION_SEND).apply {
+                            type = "application/zip"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            putExtra(Intent.EXTRA_SUBJECT, destination.name)
+                            // Read access to this one file for this one share,
+                            // granted to whichever app the sheet lands on.
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    context.startActivity(Intent.createChooser(share, "Share backup"))
+                }
+            },
+        ) {
+            Text(if (isExporting) "Exporting…" else "Export a backup")
         }
     }
 }

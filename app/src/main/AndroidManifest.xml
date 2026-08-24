@@ -83,6 +83,25 @@
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
         </activity-alias>
+
+        <!--
+          Hands the share sheet a content:// URI for an exported backup. A
+          file:// URI has been illegal to share since Android 7, and the whole
+          point of the export is that the file leaves the app.
+
+          grantUriPermissions with FLAG_GRANT_READ_URI_PERMISSION on the intent
+          means the receiving app gets read access to that one file for that one
+          share, rather than the provider being exported to everything.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.CaffeineIntake
+import com.prestondihle.healthtracker.data.CreatineIntake
 import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.data.MovementType
@@ -169,6 +170,20 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
                 },
                 onDelete = {
                     viewModel.deleteCaffeine(it)
+                    toast("Dose removed")
+                },
+            )
+        }
+
+        item {
+            CreatineCard(
+                state = state,
+                onLog = { grams ->
+                    viewModel.logCreatine(grams)
+                    toast("Logged $grams g creatine")
+                },
+                onDelete = {
+                    viewModel.deleteCreatine(it)
                     toast("Dose removed")
                 },
             )
@@ -667,6 +682,77 @@ private sealed interface CaffeineDialog {
     data object New : CaffeineDialog
 
     data class Edit(val intake: CaffeineIntake) : CaffeineDialog
+}
+
+/** The maintenance dose, and so the only button most days need. */
+private const val CREATINE_DOSE_G = 5
+
+/**
+ * Creatine taken today.
+ *
+ * The table, the DAO and the repository methods for this have existed since the
+ * first commit and nothing was ever wired to them -- the feature was in the
+ * database and not on the phone. A running total with an undo rather than a
+ * tick, because unlike a supplement the interesting question is *how much*: a
+ * loading week is four doses a day and a maintenance week is one.
+ */
+@Composable
+private fun CreatineCard(
+    state: DashboardUiState,
+    onLog: (Int) -> Unit,
+    onDelete: (CreatineIntake) -> Unit,
+) {
+    DashboardCard(title = "Creatine") {
+        Metric(
+            label = "Today",
+            value = "${state.creatineTodayGrams} g",
+            supporting =
+                when (state.creatineToday.size) {
+                    0 -> null
+                    1 -> "1 dose"
+                    else -> "${state.creatineToday.size} doses"
+                },
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(
+                onClick = { onLog(CREATINE_DOSE_G) },
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("+$CREATINE_DOSE_G g")
+            }
+            FilledTonalButton(onClick = { onLog(1) }, contentPadding = CompactButtonPadding) {
+                Text("+1 g")
+            }
+        }
+
+        // Today's doses, newest first, each removable. A mistyped scoop is
+        // otherwise stuck in the total until midnight with no way to take it
+        // back.
+        state.creatineToday.reversed().forEach { intake ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("${intake.grams} g", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        intake.timestamp.asShortDateTime(state),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    IconButton(onClick = { onDelete(intake) }) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Remove ${intake.grams} g dose",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**

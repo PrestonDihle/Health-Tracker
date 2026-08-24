@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.BloodSugarReading
 import com.prestondihle.healthtracker.data.CaffeineIntake
+import com.prestondihle.healthtracker.data.CreatineIntake
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
@@ -123,6 +124,8 @@ data class DashboardUiState(
     val caffeine: List<CaffeineIntake> = emptyList(),
     /** Most recent grip measurement on or before today, with the date it was taken. */
     val latestGrip: GripStrengthEntry? = null,
+    /** Creatine logged today, newest last. */
+    val creatineToday: List<CreatineIntake> = emptyList(),
     /** The standing stack, morning first. */
     val supplements: List<Supplement> = emptyList(),
     /** Ids of the ones already taken today. */
@@ -152,6 +155,16 @@ data class DashboardUiState(
                             it.goalDurationMinutes)
                         .coerceIn(0f, 1f)
             }
+
+    /**
+     * Creatine taken today, in grams.
+     *
+     * Summed rather than stored, like every other daily total here -- doses are
+     * the record, and a running column would be a second place for the same
+     * number to live and disagree.
+     */
+    val creatineTodayGrams: Int
+        get() = creatineToday.sumOf { it.grams }
 
     /**
      * How many of the standing stack have been ticked today.
@@ -307,6 +320,7 @@ private data class TodayBundle(
     val hydrationMl: Int,
     val waist: WaistEntry?,
     val bloodPressures: List<BloodPressureReading>,
+    val creatine: List<CreatineIntake>,
     val body: BodyBundle,
 )
 
@@ -395,7 +409,10 @@ class DashboardViewModel(
                 repository.getDailyLog(date),
                 repository.getHydrationTotalMl(date),
                 repository.getLatestWaistOnOrBefore(date),
-                repository.getBloodPressureForDate(date),
+                combine(
+                    repository.getBloodPressureForDate(date),
+                    repository.getCreatineForDate(date),
+                ) { bps, creatine -> bps to creatine },
                 combine(
                     repository.getRepTotalForDate(MovementType.PUSHUP, date),
                     repository.getRepTotalForDate(MovementType.AIR_SQUAT, date),
@@ -405,8 +422,15 @@ class DashboardViewModel(
                 ) { pushups, squats, grip, supplements, taken ->
                     BodyBundle(pushups, squats, grip, supplements, taken)
                 },
-            ) { log, hydration, waist, bps, body ->
-                TodayBundle(log, hydration, waist, bps, body)
+            ) { log, hydration, waist, bpAndCreatine, body ->
+                TodayBundle(
+                    log,
+                    hydration,
+                    waist,
+                    bpAndCreatine.first,
+                    bpAndCreatine.second,
+                    body,
+                )
             }
         }
 
@@ -490,6 +514,7 @@ class DashboardViewModel(
                     settings = metabolicBundle.settings,
                     caffeine = metabolicBundle.caffeine,
                     latestGrip = todayBundle.body.grip,
+                    creatineToday = todayBundle.creatine,
                     supplements = todayBundle.body.supplements,
                     supplementsTaken = todayBundle.body.supplementsTaken,
                     latestBloodPressure = todayBundle.bloodPressures.lastOrNull(),
@@ -589,6 +614,15 @@ class DashboardViewModel(
     /** Ticks or unticks one supplement for today. */
     fun setSupplementTaken(supplement: Supplement, taken: Boolean) {
         viewModelScope.launch { repository.setSupplementTaken(supplement, today, taken) }
+    }
+
+    fun logCreatine(grams: Int, at: Instant = Instant.now()) {
+        if (grams <= 0) return
+        viewModelScope.launch { repository.addCreatine(grams, at) }
+    }
+
+    fun deleteCreatine(intake: CreatineIntake) {
+        viewModelScope.launch { repository.deleteCreatine(intake) }
     }
 
     fun logCaffeine(milligrams: Int, at: Instant = Instant.now()) {

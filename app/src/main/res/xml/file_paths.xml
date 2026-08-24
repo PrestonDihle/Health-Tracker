@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The only directory the FileProvider will hand out, and it holds nothing but
+  generated backups. Scoped to a subdirectory of the cache rather than to the
+  cache itself so that nothing else the app happens to write there is reachable
+  through a content:// URI by anything the share sheet is pointed at.
+-->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

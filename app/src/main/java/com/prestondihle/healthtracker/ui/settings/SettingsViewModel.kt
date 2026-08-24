@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.LocalDate
 
 /**
@@ -45,6 +46,8 @@ data class SettingsUiState(
     /** Today's per-app step totals, loaded on demand. */
     val stepSources: List<StepSource> = emptyList(),
     val isLoadingStepSources: Boolean = false,
+    /** True while a backup is being written, so the button cannot be pressed twice. */
+    val isExporting: Boolean = false,
 ) {
     /** The goal in the unit every weight control on this screen is dialled in. */
     val goalWeightLbs: Float?
@@ -75,14 +78,23 @@ data class SettingsUiState(
 }
 
 /** Bundled because combine's typed overloads stop at five sources. */
-private data class StepSourceBundle(val sources: List<StepSource>, val isLoading: Boolean)
+private data class StepSourceBundle(
+    val sources: List<StepSource>,
+    val isLoading: Boolean,
+    val isExporting: Boolean,
+)
 
 class SettingsViewModel(private val repository: TrackerRepository) : ViewModel() {
 
     private val stepSources = MutableStateFlow<List<StepSource>>(emptyList())
     private val loadingStepSources = MutableStateFlow(false)
 
-    private val stepSourceState = combine(stepSources, loadingStepSources, ::StepSourceBundle)
+    private val exporting = MutableStateFlow(false)
+
+    private val stepSourceState =
+        combine(stepSources, loadingStepSources, exporting) { sources, loading, isExporting ->
+            StepSourceBundle(sources, loading, isExporting)
+        }
 
     val uiState: StateFlow<SettingsUiState> = combine(
         repository.getUserSettings(),
@@ -98,6 +110,7 @@ class SettingsViewModel(private val repository: TrackerRepository) : ViewModel()
             latestWeight = latestWeight,
             stepSources = steps.sources,
             isLoadingStepSources = steps.isLoading,
+            isExporting = steps.isExporting,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -131,6 +144,23 @@ class SettingsViewModel(private val repository: TrackerRepository) : ViewModel()
                 uiState.value.settings.copy(preferredStepsPackage = packageName)
             )
             repository.syncHealthData(LocalDate.now())
+        }
+    }
+
+    /**
+     * Writes a backup to [destination] and reports what happened.
+     *
+     * The failure is handed back rather than swallowed. A backup that quietly
+     * did not happen is the worst possible outcome here -- worse than no button
+     * at all, because it is believed.
+     */
+    fun exportBackup(destination: File, onFinished: (Throwable?) -> Unit) {
+        if (exporting.value) return
+        viewModelScope.launch {
+            exporting.value = true
+            val failure = runCatching { repository.writeCsvBackup(destination) }.exceptionOrNull()
+            exporting.value = false
+            onFinished(failure)
         }
     }
 
