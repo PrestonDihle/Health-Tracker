@@ -122,6 +122,18 @@ interface HealthDataSource {
     suspend fun readHeartRate(from: Instant, to: Instant): List<HeartRateSample>
 
     /**
+     * Blood sugar in an arbitrary window.
+     *
+     * [readDay] already returns a day's worth, and that is the right shape for
+     * the daily sync. This exists for the other question: filling a hole. A
+     * monitor that was out of range writes its readings to Health Connect hours
+     * late, by which time nothing re-reads the day they belong to, and asking for
+     * the whole of a three-day-old day to recover forty minutes of it is a lot of
+     * records to fetch and discard. See [com.prestondihle.healthtracker.domain.GlucoseGaps].
+     */
+    suspend fun readGlucose(from: Instant, to: Instant): List<GlucoseSample>
+
+    /**
      * Steps in a window, split into wall-clock hours.
      *
      * Aligned to the hour rather than to [from] so the same hour always produces

@@ -33,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -237,6 +237,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The rest of the adjustable reference lines, and the glucose plot
+         * bounds.
+         *
+         * Every one of these carries a SQLite default for the reason the last
+         * three migrations did: an upgrading user already has a UserGoals row,
+         * and a column added without one arrives NULL, which each chart reads as
+         * "no line" -- so the blood pressure rule an earlier version drew at a
+         * hard-coded 120 would vanish on upgrade, and the glucose plot would
+         * lose the bounds it has always had. The defaults are exactly the
+         * figures those charts were previously fixed at, so nothing moves.
+         */
+        internal val migration8To9Statements =
+            listOf(
+                "ALTER TABLE `UserGoals` ADD COLUMN `glucosePlotMinMgDl` INTEGER DEFAULT 60",
+                "ALTER TABLE `UserGoals` ADD COLUMN `glucosePlotMaxMgDl` INTEGER DEFAULT 180",
+                "ALTER TABLE `UserGoals` ADD COLUMN `bloodPressureSystolicReference` INTEGER " +
+                    "DEFAULT 120",
+                "ALTER TABLE `UserGoals` ADD COLUMN `bloodPressureDiastolicReference` INTEGER " +
+                    "DEFAULT 80",
+                "ALTER TABLE `UserGoals` ADD COLUMN `sleepMinutesGoal` INTEGER DEFAULT 480",
+            )
+
+        private val MIGRATION_8_9 =
+            object : Migration(8, 9) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration8To9Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -258,6 +288,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_5_6,
                                 MIGRATION_6_7,
                                 MIGRATION_7_8,
+                                MIGRATION_8_9,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

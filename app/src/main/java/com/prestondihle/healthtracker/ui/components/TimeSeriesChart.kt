@@ -33,6 +33,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import kotlin.math.ceil
 
 data class TimePoint(val time: Instant, val value: Float)
@@ -98,6 +99,16 @@ data class ChartSeries(
 )
 
 /**
+ * A horizontal rule at one value on an axis.
+ *
+ * [dashed] marks a figure that came from outside -- a published clinical
+ * threshold. Solid marks one the reader chose from scratch. Keeping the two
+ * apart matters because they carry very different authority, and a rule drawn
+ * the same way in both cases quietly lends one the weight of the other.
+ */
+data class AxisRule(val value: Float, val dashed: Boolean = true)
+
+/**
  * Fixed bounds for one axis. [min] and [max] are a floor and ceiling, not hard
  * limits -- outliers expand the axis so a 250 mg/dL spike is never clipped off
  * the top of the chart.
@@ -107,14 +118,24 @@ data class AxisSpec(
     val max: Float,
     val label: String,
     val format: (Float) -> String = { it.toInt().toString() },
-    val threshold: Float? = null,
     /**
-     * Dashed marks a figure that came from outside -- a published clinical
-     * threshold. Solid marks one the reader chose. Keeping them apart matters
-     * because the two carry very different authority, and a rule drawn the same
-     * way in both cases quietly lends one the weight of the other.
+     * Reference rules across the plot.
+     *
+     * A list rather than the single value this started as, because a blood
+     * pressure chart carries two numbers and one rule can only ever be read
+     * against one of them: drawn with a systolic rule alone, the diastolic line
+     * had nothing to be read against at all.
      */
-    val thresholdDashed: Boolean = true,
+    val rules: List<AxisRule> = emptyList(),
+    /**
+     * Colour for this axis' numbers, or null for the ordinary label grey.
+     *
+     * Set where an axis serves exactly one line, so the numbers down the side
+     * say which line they belong to. Left null where an axis carries several --
+     * tinting shared numbers with one series' colour claims they are that
+     * series', which is worse than not tinting them at all.
+     */
+    val color: Color? = null,
     /**
      * A range shaded behind the data, for a target the series is read against.
      *
@@ -170,6 +191,83 @@ private val MARKER_LABEL_GAP = 6.dp
 /** Least vertical room a gridline row may have before rows are dropped. */
 private val MIN_ROW_SPACING = 28.dp
 
+/** Least horizontal room between two time rules before the interval widens. */
+private val MIN_GRIDLINE_SPACING = 14.dp
+
+/**
+ * Where the vertical rules go on a time chart.
+ *
+ * Separated out and left `internal` because the choice of interval is the part
+ * worth pinning down, and it is arithmetic rather than drawing.
+ */
+internal object TimeGridlines {
+
+    /**
+     * Intervals a day divides evenly into.
+     *
+     * Evenly, so that every rule lands on the same clock times each day and the
+     * pattern repeats: a 5-hour interval would drift through the day and put the
+     * rules in different places on Tuesday than on Monday, which is the opposite
+     * of what a gridline is for. 24 is the widest -- beyond a day apart the rules
+     * are marking dates, and the tick labels already do that.
+     */
+    private val INTERVALS = listOf(1L, 2L, 3L, 4L, 6L, 12L, 24L)
+
+    /**
+     * Hours between rules for a window of [windowHours].
+     *
+     * Hourly up to half a day, four-hourly beyond it: an hour is the unit a meal
+     * or a walk is read in, and it stays legible while a window is short enough
+     * for individual hours to matter. Past that the question stops being "which
+     * hour" and becomes "which part of the day", and a rule per hour is 24 lines
+     * of furniture across the data.
+     *
+     * The base choice is then widened until the rules are at least
+     * [minSpacingPx] apart, which is what keeps a week from arriving as 42 lines
+     * roughly a finger-width in total. The guard is in pixels rather than in
+     * hours because it is a question about the screen, not about the clock --
+     * the same window on a tablet has room for more.
+     */
+    fun intervalHours(windowHours: Long, plotWidthPx: Float, minSpacingPx: Float): Long {
+        if (windowHours <= 0) return 0
+        val base = if (windowHours <= 12) 1L else 4L
+        if (plotWidthPx <= 0f || minSpacingPx <= 0f) return base
+        return INTERVALS.firstOrNull {
+            it >= base && plotWidthPx * (it.toFloat() / windowHours) >= minSpacingPx
+        }
+            // Nothing fits: a day apart is as wide as these go, and drawing the
+            // widest available beats drawing none.
+            ?: INTERVALS.last()
+    }
+
+    /**
+     * Every clock time in the window that lands on [intervalHours].
+     *
+     * Aligned to the local hour of day rather than stepped from the window edge,
+     * so the rules sit on 4 PM and 8 PM rather than on "four hours before now".
+     * Walked hour by hour instead of added to, because adding a fixed number of
+     * hours across a daylight-saving change lands an hour off the clock and puts
+     * every rule after it in the wrong place.
+     */
+    fun times(
+        windowStart: Instant,
+        windowEnd: Instant,
+        zoneId: ZoneId,
+        intervalHours: Long,
+    ): List<Instant> {
+        if (intervalHours <= 0 || !windowStart.isBefore(windowEnd)) return emptyList()
+        val times = mutableListOf<Instant>()
+        var cursor = windowStart.atZone(zoneId).truncatedTo(ChronoUnit.HOURS)
+        while (!cursor.toInstant().isAfter(windowEnd)) {
+            if (!cursor.toInstant().isBefore(windowStart) && cursor.hour % intervalHours == 0L) {
+                times.add(cursor.toInstant())
+            }
+            cursor = cursor.plusHours(1)
+        }
+        return times
+    }
+}
+
 /**
  * Time-indexed line chart with an independent scale on each side.
  *
@@ -188,6 +286,15 @@ fun DualAxisTimeChart(
     zoneId: ZoneId = ZoneId.systemDefault(),
     /** Vertical rules, used to separate measured past from projected future. */
     markers: List<ChartMarker> = emptyList(),
+    /**
+     * Rules on the clock, at whole hours.
+     *
+     * Off by default. They earn their ink on a plot carrying several series that
+     * are being read against each other in time -- did the rise start before or
+     * after that walk -- and are clutter on a chart with one line on it, where
+     * the tick labels already say enough.
+     */
+    verticalGridlines: Boolean = false,
 ) {
     val textMeasurer = rememberTextMeasurer()
     val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -223,6 +330,7 @@ fun DualAxisTimeChart(
                         axisTextColor = axisTextColor,
                         zoneId = zoneId,
                         markers = markers,
+                        verticalGridlines = verticalGridlines,
                     )
                 }
             }
@@ -397,6 +505,7 @@ private fun DrawScope.drawChart(
     axisTextColor: Color,
     zoneId: ZoneId,
     markers: List<ChartMarker> = emptyList(),
+    verticalGridlines: Boolean = false,
 ) {
     val leftGutter = 36.dp.toPx()
     val rightGutter = if (rightAxis != null) 36.dp.toPx() else 8.dp.toPx()
@@ -444,6 +553,12 @@ private fun DrawScope.drawChart(
     // rows of labels in 72dp overprint into an unreadable stack. Two gaps is the
     // floor, which still gives a min, a max and a midpoint.
     val rows = (plotHeight / MIN_ROW_SPACING.toPx()).toInt().coerceIn(2, 4)
+    // Tinted per axis where the axis names a colour, so the numbers down the
+    // side say which line they belong to. The gutter is the one place a reader
+    // has to work out what a figure measures, and on a plot carrying five units
+    // the label alone does not settle it.
+    val leftLabelStyle = leftAxis.color?.let { labelStyle.copy(color = it) } ?: labelStyle
+    val rightLabelStyle = rightAxis?.color?.let { labelStyle.copy(color = it) } ?: labelStyle
     for (i in 0..rows) {
         val fraction = i.toFloat() / rows
         val y = plotBottom - fraction * plotHeight
@@ -454,7 +569,7 @@ private fun DrawScope.drawChart(
             strokeWidth = 1f,
         )
         val value = leftAxis.min + fraction * (leftAxis.max - leftAxis.min)
-        val laid = textMeasurer.measure(leftAxis.format(value), labelStyle)
+        val laid = textMeasurer.measure(leftAxis.format(value), leftLabelStyle)
         drawText(
             textLayoutResult = laid,
             topLeft =
@@ -466,7 +581,7 @@ private fun DrawScope.drawChart(
 
         if (rightAxis != null) {
             val rightValue = rightAxis.min + fraction * (rightAxis.max - rightAxis.min)
-            val rightLaid = textMeasurer.measure(rightAxis.format(rightValue), labelStyle)
+            val rightLaid = textMeasurer.measure(rightAxis.format(rightValue), rightLabelStyle)
             drawText(
                 textLayoutResult = rightLaid,
                 topLeft =
@@ -474,6 +589,32 @@ private fun DrawScope.drawChart(
                         x = plotRight + 4.dp.toPx(),
                         y = y - rightLaid.size.height / 2f,
                     ),
+            )
+        }
+    }
+
+    // Vertical rules on the clock, where asked for.
+    //
+    // Deliberately not the same instants as the tick labels below: those step
+    // back from now and so land wherever the window happens to end, which is
+    // fine for saying roughly when, and useless for the thing these are for --
+    // reading one hour against another. A rule at 2:47 does not answer "how much
+    // of that rise was in the hour after eating".
+    if (verticalGridlines) {
+        val interval =
+            TimeGridlines.intervalHours(
+                windowHours = Duration.between(windowStart, windowEnd).toHours(),
+                plotWidthPx = plotWidth,
+                minSpacingPx = MIN_GRIDLINE_SPACING.toPx(),
+            )
+        for (at in TimeGridlines.times(windowStart, windowEnd, zoneId, interval)) {
+            val x = xFor(at)
+            if (x < plotLeft || x > plotRight) continue
+            drawLine(
+                color = gridColor,
+                start = androidx.compose.ui.geometry.Offset(x, plotTop),
+                end = androidx.compose.ui.geometry.Offset(x, plotBottom),
+                strokeWidth = 1f,
             )
         }
     }
@@ -520,9 +661,9 @@ private fun DrawScope.drawChart(
         tick = tick.minus(Duration.ofHours(tickHours))
     }
 
-    // Threshold lines, drawn under the data.
-    leftAxis.threshold?.let { drawThreshold(yFor(it, leftAxis), plotLeft, plotRight, leftAxis.thresholdDashed) }
-    rightAxis?.threshold?.let { drawThreshold(yFor(it, rightAxis), plotLeft, plotRight, rightAxis.thresholdDashed) }
+    // Reference rules, drawn under the data.
+    leftAxis.rules.forEach { drawRule(yFor(it.value, leftAxis), plotLeft, plotRight, it.dashed) }
+    rightAxis?.rules?.forEach { drawRule(yFor(it.value, rightAxis), plotLeft, plotRight, it.dashed) }
 
     // Bars before rules and lines. A column is a block of ink the width of a
     // whole hour; anything drawn under one is simply gone.
@@ -686,7 +827,7 @@ private fun DrawScope.drawChart(
     }
 }
 
-private fun DrawScope.drawThreshold(y: Float, left: Float, right: Float, dashed: Boolean) {
+private fun DrawScope.drawRule(y: Float, left: Float, right: Float, dashed: Boolean) {
     drawLine(
         color = Color(0xFFA30000),
         start = androidx.compose.ui.geometry.Offset(left, y),

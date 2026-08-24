@@ -26,6 +26,7 @@ import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeeklyPerformance
 import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.domain.GlucoseGaps
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
@@ -538,5 +539,67 @@ class TrackerRepository(
                     }
             if (fresh.isNotEmpty()) dao.insertBloodSugarReadings(fresh)
         }
+    }
+
+    /**
+     * Asks the source again about the stretches where the blood sugar trace is
+     * missing.
+     *
+     * [syncHealthData] only ever re-reads the day it is given, which is almost
+     * always today, so a reading that reaches Health Connect late -- a monitor
+     * that was out of Bluetooth range and uploaded hours afterwards -- lands on a
+     * day nothing asks about any more. The hole is then permanent, and looks on
+     * the chart exactly like a sensor that was genuinely not reporting.
+     *
+     * Returns how many readings were recovered, which is what lets the caller say
+     * so rather than silently changing a chart the reader was looking at.
+     *
+     * Only the gaps are read, not the window: on a healthy trace this finds
+     * nothing to do and costs one local query. It does re-ask about a span that
+     * is genuinely empty, on every refresh, forever -- which is the price of not
+     * keeping a record of what has already been given up on, and is bounded by
+     * [GlucoseGaps.MAX_SPANS] queries against a three-day window.
+     */
+    suspend fun backfillGlucoseGaps(now: Instant = Instant.now()): Result<Int> = runCatching {
+        val from = now.minus(Duration.ofHours(GlucoseGaps.WINDOW_HOURS))
+        val cached = dao.getBloodSugarReadingsBetween(from.toEpochMilli(), now.toEpochMilli()).first()
+        val gaps = GlucoseGaps.spans(cached.map { it.timestamp }, from, now)
+        if (gaps.isEmpty()) return@runCatching 0
+
+        // Every id already held across the whole window, fetched once: a span is
+        // padded past the readings that bound it, so each read comes back holding
+        // records this has seen before whether or not anything new arrived.
+        //
+        // Added to as it goes, because the padding means two neighbouring spans
+        // can overlap by a few minutes. The unique index would refuse the second
+        // copy either way; what this protects is the count, which is reported to
+        // the reader and would otherwise claim recoveries that never happened.
+        val known =
+            dao.getKnownGlucoseExternalIds(from.toEpochMilli(), now.toEpochMilli())
+                .toMutableSet()
+
+        var recovered = 0
+        for (gap in gaps) {
+            val samples =
+                runCatching { healthDataSource.readGlucose(gap.from, gap.to) }
+                    .getOrDefault(emptyList())
+            val fresh =
+                samples
+                    .filter { it.externalId != null && it.externalId !in known }
+                    .map {
+                        BloodSugarReading(
+                            timestamp = it.time,
+                            mgDl = it.mgDl,
+                            source = DataSourceEnum.HEALTH_CONNECT,
+                            externalId = it.externalId,
+                        )
+                    }
+            if (fresh.isNotEmpty()) {
+                dao.insertBloodSugarReadings(fresh)
+                known += fresh.mapNotNull { it.externalId }
+                recovered += fresh.size
+            }
+        }
+        recovered
     }
 }

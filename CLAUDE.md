@@ -196,6 +196,24 @@ Health Connect has no mile-split concept. `bestMileSeconds` is elapsed time divi
 normalised to a mile, over runs of at least a mile — so it is *average pace*, not a PR, and is
 labelled as such in the UI.
 
+**Glucose is cached a calendar day at a time and only *today* is ever re-read**, which is right for a
+finished day and wrong for one that was never finished properly: a monitor out of Bluetooth range
+writes its readings to Health Connect hours late, by which time nothing asks about the day they
+belong to and the hole is permanent. `domain/GlucoseGaps.kt` turns the holes themselves into the
+query — `TrackerRepository.backfillGlucoseGaps` finds the stretches of the last 72 hours with nothing
+in them and re-reads only those, with the `externalId` index throwing away what came back already
+known. **The window end counts as an edge**: a monitor that stopped an hour ago leaves its gap where
+no later reading bounds it, and that is the freshest and most fillable gap there is.
+
+Its threshold is **fixed at 45 minutes**, deliberately unlike `SeriesGaps`, which judges a break
+against the series' own cadence. The two are answering different questions: `SeriesGaps` decides
+whether to *draw* a line, where a fingerstick user's five-hour spacing is not a dropout; this decides
+whether to spend a query, where judging by that same cadence would leave a continuous monitor's
+four-hour outage looking unremarkable. More holes than `MAX_SPANS` collapse into one sweep — a trace
+that broken is not worth six round trips to discover. It does re-ask about a genuinely empty span on
+every refresh forever, which is the price of keeping no record of what has been given up on; the
+count of what was recovered is reported on the Today card rather than absorbed silently.
+
 ### Fasting adherence
 
 `domain/Interval.kt` is half-open `[start, end)` interval algebra — `normalized`, `intersectWith`,
@@ -217,20 +235,24 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 8, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 9, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
 tables; `MIGRATION_5_6` does both at once; `MIGRATION_6_7` adds a non-null one. All are covered by
 `MigrationSchemaTest` — note that a table built by one migration and altered by a later one has to be
-checked across **both**, which is why the MealEntry test replays 3-to-4 and then 6-to-7.
+checked across **all** of them, which is why the MealEntry test replays 3-to-4 and then 6-to-7, and
+the UserGoals one replays 5-to-6, 7-to-8 and 8-to-9.
 `fallbackToDestructiveMigration` is still registered, but only covers the v1 schema, which kept
 steps, sleep, macros and rep counts on `DailyLog` and has no sensible column-wise mapping to today's
 tables.
 
 An added column may carry a SQLite `DEFAULT` even where the entity declares none — `MIGRATION_5_6`
 seeds the glucose target that way, so an upgrading user does not find blank a setting that ships
-pre-filled. Room only compares a column's default when the entity spells one out with
+pre-filled. `MIGRATION_8_9` is the case where this matters most: the glucose plot bounds and the
+blood pressure rules were **hard-coded before they were settings**, so a column arriving NULL would
+read as "no line" and visibly change an existing user's charts — which is the one thing turning a
+constant into a setting must not do. Its defaults are exactly the figures those charts were fixed at. Room only compares a column's default when the entity spells one out with
 `@ColumnInfo(defaultValue = …)`, so this is invisible to schema validation. It does mean an
 `ALTER TABLE`-added column **cannot** be checked by diffing DDL text the way a new table is: the
 migration's text says `DEFAULT 70` and Room's `CREATE TABLE` does not. `MigrationSchemaTest` therefore
@@ -337,10 +359,21 @@ The same rule sorts out the other three chart primitives:
 - **Target bands** (`AxisSpec.band`) shade a range behind the data. A filled area answers "was it in
   range" at a glance where two threshold rules leave the reader working out which side of each the
   trace is on.
-  A single value gets `AxisSpec.threshold` instead, which answers "above or below" rather than "in
-  range". `thresholdDashed` keeps the two kinds of rule apart: dashed for a published clinical figure
-  (the blood pressure chart), solid for one the reader chose in Settings (the Today glucose chart).
-  Drawing both the same way quietly lends one the authority of the other.
+  Single values get `AxisSpec.rules` instead, which answer "above or below" rather than "in
+  range". `AxisRule.dashed` keeps the two kinds apart: dashed for a published clinical figure
+  (the blood pressure chart), solid for one the reader chose in Settings (the glucose reference).
+  Drawing both the same way quietly lends one the authority of the other. It is a *list* because
+  blood pressure is two numbers — drawn with a systolic rule alone, the diastolic line had nothing
+  to be read against at all.
+- **Time gridlines** (`DualAxisTimeChart(verticalGridlines = true)`, `TimeGridlines`) are hourly up
+  to a 12-hour window and four-hourly beyond it, then widened through `1, 2, 3, 4, 6, 12, 24` until
+  the rules are at least 14dp apart — a week at four hours is 42 lines a finger-width apart. Every
+  interval divides a day evenly, so the rules sit on the same clock times each day instead of
+  drifting through it. They are aligned to the **local hour**, deliberately *not* to the tick labels
+  below, which step back from *now* and land wherever the window happens to end: a rule at 2:47
+  cannot answer "how much of that rise was in the hour after eating". The hours are walked one at a
+  time rather than added to, so a daylight-saving change does not put every rule after it an hour
+  off the clock. On the master graph only — the tick labels say enough on a chart with one line.
 - **Smoothing** (`domain/GlucoseSmoothing.kt`) is a Gaussian-weighted moving average in *time*, not
   in sample index — index weighting would treat two fingersticks a week apart as neighbours and
   average them together. It never resamples or interpolates: one output per input reading at that
@@ -359,21 +392,29 @@ for a series carrying its own `AxisSpec.scale` the caption *is* its axis: quotin
 range there would print a ceiling the plot stopped using the moment anything exceeded it.
 
 **Which two units get printed down the sides is a reading decision.** `AxisMetric` groups the master
-graph series by unit -- glucose, macros, heart rate, ketones, steps -- and `labelledAxes` holds the
-chosen pair in order, first left then right. Everything unchosen still plots, against its own
-`ChartSeries.scale`, with its range quoted in the legend. **A series takes a labelled axis or a scale
-of its own, never both**: `scale` overrides `axis`, so a unit that has been given a gutter must pass
-`scale = null`, or it goes on being drawn to its private range while the numbers printed beside it
-describe something else. Picking a third drops the oldest rather than refusing the tap; the last one
-cannot be removed, because the plot has to be drawn against something. One consequence worth knowing:
-the glucose target band rides on the glucose `AxisSpec`, so it is only shaded while glucose is one of
-the labelled pair.
+graph series by unit -- glucose, macros, heart rate, ketones, steps, caffeine -- and `labelledAxes`
+holds the chosen pair in order, first left then right. Everything unchosen still plots, against its
+own `ChartSeries.scale`, with its range quoted in the legend. **A series takes a labelled axis or a
+scale of its own, never both**: `scale` overrides `axis`, so a unit that has been given a gutter must
+pass `scale = null`, or it goes on being drawn to its private range while the numbers printed beside
+it describe something else. Picking a third drops the oldest rather than refusing the tap; the last
+one cannot be removed, because the plot has to be drawn against something. One consequence worth
+knowing: the glucose target band and reference rule ride on the glucose `AxisSpec`, so they are only
+drawn while glucose is one of the labelled pair.
+
+**An axis takes its line's colour only when it is serving exactly one.** `AxisSpec.color` tints the
+numbers in the gutter, and `axisColorFor` sets it from the single *visible* series carrying that
+unit. Where several share it there is no honest answer — tinting g/h in the carbohydrate colour
+claims the protein and fat curves are read against some other axis — so it stays the ordinary label
+grey. Switching two of the three macros off hands the axis to the survivor, which is emergent rather
+than special-cased. `MasterSeries.color` is the single source for all three uses: plot, switch, axis.
 
 ## Testing
 
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
-`GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest` and `AxisSelectionTest` are the
-pure-JVM suites. Adherence covers the midnight-wrapping window,
+`GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
+`GlucoseGapsTest` and `TimeGridlinesTest` are the pure-JVM suites. Adherence covers the
+midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
 decay, dose accumulation and curve shape. Absorption covers the gastric lag, per-macro peak ordering,
@@ -384,8 +425,14 @@ Duplicates pins the line between one meal written twice and two similar meals, i
 and `MealTimeStampTest` pins the one between a measured meal time and a stamped one — including that
 three copies of a single meal must *not* make its own timestamp look invented, which only holds
 because the collapse runs first.
-New adherence, interval, stats, decay, absorption, smoothing or duplicate behaviour belongs there.
-`ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
+`GlucoseGapsTest` pins both failure modes of the backfill at once — missing a real hole leaves the
+chart permanently wrong about hours that *were* recorded, and finding one in every sensor stutter
+spends a query on every refresh forever — which is why it carries a fixture for an ordinary
+fifteen-minute stutter alongside the four-hour outage. `TimeGridlinesTest` pins that every interval
+divides a day evenly (otherwise the rules drift through the day), that the density guard is about the
+screen and not the clock, and that a spring-forward day keeps every rule on the hour.
+New adherence, interval, stats, decay, absorption, smoothing, duplicate, gap or gridline behaviour
+belongs there. `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
 
 Awkwardly, the duplicate-collapse cannot be reached through the repository any more: the sync rejects
 duplicates on the way in, so a render test that needs rows in the state a *previous* version left

@@ -49,6 +49,7 @@ import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.health.HealthPermissionState
+import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
@@ -58,6 +59,7 @@ import com.prestondihle.healthtracker.ui.components.MealDraft
 import com.prestondihle.healthtracker.ui.components.MealEntryDialog
 import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
+import com.prestondihle.healthtracker.ui.theme.CaffeineSeries
 import com.prestondihle.healthtracker.ui.theme.CarbAbsorptionSeries
 import com.prestondihle.healthtracker.ui.theme.FatAbsorptionSeries
 import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
@@ -254,6 +256,28 @@ private fun NowCard(state: MasterGraphUiState, onRefresh: () -> Unit) {
 }
 
 /**
+ * The lines one unit is carried by.
+ *
+ * Every series of that unit, whether or not it is currently switched on. The
+ * visible ones are what decides the axis colour: see [axisColorFor].
+ */
+internal val AxisMetric.series: List<MasterSeries>
+    get() = MasterSeries.entries.filter { it.metric == this }
+
+/**
+ * The colour this unit's numbers are printed in, or null for the ordinary grey.
+ *
+ * A colour only where the axis is serving exactly one line that is actually
+ * drawn -- then the numbers unambiguously belong to it, which is the whole point
+ * on a plot carrying six units. Where several lines share the unit there is no
+ * honest answer: tinting mg/h in the carbohydrate colour would claim the
+ * protein and fat curves are read against some other axis. Switching two of the
+ * three off resolves it, and the axis takes the survivor's colour.
+ */
+internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric): Color? =
+    metric.series.filter(::isVisible).singleOrNull()?.color
+
+/**
  * The scale one unit is drawn against.
  *
  * One place, whether the unit ends up labelled down the side of the plot or
@@ -265,21 +289,35 @@ private fun MasterGraphUiState.specFor(metric: AxisMetric): AxisSpec =
     when (metric) {
         AxisMetric.GLUCOSE ->
             AxisSpec(
-                min = Glucose.PLOT_MIN,
-                max = Glucose.PLOT_MAX,
+                min = glucosePlotRange.start,
+                max = glucosePlotRange.endInclusive,
                 label = Glucose.UNIT,
                 band = glucoseTarget,
+                // Solid: the reader put this one wherever they wanted it. The
+                // same rule the Today chart draws, so the two agree.
+                rules = listOfNotNull(glucoseReference?.let { AxisRule(it, dashed = false) }),
+                color = axisColorFor(metric),
             )
-        AxisMetric.MACROS -> AxisSpec(min = 0f, max = 40f, label = "g/h")
-        AxisMetric.HEART_RATE -> AxisSpec(min = 40f, max = 180f, label = "bpm")
+        AxisMetric.MACROS ->
+            AxisSpec(min = 0f, max = 40f, label = "g/h", color = axisColorFor(metric))
+        AxisMetric.HEART_RATE ->
+            AxisSpec(min = 40f, max = 180f, label = "bpm", color = axisColorFor(metric))
         AxisMetric.KETONES ->
             AxisSpec(
                 min = Ketones.PLOT_MIN,
                 max = Ketones.PLOT_MAX,
                 label = Ketones.UNIT,
                 format = Ketones::format,
+                color = axisColorFor(metric),
             )
-        AxisMetric.STEPS -> AxisSpec(min = 0f, max = 1_200f, label = "steps/h")
+        AxisMetric.STEPS ->
+            AxisSpec(min = 0f, max = 1_200f, label = "steps/h", color = axisColorFor(metric))
+        // 200 mg is around two strong coffees still in the body at once, which
+        // is where the dashboard's caffeine chart tops out; both plot the same
+        // quantity and a reader moving between them should not have to re-learn
+        // the height of a line.
+        AxisMetric.CAFFEINE ->
+            AxisSpec(min = 0f, max = 200f, label = "mg", color = axisColorFor(metric))
     }
 
 /**
@@ -394,6 +432,17 @@ private fun CombinedChartCard(
                 kind = SeriesKind.BAR,
                 barWidth = Duration.ofMinutes(StepBucket.BUCKET_MINUTES),
             ),
+            // Dashed, alongside the macro curves and for the same reason: what is
+            // measured is the dose and the minute it was drunk, and everything
+            // between two doses is a half-life model of what became of it.
+            series(
+                key = MasterSeries.CAFFEINE,
+                label = "Caffeine",
+                points = state.caffeineCurve.asPoints(),
+                color = CaffeineSeries,
+                showPoints = false,
+                dashed = true,
+            ),
         )
 
     MasterCard(title = "Food, blood and body") {
@@ -421,6 +470,10 @@ private fun CombinedChartCard(
                         subdued = true,
                     )
                 },
+            // This is the plot whose whole purpose is reading one series against
+            // another in time, and every such question is asked in hours: did
+            // the heart rate climb before the coffee or after it.
+            verticalGridlines = true,
             modifier = Modifier.fillMaxWidth().height(ChartHeight),
         )
 
@@ -509,8 +562,8 @@ private fun SeriesToggles(
     }
 }
 
-/** The colour this series is drawn in, for its switch. */
-private val MasterSeries.color: Color
+/** The colour this series is drawn in — on the plot, on its switch, and on its axis. */
+internal val MasterSeries.color: Color
     get() =
         when (this) {
             MasterSeries.GLUCOSE -> GlucoseSeries
@@ -520,6 +573,7 @@ private val MasterSeries.color: Color
             MasterSeries.HEART_RATE -> HeartRateSeries
             MasterSeries.KETONES -> KetoneSeries
             MasterSeries.STEPS -> StepsSeries
+            MasterSeries.CAFFEINE -> CaffeineSeries
         }
 
 /** Where the absorption curves come from, since they are the one modelled thing here. */

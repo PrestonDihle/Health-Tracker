@@ -378,6 +378,44 @@ data class UserGoals(
      * a centre line rather than a limit.
      */
     val glucoseReferenceMgDl: Int? = 100,
+
+    /**
+     * Floor and ceiling of the glucose plot, in mg/dL.
+     *
+     * A floor and ceiling rather than hard limits -- both charts still widen to
+     * fit an outlier, so narrowing these can never clip a reading off the top.
+     * What it does change is how much of the plot the ordinary range gets: a
+     * trace that lives between 80 and 120 is a flat line on a 60-180 axis and a
+     * legible swing on a 70-130 one, and which of those is right depends on
+     * whose blood sugar it is. Seeded with the 60-180 both charts were fixed at.
+     */
+    val glucosePlotMinMgDl: Int? = 60,
+    val glucosePlotMaxMgDl: Int? = 180,
+
+    /**
+     * Rules across the blood pressure chart, in mmHg.
+     *
+     * Two, because a blood pressure reading is two numbers and a single rule can
+     * only ever be read against one of them -- the chart drew 120 alone, which
+     * left the diastolic line with nothing to be read against at all.
+     *
+     * Seeded at 120/80 and drawn dashed, unlike the glucose reference: these
+     * start as the published clinical figure and are adjustable because a
+     * clinician may have named different ones, not because they are the
+     * reader's own invention.
+     */
+    val bloodPressureSystolicReference: Int? = 120,
+    val bloodPressureDiastolicReference: Int? = 80,
+
+    /**
+     * A nightly sleep target, in minutes.
+     *
+     * Stored in minutes because the snapshot is, and converted for display, so
+     * that a target of seven and a half hours survives the round trip. 480 to
+     * start -- eight hours is the figure most people are measuring themselves
+     * against whether or not it is the right one for them.
+     */
+    val sleepMinutesGoal: Int? = 480,
 )
 
 @Entity

@@ -269,6 +269,20 @@ class HealthConnectDataSource(
     }
 
     /**
+     * Blood sugar in a window, using the same reader the daily sync does.
+     *
+     * The whole point of going back for a gap is that the source has since
+     * written records the cache has never seen, so this deliberately shares
+     * [readGlucose]'s ordinary path rather than doing anything cleverer: what
+     * comes back is whatever is there now, and the caller's `externalId` index
+     * discards the part it already holds.
+     */
+    override suspend fun readGlucose(from: Instant, to: Instant): List<GlucoseSample> {
+        val active = client ?: return emptyList()
+        return active.readGlucose(TimeRangeFilter.between(from, to)).sortedBy { it.time }
+    }
+
+    /**
      * Steps split into wall-clock hours.
      *
      * Aggregated per slice rather than read as raw [StepsRecord]s for the same

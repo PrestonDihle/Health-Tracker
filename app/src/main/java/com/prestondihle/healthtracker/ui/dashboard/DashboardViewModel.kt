@@ -22,6 +22,7 @@ import com.prestondihle.healthtracker.domain.AdherenceResult
 import com.prestondihle.healthtracker.domain.Caffeine
 import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.FastingAdherence
+import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
@@ -128,6 +129,8 @@ data class DashboardUiState(
     /** Requested Health Connect permissions still denied, if any. */
     val missingPermissions: Set<String> = emptySet(),
     val isSyncing: Boolean = false,
+    /** Readings the last refresh recovered from holes in the trace; 0 when it found none. */
+    val glucoseRecovered: Int = 0,
     val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     /** How long the current fast has been running, or null when not fasting. */
@@ -193,6 +196,10 @@ data class DashboardUiState(
      */
     val glucoseReference: Float?
         get() = goals.glucoseReferenceMgDl?.toFloat()
+
+    /** Floor and ceiling of the glucose axis, from settings. */
+    val glucosePlotRange: ClosedFloatingPointRange<Float>
+        get() = Glucose.plotRange(goals.glucosePlotMinMgDl, goals.glucosePlotMaxMgDl)
 
     /** True only when the most recent grip measurement is today's. */
     val hasGripToday: Boolean
@@ -294,6 +301,7 @@ private data class SettingsBundle(
     val permission: HealthPermissionState,
     val isSyncing: Boolean,
     val missingPermissions: Set<String>,
+    val glucoseRecovered: Int,
 )
 
 private data class MetabolicBundle(
@@ -312,6 +320,16 @@ class DashboardViewModel(
     private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
     private val syncing = MutableStateFlow(false)
     private val missingPermissions = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Readings the last refresh went back and recovered from gaps in the trace.
+     *
+     * Reported rather than absorbed quietly, for the reason the duplicate
+     * collapse is: the chart is being looked at while this runs, and a line that
+     * grows a new hour in it without explanation is harder to trust than one that
+     * says where the hour came from.
+     */
+    private val glucoseRecovered = MutableStateFlow(0)
     private val glucoseWindow = MutableStateFlow(GlucoseWindow.DAY)
 
     /**
@@ -401,12 +419,14 @@ class DashboardViewModel(
                 todayData,
                 metabolic,
                 healthData,
-                combine(repository.getUserGoals(), healthState, syncing, missingPermissions) {
-                    goals,
-                    state,
-                    isSyncing,
-                    missing ->
-                    SettingsBundle(goals, state, isSyncing, missing)
+                combine(
+                    repository.getUserGoals(),
+                    healthState,
+                    syncing,
+                    missingPermissions,
+                    glucoseRecovered,
+                ) { goals, state, isSyncing, missing, recovered ->
+                    SettingsBundle(goals, state, isSyncing, missing, recovered)
                 },
             ) { fastingAndNow, todayBundle, metabolicBundle, health, settings ->
                 val (fastingBundle, now) = fastingAndNow
@@ -450,6 +470,7 @@ class DashboardViewModel(
                     healthState = settings.permission,
                     missingPermissions = settings.missingPermissions,
                     isSyncing = settings.isSyncing,
+                    glucoseRecovered = settings.glucoseRecovered,
                 )
             }
             .stateIn(
@@ -486,6 +507,11 @@ class DashboardViewModel(
             if (healthState.value == HealthPermissionState.GRANTED) {
                 syncing.value = true
                 repository.syncHealthData(today)
+                // After the day sync rather than before it: today's hole is the
+                // one the ordinary sync is most likely to have just filled, and
+                // going first would spend a query rediscovering that.
+                glucoseRecovered.value =
+                    repository.backfillGlucoseGaps().getOrDefault(0)
                 syncing.value = false
             }
         }

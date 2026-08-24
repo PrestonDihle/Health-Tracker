@@ -304,13 +304,14 @@ class MigrationSchemaTest {
             raw.execSQL("DROP TABLE IF EXISTS `UserSettings`")
             settingsV5.forEach { raw.execSQL(it) }
 
-            // Both migrations that alter these tables, in order: UserGoals is
-            // added to twice, and replaying only the first leaves it a column
-            // short of what Room now builds.
+            // Every migration that alters these tables, in order: UserGoals is
+            // added to three times over, and replaying only some of them leaves
+            // it short of what Room now builds.
             AppDatabase.migration5To6Statements
                 .filter { it.startsWith("ALTER TABLE") }
                 .forEach { raw.execSQL(it) }
             AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration8To9Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -339,17 +340,20 @@ class MigrationSchemaTest {
                     "VALUES (1, 'IMPERIAL', 'MONDAY')"
             )
 
-            // Both migrations that alter these tables, in order: UserGoals is
-            // added to twice, and replaying only the first leaves it a column
-            // short of what Room now builds.
+            // Every migration that alters these tables, in order: UserGoals is
+            // added to three times over, and replaying only some of them leaves
+            // it short of what Room now builds.
             AppDatabase.migration5To6Statements
                 .filter { it.startsWith("ALTER TABLE") }
                 .forEach { raw.execSQL(it) }
             AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration8To9Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
-                        "`glucoseReferenceMgDl` FROM `UserGoals`"
+                        "`glucoseReferenceMgDl`, `glucosePlotMinMgDl`, `glucosePlotMaxMgDl`, " +
+                        "`bloodPressureSystolicReference`, `bloodPressureDiastolicReference`, " +
+                        "`sleepMinutesGoal` FROM `UserGoals`"
                 )
                 .use {
                     it.moveToNext()
@@ -357,6 +361,15 @@ class MigrationSchemaTest {
                     assertEquals(70, it.getInt(1))
                     assertEquals(140, it.getInt(2))
                     assertEquals(100, it.getInt(3))
+                    // The plot bounds and the blood pressure rules were hard-coded
+                    // before they were settings, so an upgrade that left these
+                    // null would change what an existing user's charts look like
+                    // -- which is the one thing adding a setting must not do.
+                    assertEquals(60, it.getInt(4))
+                    assertEquals(180, it.getInt(5))
+                    assertEquals(120, it.getInt(6))
+                    assertEquals(80, it.getInt(7))
+                    assertEquals(480, it.getInt(8))
                 }
             raw.query("SELECT `smoothGlucose` FROM `UserSettings`").use {
                 it.moveToNext()

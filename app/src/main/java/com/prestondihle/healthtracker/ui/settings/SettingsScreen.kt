@@ -116,12 +116,47 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
 
         item {
             SettingsCard(title = "Daily goals") {
+                Text(
+                    "Each of these is drawn as a dashed rule across its chart on the Trends " +
+                        "screen, so a day can be read against what you were aiming at rather " +
+                        "than only against the days either side of it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 IntStepper(
                     label = "Steps",
                     value = state.goals.dailyStepGoal ?: 10_000,
                     onValueChange = { viewModel.saveGoals(state.goals.copy(dailyStepGoal = it)) },
                     step = 500,
                     range = 0..50_000,
+                )
+                HorizontalDivider()
+                // The stacked macro bars total the day's calories, so this rule
+                // is read against the top of the stack rather than any one band.
+                IntStepper(
+                    label = "Calories",
+                    value = state.goals.dailyCalorieTarget ?: 2_200,
+                    onValueChange = {
+                        viewModel.saveGoals(state.goals.copy(dailyCalorieTarget = it))
+                    },
+                    step = 50,
+                    range = 0..8_000,
+                    supportingText = "rule across the Macros chart",
+                    valueFormatter = { "$it kcal" },
+                )
+                HorizontalDivider()
+                // Stored and stepped in minutes, shown as hours and minutes: a
+                // whole-hour stepper cannot say seven and a half, and a decimal
+                // one asks the reader to convert 7.5 back into a bedtime.
+                IntStepper(
+                    label = "Sleep",
+                    value = state.goals.sleepMinutesGoal ?: 480,
+                    onValueChange = {
+                        viewModel.saveGoals(state.goals.copy(sleepMinutesGoal = it))
+                    },
+                    step = 15,
+                    range = 0..(16 * 60),
+                    valueFormatter = { "${it / 60}h ${(it % 60).toString().padStart(2, '0')}m" },
                 )
                 HorizontalDivider()
                 IntStepper(
@@ -229,8 +264,100 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     },
                     step = 5,
                     range = Glucose.ENTRY_RANGE,
-                    supportingText = "solid rule across the Today chart",
+                    supportingText = "solid rule across the Today and Master charts",
                     valueFormatter = { "$it ${Glucose.UNIT}" },
+                )
+            }
+        }
+
+        item {
+            SettingsCard(title = "Blood sugar chart") {
+                Text(
+                    "How much of the plot the ordinary range gets. A trace that lives between " +
+                        "80 and 120 is a flat line on a wide axis and a legible swing on a " +
+                        "narrow one. Neither figure clips anything — a reading outside them " +
+                        "still widens the axis to fit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                val plotMin = state.goals.glucosePlotMinMgDl ?: Glucose.PLOT_MIN.toInt()
+                val plotMax = state.goals.glucosePlotMaxMgDl ?: Glucose.PLOT_MAX.toInt()
+
+                IntStepper(
+                    label = "Chart floor",
+                    value = plotMin,
+                    // Held apart as they move, exactly as the target band's two
+                    // edges are: an axis whose floor has passed its ceiling draws
+                    // every reading at the same height or upside down, and the
+                    // stepper is the only place that can be prevented cheaply.
+                    onValueChange = {
+                        viewModel.saveGoals(
+                            state.goals.copy(
+                                glucosePlotMinMgDl =
+                                    it.coerceAtMost(plotMax - Glucose.MIN_PLOT_SPAN),
+                                glucosePlotMaxMgDl = plotMax,
+                            )
+                        )
+                    },
+                    step = 5,
+                    range = Glucose.ENTRY_RANGE,
+                    valueFormatter = { "$it ${Glucose.UNIT}" },
+                )
+                HorizontalDivider()
+                IntStepper(
+                    label = "Chart ceiling",
+                    value = plotMax,
+                    onValueChange = {
+                        viewModel.saveGoals(
+                            state.goals.copy(
+                                glucosePlotMinMgDl = plotMin,
+                                glucosePlotMaxMgDl =
+                                    it.coerceAtLeast(plotMin + Glucose.MIN_PLOT_SPAN),
+                            )
+                        )
+                    },
+                    step = 5,
+                    range = Glucose.ENTRY_RANGE,
+                    valueFormatter = { "$it ${Glucose.UNIT}" },
+                )
+            }
+        }
+
+        item {
+            SettingsCard(title = "Blood pressure reference") {
+                Text(
+                    "Two dashed rules across the blood pressure chart on Trends, one per line. " +
+                        "Seeded at the published 120/80 — change them if you have been given " +
+                        "different numbers to aim at.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                IntStepper(
+                    label = "Systolic",
+                    value = state.goals.bloodPressureSystolicReference ?: 120,
+                    onValueChange = {
+                        viewModel.saveGoals(
+                            state.goals.copy(bloodPressureSystolicReference = it)
+                        )
+                    },
+                    step = 5,
+                    range = 70..200,
+                    valueFormatter = { "$it mmHg" },
+                )
+                HorizontalDivider()
+                IntStepper(
+                    label = "Diastolic",
+                    value = state.goals.bloodPressureDiastolicReference ?: 80,
+                    onValueChange = {
+                        viewModel.saveGoals(
+                            state.goals.copy(bloodPressureDiastolicReference = it)
+                        )
+                    },
+                    step = 5,
+                    range = 40..140,
+                    valueFormatter = { "$it mmHg" },
                 )
             }
         }

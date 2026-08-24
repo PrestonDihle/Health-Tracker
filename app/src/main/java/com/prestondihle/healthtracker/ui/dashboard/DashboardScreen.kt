@@ -59,6 +59,7 @@ import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import androidx.compose.material3.FilterChip
+import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
 import com.prestondihle.healthtracker.ui.components.ChartAxis
@@ -858,14 +859,14 @@ private fun MetabolicCard(
                 ),
             leftAxis =
                 AxisSpec(
-                    min = Glucose.PLOT_MIN,
-                    max = Glucose.PLOT_MAX,
+                    min = state.glucosePlotRange.start,
+                    max = state.glucosePlotRange.endInclusive,
                     label = Glucose.UNIT,
                     band = state.glucoseTarget,
                     // Solid, because this is the reader's own line rather than
-                    // a published figure -- see AxisSpec.thresholdDashed.
-                    threshold = state.glucoseReference,
-                    thresholdDashed = false,
+                    // a published figure -- see AxisRule.dashed.
+                    rules =
+                        listOfNotNull(state.glucoseReference?.let { AxisRule(it, dashed = false) }),
                 ),
             rightAxis =
                 AxisSpec(
@@ -882,6 +883,21 @@ private fun MetabolicCard(
                         else ChartHeight
                     ),
         )
+
+        // Said out loud, for the reason the master graph owns up to the meal
+        // duplicates it merged: the last refresh went back and filled holes in a
+        // line that was already on screen, and a trace that grows an hour in it
+        // without explanation is harder to trust than one that says where the
+        // hour came from.
+        if (state.glucoseRecovered > 0) {
+            Text(
+                "Refilled ${state.glucoseRecovered} " +
+                    (if (state.glucoseRecovered == 1) "reading" else "readings") +
+                    " the source had written late",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         // The switch sits on the chart rather than in settings because it is a
         // way of looking at the data, not a fact about it -- and because a line

@@ -262,6 +262,31 @@ class MasterGraphRenderTest {
     }
 
     /**
+     * Caffeine reaches the master chart, and reaches it from before the window.
+     *
+     * The legend caption is what is asserted rather than the word "Caffeine":
+     * that appears three times over on this screen -- on the axis chip, on the
+     * series switch and in the legend -- and only the legend quotes the range,
+     * which is also the only place a self-scaled series' numbers appear at all.
+     */
+    @Test
+    fun `a caffeine curve renders from doses taken before the window opened`() {
+        renderScreen { repository ->
+            val now = Instant.now()
+            // One this morning and one well before the three-hour window opens.
+            // The older dose is most of the level at the left edge, and dropping
+            // it would start the line at zero and draw a climb nobody drank.
+            repository.addCaffeine(mg = 150, at = now.minus(Duration.ofHours(6)))
+            repository.addCaffeine(mg = 90, at = now.minus(Duration.ofMinutes(40)))
+        }
+
+        chooseRange(MasterRange.THREE)
+
+        composeRule.onNodeWithText("Caffeine (0-200 mg)", substring = true).assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/master_graph_caffeine.png")
+    }
+
+    /**
      * A source that gives dates instead of times, and repeats itself.
      *
      * Exactly what a real phone was producing: the meal list read as several

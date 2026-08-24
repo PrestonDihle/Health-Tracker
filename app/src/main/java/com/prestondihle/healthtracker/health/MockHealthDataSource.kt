@@ -22,24 +22,45 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
 
     override suspend fun missingPermissions(): Set<String> = emptySet()
 
-    override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
+    /**
+     * A CGM sample every 5 minutes, drifting around a fasting baseline with a
+     * gentle post-meal rise in the afternoon.
+     *
+     * Seeded from the date and given ids derived from it, so the same day always
+     * produces the same readings however it is asked for. A gap re-read that
+     * invented fresh ids would defeat the deduplication it is supposed to be
+     * exercising and double every reading it touched.
+     */
+    private fun glucoseFor(date: LocalDate): List<GlucoseSample> {
         val random = Random(date.toEpochDay())
         val startOfDay = date.atStartOfDay(zoneId).toInstant()
+        return (0 until 288).map { index ->
+            val minutes = index * 5L
+            val hour = minutes / 60.0
+            val meal = 18.0 * sin((hour - 6.0) / 24.0 * 2 * Math.PI).coerceAtLeast(0.0)
+            val jitter = random.nextInt(-4, 5)
+            GlucoseSample(
+                time = startOfDay.plusSeconds(minutes * 60),
+                mgDl = (88 + meal + jitter).toInt(),
+                externalId = "mock-${date}-$index",
+            )
+        }
+    }
 
-        // A CGM sample every 5 minutes, drifting around a fasting baseline with
-        // a gentle post-meal rise in the afternoon.
-        val samples =
-            (0 until 288).map { index ->
-                val minutes = index * 5L
-                val hour = minutes / 60.0
-                val meal = 18.0 * sin((hour - 6.0) / 24.0 * 2 * Math.PI).coerceAtLeast(0.0)
-                val jitter = random.nextInt(-4, 5)
-                GlucoseSample(
-                    time = startOfDay.plusSeconds(minutes * 60),
-                    mgDl = (88 + meal + jitter).toInt(),
-                    externalId = "mock-${date}-$index",
-                )
-            }
+    override suspend fun readGlucose(from: Instant, to: Instant): List<GlucoseSample> {
+        var date = from.atZone(zoneId).toLocalDate()
+        val lastDate = to.atZone(zoneId).toLocalDate()
+        val samples = mutableListOf<GlucoseSample>()
+        while (!date.isAfter(lastDate)) {
+            samples += glucoseFor(date)
+            date = date.plusDays(1)
+        }
+        return samples.filter { !it.time.isBefore(from) && !it.time.isAfter(to) }.sortedBy { it.time }
+    }
+
+    override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
+        val random = Random(date.toEpochDay())
+        val samples = glucoseFor(date)
 
         return HealthDay(
             date = date,

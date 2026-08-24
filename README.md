@@ -11,10 +11,26 @@ reps and reading.
 | --- | --- |
 | **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
-| **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate and steps per hour |
-| **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading |
+| **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour |
+| **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading — each against its own reference line |
 | **History** | Backfill or correct any past day |
-| **Settings** | Units, step source, daily goals, blood sugar target and reference line, body targets |
+| **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets |
+
+## Reference lines
+
+Every long-run chart is read against something. A bar that is taller than
+yesterday's says nothing on its own; a bar that is above or below the line you
+set says what you actually wanted to know. Steps, calories, sleep, pages read,
+waist, weight and blood pressure each carry one, all of them set in Settings and
+all drawn dashed to mark them as a target rather than a measurement.
+
+Blood pressure carries **two**, one per line — drawn with a systolic rule alone,
+the diastolic trace had nothing to be read against at all. They start at the
+published 120/80 and are adjustable because a clinician may have named different
+numbers, not because the reader is free to decide what normal is. That is also
+why they stay dashed while the glucose reference line is solid: one is a
+published figure, the other is wherever you decided to put it, and the two should
+not look alike.
 
 ## Health Connect
 
@@ -109,10 +125,16 @@ length so far and beat itself an hour later.
 ## The master graph
 
 One timeline carrying everything that might explain everything else: what was
-eaten, how it is being absorbed, and what blood sugar, ketones, heart rate and
-walking did in response. Windows run from 3 hours — about one meal, start to
-finish — out to 7 days, where individual meals stop being legible but habits do
-not.
+eaten, how it is being absorbed, how much caffeine is still in the body, and what
+blood sugar, ketones, heart rate and walking did in response. Windows run from 3
+hours — about one meal, start to finish — out to 7 days, where individual meals
+stop being legible but habits do not.
+
+Vertical rules mark the hours: every hour up to a 12-hour window, every four
+hours beyond it, widening again where a week's worth would arrive as forty lines
+a finger-width apart. They sit on the **clock**, not on the edge of the window —
+a rule at 2:47 cannot answer "how much of that rise was in the hour after
+eating".
 
 ### Meals become curves
 
@@ -142,20 +164,33 @@ clock time that was never written, so instead:
 
 ### Reading two units at a time
 
-The plot has two gutters and the series carry five different units, so which two
+The plot has two gutters and the series carry six different units, so which two
 get their numbers printed is a choice, not a fixed layout — comparing steps
 against heart rate wants a different pair than comparing carbohydrate against
 glucose. Unchosen units still plot, correctly shaped, against their own range
 with the numbers quoted in the legend.
 
+**The numbers in the gutter take the colour of the line they belong to**, which
+on a plot carrying six units is the difference between reading a figure and
+guessing at it. Only where the axis is serving exactly one visible line, though:
+grams per hour is shared by carbohydrate, protein and fat, and tinting it in any
+one of their colours would claim the other two are read against some other axis.
+Switch two of the three off and the axis takes the survivor's colour.
+
 Steps are drawn as hourly **bars** rather than a line: a step count belongs to
 the hour it accumulated over, and joining the hours would claim a walking rate at
-instants when nothing was counted.
+instants when nothing was counted. Caffeine is drawn **dashed**, alongside the
+macro curves and for the same reason: what was measured is the dose and the
+minute it was drunk, and everything between two doses is a half-life model of
+what became of it.
 
 ## Blood sugar
 
-The glucose axis runs 60–180 mg/dL. Outliers expand it rather than being clipped,
-so a 210 reading still plots; it is simply not budgeted for.
+The glucose axis runs 60–180 mg/dL by default, and **both bounds are settable**:
+a trace that lives between 80 and 120 is a flat line on a wide axis and a legible
+swing on a narrow one, and which of those is right depends on whose blood sugar
+it is. Neither figure clips anything — outliers expand the axis rather than being
+cut off, so a 210 reading still plots; it is simply not budgeted for.
 
 Three things can be drawn on it, and they are deliberately distinct:
 
@@ -186,6 +221,28 @@ spacing) rather than being fixed, because a fixed one is wrong for somebody:
 twenty minutes of silence is a dropout for a monitor writing every five minutes
 and an ordinary afternoon for three fingersticks a day. An isolated reading is
 drawn as a dot rather than dropped.
+
+### Holes get a second look
+
+Not every gap is real. Glucose is cached a calendar day at a time and only
+*today* is re-read on an ordinary refresh, so a monitor that was out of Bluetooth
+range and uploaded its readings hours later writes them to a day nothing asks
+about any more. The hole is then permanent, and looks exactly like a sensor that
+was genuinely not reporting.
+
+So the holes themselves become the query. Every refresh looks over the last 72
+hours, and anywhere the trace stops for **45 minutes or more** the source is
+asked about that stretch again — including the stretch at the right-hand end,
+where a monitor that stopped an hour ago leaves the freshest and most fillable
+gap of all. Whatever comes back that is already held is discarded on its record
+id. If anything was recovered, the Today card says how many readings, because a
+line that grows a new hour in it without explanation is harder to trust than one
+that says where the hour came from.
+
+This is a different threshold from the one above, on purpose. Breaking a line
+asks "was this measured"; going back to the source asks "is it worth a query",
+and a reader taking three fingersticks a day has hours of genuine emptiness that
+no re-read will ever fill.
 
 ## Grip strength
 
@@ -268,7 +325,8 @@ needs a real upload key. No signing material is stored in this repo.
 
 The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
-series gap-splitting and axis selection. `MasterGraphRenderTest` and
+series gap-splitting, axis selection, gap backfill and gridline spacing.
+`MasterGraphRenderTest` and
 `ScreenRenderTest` compose whole screens against an in-memory database and
 capture images with Roborazzi, which is what catches the empty-list and
 divide-by-zero cases the chart canvas only reaches under a real layout pass.

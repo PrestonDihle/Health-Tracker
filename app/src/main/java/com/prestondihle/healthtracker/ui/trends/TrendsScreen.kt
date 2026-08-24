@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.BarChart
 import com.prestondihle.healthtracker.ui.components.ChartSeries
@@ -158,8 +159,27 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                                 color = DiastolicSeries,
                             ),
                         ),
-                    // 120/80 is the reference both lines are read against.
-                    leftAxis = AxisSpec(min = 60f, max = 140f, label = "mmHg", threshold = 120f),
+                    // A rule per line. One alone left the diastolic trace with
+                    // nothing to be read against, which is half the reading.
+                    // Dashed, because 120/80 is a published figure rather than
+                    // one invented here -- adjustable in settings because a
+                    // clinician may have named different numbers, not because
+                    // the reader is free to decide what normal is.
+                    leftAxis =
+                        AxisSpec(
+                            min = 60f,
+                            max = 140f,
+                            label = "mmHg",
+                            rules =
+                                listOfNotNull(
+                                    state.goals.bloodPressureSystolicReference?.let {
+                                        AxisRule(it.toFloat())
+                                    },
+                                    state.goals.bloodPressureDiastolicReference?.let {
+                                        AxisRule(it.toFloat())
+                                    },
+                                ),
+                        ),
                     modifier = Modifier.fillMaxWidth().height(160.dp),
                 )
             }
@@ -178,6 +198,10 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
             TrendCard(title = "Sleep", subtitle = "hours") {
                 BarChart(
                     days = state.snapshotSeries { snap -> snap.sleepMinutes?.let { it / 60f } },
+                    // In hours, because that is what the bars are. The target is
+                    // stored in minutes so that seven and a half survives the
+                    // round trip through the stepper.
+                    goalLine = state.goals.sleepMinutesGoal?.let { it / 60f },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
             }

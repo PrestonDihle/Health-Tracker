@@ -4,11 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.BloodSugarReading
+import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.StepBucket
 import com.prestondihle.healthtracker.data.UserGoals
+import com.prestondihle.healthtracker.domain.Caffeine
+import com.prestondihle.healthtracker.domain.CaffeineDose
+import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
@@ -52,7 +56,7 @@ enum class MasterRange(val label: String, val hours: Long) {
 /**
  * One switchable series on the master graph.
  *
- * Seven series on one plot is a lot to read at once, and most questions only
+ * Eight series on one plot is a lot to read at once, and most questions only
  * involve two or three of them -- carbs against glucose, or steps against heart
  * rate. Turning the rest off is what makes those comparisons legible.
  */
@@ -64,12 +68,20 @@ enum class MasterSeries(val label: String) {
     HEART_RATE("Heart rate"),
     KETONES("Ketones"),
     STEPS("Steps"),
+    /**
+     * Caffeine belongs here for the same reason the macro curves do: it is
+     * something taken at a known moment that goes on acting for hours
+     * afterwards, and the questions asked of this chart -- why is the heart rate
+     * up, why did sleep not come -- are exactly the ones a decay curve beside
+     * the rest of the day answers.
+     */
+    CAFFEINE("Caffeine"),
 }
 
 /**
  * A unit that can be printed down the side of the master chart.
  *
- * The plot has two gutters and the series carry five different units, so at most
+ * The plot has two gutters and the series carry six different units, so at most
  * two of them can ever have their numbers on screen; the rest are drawn to their
  * own scale with the range quoted in the legend instead. Which two is a reading
  * decision, not a fixed one -- comparing steps against heart rate wants a
@@ -85,6 +97,7 @@ enum class AxisMetric(val label: String) {
     HEART_RATE("Heart rate"),
     KETONES("Ketones"),
     STEPS("Steps"),
+    CAFFEINE("Caffeine"),
 }
 
 /** The unit a series is measured in, and so which axis can carry it. */
@@ -96,6 +109,7 @@ val MasterSeries.metric: AxisMetric
             MasterSeries.HEART_RATE -> AxisMetric.HEART_RATE
             MasterSeries.KETONES -> AxisMetric.KETONES
             MasterSeries.STEPS -> AxisMetric.STEPS
+            MasterSeries.CAFFEINE -> AxisMetric.CAFFEINE
         }
 
 /** How many units can have their numbers printed at once. */
@@ -123,6 +137,14 @@ data class MasterGraphUiState(
     val ketones: List<KetoneReading> = emptyList(),
     val heartRate: List<HeartRateBucket> = emptyList(),
     val steps: List<StepBucket> = emptyList(),
+    /**
+     * Doses reaching back beyond the window, not only the ones inside it.
+     *
+     * A coffee drunk before the left edge is still most of the level at the edge,
+     * and dropping it would start the curve at zero and draw a climb that never
+     * happened.
+     */
+    val caffeine: List<CaffeineIntake> = emptyList(),
     val goals: UserGoals = UserGoals(),
     /** Drawn smoothed only when the user has asked for it in settings. */
     val smoothGlucose: Boolean = false,
@@ -172,6 +194,33 @@ data class MasterGraphUiState(
             val high = goals.glucoseTargetHighMgDl ?: return null
             return if (high > low) low.toFloat()..high.toFloat() else null
         }
+
+    /** Floor and ceiling of the glucose axis, from settings. */
+    val glucosePlotRange: ClosedFloatingPointRange<Float>
+        get() = Glucose.plotRange(goals.glucosePlotMinMgDl, goals.glucosePlotMaxMgDl)
+
+    /** The reader's own rule across the glucose axis, or null when cleared. */
+    val glucoseReference: Float?
+        get() = goals.glucoseReferenceMgDl?.toFloat()
+
+    /**
+     * Caffeine in the body across the window, sampled evenly.
+     *
+     * Sampled rather than drawn dose to dose for the reason the dashboard does
+     * it: the decay between two doses is exponential, and joining the doses
+     * themselves would draw it as a straight ramp. The step follows the window
+     * for the same reason the absorption curves' does -- a fixed one is either
+     * too coarse to show a morning coffee arriving or far more points than a
+     * week of plot can render.
+     */
+    val caffeineCurve: List<Pair<Instant, Float>>
+        get() =
+            Caffeine.curve(
+                doses = caffeine.map { CaffeineDose(it.timestamp, it.milligrams) },
+                from = windowStart,
+                to = now,
+                step = curveStep,
+            )
 
     /**
      * The meals as they should be counted: one row per meal actually eaten.
@@ -310,7 +359,8 @@ data class MasterGraphUiState(
                 glucose.isNotEmpty() ||
                 ketones.isNotEmpty() ||
                 heartRate.isNotEmpty() ||
-                steps.isNotEmpty()
+                steps.isNotEmpty() ||
+                caffeine.isNotEmpty()
 }
 
 private data class SeriesBundle(
@@ -319,6 +369,7 @@ private data class SeriesBundle(
     val ketones: List<KetoneReading>,
     val heartRate: List<HeartRateBucket>,
     val steps: List<StepBucket>,
+    val caffeine: List<CaffeineIntake>,
 )
 
 /** Everything that shapes how the series are drawn rather than what is in them. */
@@ -365,14 +416,26 @@ class MasterGraphViewModel(
             // would start the line at the wrong height.
             val mealsSince =
                 windowStart.minus(Duration.ofHours(MacroAbsorption.RELEVANT_HISTORY_HOURS))
+            // Caffeine reaches back on the same principle as the meals, over its
+            // own history: a dose older than this is under a thousandth of what
+            // was drunk and cannot move the line it would be loaded to draw.
+            val caffeineSince =
+                windowStart.minus(Duration.ofHours(Caffeine.RELEVANT_HISTORY_HOURS))
+            // Nested rather than one call: combine's typed overloads stop at five
+            // sources, and this is the sixth.
             combine(
-                repository.getMealsSince(mealsSince),
-                repository.getBloodSugarSince(windowStart),
-                repository.getKetonesSince(windowStart),
-                repository.getHeartRateSince(windowStart),
-                repository.getStepBucketsSince(windowStart),
-            ) { meals, glucose, ketones, heartRate, steps ->
-                SeriesBundle(meals, glucose, ketones, heartRate, steps)
+                combine(
+                    repository.getMealsSince(mealsSince),
+                    repository.getBloodSugarSince(windowStart),
+                    repository.getKetonesSince(windowStart),
+                    repository.getHeartRateSince(windowStart),
+                    repository.getStepBucketsSince(windowStart),
+                ) { meals, glucose, ketones, heartRate, steps ->
+                    SeriesBundle(meals, glucose, ketones, heartRate, steps, emptyList())
+                },
+                repository.getCaffeineSince(caffeineSince),
+            ) { bundle, caffeine ->
+                bundle.copy(caffeine = caffeine)
             }
         }
 
@@ -409,6 +472,7 @@ class MasterGraphViewModel(
                 ketones = series.ketones,
                 heartRate = series.heartRate,
                 steps = series.steps,
+                caffeine = series.caffeine,
                 goals = prefs.goals,
                 smoothGlucose = prefs.smoothGlucose,
                 healthState = permission,
@@ -525,6 +589,10 @@ class MasterGraphViewModel(
                 now.minus(Duration.ofHours(range.value.hours + MacroAbsorption.RELEVANT_HISTORY_HOURS))
             syncing.value = true
             repository.syncTimeSeries(from, now)
+            // Glucose is not part of syncTimeSeries -- it is cached a calendar
+            // day at a time -- so a hole in the trace this chart is drawing is
+            // only ever filled by going back for it deliberately.
+            repository.backfillGlucoseGaps(now)
             syncing.value = false
         }
     }
