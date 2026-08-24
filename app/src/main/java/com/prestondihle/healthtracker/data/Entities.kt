@@ -155,6 +155,55 @@ data class CreatineIntake(
     val grams: Int,
 )
 
+/** When in the day a supplement is meant to be taken. */
+enum class SupplementSlot(val label: String) {
+    MORNING("Morning"),
+    MIDDAY("Midday"),
+    EVENING("Evening"),
+}
+
+/**
+ * One entry in the daily stack: what it is, how much, and when.
+ *
+ * **The dose is free text rather than a number and a unit.** Supplement labels
+ * do not agree on one: IU, mcg, mg, grams, capsules, softgels, drops and
+ * millilitres all turn up on the same shelf, and half of them are printed per
+ * serving rather than per pill. Nothing here does arithmetic on the dose -- it
+ * is quoted back exactly as it was typed -- so parsing it could only ever be a
+ * way of rejecting something somebody actually takes.
+ *
+ * Unique on name and slot together. The same thing morning and evening is two
+ * rows, which is what makes it tickable twice a day; the same thing twice in one
+ * morning is one row, because that is one dose split across two capsules and the
+ * label already says so.
+ */
+@Entity(indices = [Index(value = ["name", "slot"], unique = true)])
+data class Supplement(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val dose: String,
+    val slot: SupplementSlot,
+)
+
+/**
+ * One supplement taken on one day.
+ *
+ * The row is the whole fact: present means taken, absent means not. There is
+ * deliberately no boolean column, because "not taken" and "not answered yet" are
+ * the same state for something that resets at midnight, and a column would force
+ * a distinction the data cannot support -- leaving every past day looking
+ * actively missed rather than simply over.
+ *
+ * Keyed on the pair, so ticking the same day twice is absorbed rather than
+ * counted twice. Indexed on the date because that is how a day is read; the
+ * primary key indexes the pair, which does not answer "what was taken today".
+ */
+@Entity(primaryKeys = ["supplementId", "date"], indices = [Index("date")])
+data class SupplementDose(
+    val supplementId: Long,
+    val date: LocalDate,
+)
+
 /** An actually-performed fast. Open-ended while [endInstant] is null. */
 @Entity(indices = [Index("startInstant")])
 data class FastingSession(

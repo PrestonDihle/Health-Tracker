@@ -51,6 +51,12 @@ class Converters {
     fun toLocalTime(secondOfDay: Int?): LocalTime? = secondOfDay?.let { LocalTime.ofSecondOfDay(it.toLong()) }
 
     @TypeConverter
+    fun fromSupplementSlot(slot: SupplementSlot?): String? = slot?.name
+
+    @TypeConverter
+    fun toSupplementSlot(name: String?): SupplementSlot? = name?.let { SupplementSlot.valueOf(it) }
+
+    @TypeConverter
     fun fromMovementType(movement: MovementType?): String? = movement?.name
 
     @TypeConverter

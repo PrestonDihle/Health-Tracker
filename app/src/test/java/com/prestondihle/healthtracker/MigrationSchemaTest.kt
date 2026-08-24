@@ -151,6 +151,32 @@ class MigrationSchemaTest {
     }
 
     /**
+     * The supplement stack and the per-day ticks against it.
+     *
+     * Both are new tables, so their DDL is diffed directly -- there is no
+     * `ALTER TABLE`-added column here carrying a SQLite default that Room's own
+     * `CREATE TABLE` would omit.
+     *
+     * Two things are worth the pinning. `Supplement` is unique on name and slot
+     * together, which is what makes the same thing morning and evening two
+     * tickable rows and the same thing twice in one morning a single one. And
+     * `SupplementDose` has a *composite* primary key rather than a generated id,
+     * which is what makes ticking a box twice idempotent -- get that wrong and
+     * every stray tap is another row saying the same thing.
+     */
+    @Test
+    fun `migration builds the supplement tables exactly as Room expects`() {
+        assertEquals(
+            roomSchema("Supplement"),
+            migrationSchema("Supplement", AppDatabase.migration10To11Statements),
+        )
+        assertEquals(
+            roomSchema("SupplementDose"),
+            migrationSchema("SupplementDose", AppDatabase.migration10To11Statements),
+        )
+    }
+
+    /**
      * The v4 KetoneReading table, as Room built it before the rename.
      *
      * Spelled out here rather than derived, because the point of the test is to

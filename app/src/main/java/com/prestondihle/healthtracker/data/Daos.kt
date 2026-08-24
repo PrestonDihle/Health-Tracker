@@ -97,6 +97,47 @@ interface TrackerDao {
 
     @Upsert suspend fun upsertWaist(entry: WaistEntry)
 
+    // ----- Supplements -------------------------------------------------------
+
+    /**
+     * The whole stack, in the order it is taken.
+     *
+     * Ordered by slot and then by name, and the slot ordering is spelled out
+     * rather than left to the column -- sorting the stored text would put
+     * evening before midday before morning, which is the day backwards.
+     */
+    @Query(
+        "SELECT * FROM Supplement ORDER BY CASE slot " +
+            "WHEN 'MORNING' THEN 0 WHEN 'MIDDAY' THEN 1 ELSE 2 END, name COLLATE NOCASE"
+    )
+    fun getSupplements(): Flow<List<Supplement>>
+
+    /**
+     * IGNORE rather than REPLACE: the unique index means the same name in the
+     * same slot is the same entry, and replacing it would hand it a new id --
+     * silently orphaning every dose already logged against the old one.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSupplement(supplement: Supplement)
+
+    @Update suspend fun updateSupplement(supplement: Supplement)
+
+    @Delete suspend fun deleteSupplement(supplement: Supplement)
+
+    /** The doses logged against one supplement, for clearing when it is removed. */
+    @Query("DELETE FROM SupplementDose WHERE supplementId = :supplementId")
+    suspend fun deleteDosesOf(supplementId: Long)
+
+    @Query("SELECT * FROM SupplementDose WHERE date = :date")
+    fun getSupplementDosesOn(date: LocalDate): Flow<List<SupplementDose>>
+
+    /** IGNORE, so ticking a box that is already ticked is absorbed rather than thrown. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSupplementDose(dose: SupplementDose)
+
+    @Query("DELETE FROM SupplementDose WHERE supplementId = :supplementId AND date = :date")
+    suspend fun deleteSupplementDose(supplementId: Long, date: LocalDate)
+
     // ----- Grip strength -----------------------------------------------------
 
     @Query("SELECT * FROM GripStrengthEntry WHERE date = :date")

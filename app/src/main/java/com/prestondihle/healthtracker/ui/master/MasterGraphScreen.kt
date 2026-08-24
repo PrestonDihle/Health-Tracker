@@ -26,6 +26,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,7 +56,6 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
-import com.prestondihle.healthtracker.ui.components.HiddenSeries
 import com.prestondihle.healthtracker.ui.components.MealDraft
 import com.prestondihle.healthtracker.ui.components.MealEntryDialog
 import com.prestondihle.healthtracker.ui.components.SeriesKind
@@ -483,20 +485,16 @@ private fun CombinedChartCard(
             // Filtered rather than drawn-then-hidden, so a switched-off series
             // also stops stretching the axis it shares.
             series = allSeries.filterKeys(state::isVisible).values.toList(),
-            // The off ones, carrying nothing but a name and a colour. The legend
-            // is the only switch on this chart now, so it has to be able to show
-            // what is not drawn -- and it has to do it without handing the plot
-            // points it must not scale itself to.
-            hiddenSeries =
-                allSeries
-                    .filterKeys { !state.isVisible(it) }
-                    .values
-                    .map { HiddenSeries(it.label, it.color, it.kind, it.dashed) },
+            // A shortcut for putting a line away without leaving the plot. The
+            // switches below are the control proper -- this only ever hides,
+            // because a legend lists what is drawn and the row is gone the
+            // moment it is off.
+            //
+            // Matched on the label the series was actually built with, which is
+            // how "Glucose (smoothed)" still finds its own series.
             onSeriesTap = { label ->
-                // Matched on the label the series was actually built with, which
-                // is how "Glucose (smoothed)" still finds its own switch.
                 allSeries.entries.firstOrNull { it.value.label == label }?.key?.let {
-                    onToggleSeries(it, !state.isVisible(it))
+                    onToggleSeries(it, false)
                 }
             },
             // Falls back rather than throwing: the toggle refuses to empty the list,
@@ -527,13 +525,10 @@ private fun CombinedChartCard(
             modifier = Modifier.fillMaxWidth().height(ChartHeight),
         )
 
-        // The legend is a set of switches now, and nothing about a row of names
-        // says so on its own -- a control nobody knows is a control is the same
-        // as no control.
         Text(
-            "Tap the plot to read every line at one moment, drag sideways to go " +
-                "back through the day, and tap a name in the key to draw that " +
-                "line or put it away.",
+            "Tap the plot to read every line at one moment, or drag sideways to " +
+                "go back through the day. Tapping a name in the key puts that " +
+                "line away.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -541,6 +536,10 @@ private fun CombinedChartCard(
         HorizontalDivider()
 
         AxisPicker(state = state, onToggle = onToggleAxis)
+
+        HorizontalDivider()
+
+        SeriesToggles(state = state, onToggle = onToggleSeries)
     }
 }
 
@@ -576,6 +575,54 @@ private fun AxisPicker(state: MasterGraphUiState, onToggle: (AxisMetric) -> Unit
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * A switch per line, coloured to match it.
+ *
+ * The swatch is what ties a row to its line -- the labels alone would mean
+ * re-reading the legend to work out which switch does what.
+ *
+ * This row was briefly replaced by tapping names in the legend, which reads well
+ * and hides badly: the legend sits at the foot of a 300dp card, the line
+ * explaining that it had become the switch fell below the fold on a phone, and
+ * the result was a chart with no visible way to choose what it drew. A control
+ * has to be visible from where the reader is standing. The legend tap stays as
+ * the shortcut it always should have been.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SeriesToggles(
+    state: MasterGraphUiState,
+    onToggle: (MasterSeries, Boolean) -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        MasterSeries.entries.forEach { series ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Switch(
+                    checked = state.isVisible(series),
+                    onCheckedChange = { onToggle(series, it) },
+                    colors =
+                        SwitchDefaults.colors(
+                            checkedThumbColor = series.color,
+                            checkedTrackColor = series.color.copy(alpha = 0.4f),
+                        ),
+                    modifier = Modifier.scale(0.75f),
+                )
+                Text(
+                    series.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 /** The colour this series is drawn in — on the plot, in the key, and on its axis. */

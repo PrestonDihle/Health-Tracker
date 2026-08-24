@@ -9,7 +9,7 @@ reps and reading.
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
+| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, supplements, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
 | **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour |
 | **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading — each against its own reference line |
@@ -224,11 +224,13 @@ alone, so the screen goes on scrolling. Panning shows what is already on the
 phone; the refresh button re-syncs whatever window is on screen when it is
 pressed.
 
-**Tap a name in the key** to draw that line or put it away. Switched-off lines
-stay in the key, faded, which is what makes it a complete set of switches rather
-than a caption for whatever survived. A line that is off is genuinely not on the
-plot — it stops stretching the axis it shares, which is the point of switching it
-off in the first place.
+**A switch per line** sits under the chart, coloured to match it, and that is the
+control: it shows every line whether or not it is currently drawn. **Tapping a
+name in the key** is the shortcut — it puts that line away without leaving the
+plot, and only ever that way, because a key lists what is drawn and the row is
+gone the moment the line is. A line that is off is genuinely not on the plot; it
+stops stretching the axis it shares, which is the point of switching it off in
+the first place.
 
 ## Blood sugar
 
@@ -289,6 +291,24 @@ This is a different threshold from the one above, on purpose. Breaking a line
 asks "was this measured"; going back to the source asks "is it worth a query",
 and a reader taking three fingersticks a day has hours of genuine emptiness that
 no re-read will ever fill.
+
+## Supplements
+
+A standing stack rather than a log typed out each morning. Add a name, a dose and
+one of **morning, midday or evening**, and it comes back every day with a box to
+tick; the card says how many of the stack are done. Something taken twice a day is
+added twice, once per slot, which is what makes it tickable twice.
+
+The dose is **free text**, and has to be: IU, mcg, mg, grams, capsules, softgels,
+drops and millilitres all turn up on one shelf, and half of them are printed per
+serving rather than per pill. Nothing does arithmetic on it, so demanding a
+number could only ever reject something you actually take. It is also optional —
+plenty of things are simply "one capsule", and saying so adds nothing.
+
+Ticks are stored per day, so a day that was never ticked and a day that was
+missed look the same, which is honest: there is nothing running at midnight to
+tell them apart. Removing a supplement also clears the record of the days it was
+taken, and says so before it does it.
 
 ## Grip strength
 
@@ -382,7 +402,10 @@ macro absorption, glucose smoothing, meal de-duplication, stamped-time detection
 series gap-splitting, axis selection, gap backfill, gridline spacing, axis range,
 where the waypoint stepper opens, and the panned window's own arithmetic --
 whether the curves stop at the right edge, and whether a meal past it is still
-listed. `MasterGraphRenderTest` and
+listed. `MealDeletionTest` and `SupplementsTest` drive the repository against an
+in-memory database for the behaviour that only appears across a sync, or between
+two tables with no foreign key holding them together.
+`MasterGraphRenderTest` and
 `ScreenRenderTest` compose whole screens against an in-memory database and
 capture images with Roborazzi, which is what catches the empty-list and
 divide-by-zero cases the chart canvas only reaches under a real layout pass.

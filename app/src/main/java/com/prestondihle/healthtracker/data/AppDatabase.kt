@@ -33,8 +33,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RestingHeartRate::class,
         UserGoals::class,
         UserSettings::class,
+        Supplement::class,
+        SupplementDose::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -292,6 +294,42 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The daily supplement stack, and a row per dose actually taken.
+         *
+         * Two tables rather than one, for the same reason the weight waypoints
+         * were a table: the stack is a standing list and what was swallowed today
+         * is an event, and folding the second into the first would mean a column
+         * that has to be cleared at midnight by something. Nothing here runs at
+         * midnight.
+         *
+         * `SupplementDose` carries no `taken` column -- the row's existence is the
+         * fact. See the entity for why a boolean would be worse than no column.
+         */
+        internal val migration10To11Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `Supplement` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`name` TEXT NOT NULL, " +
+                    "`dose` TEXT NOT NULL, " +
+                    "`slot` TEXT NOT NULL)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_Supplement_name_slot` " +
+                    "ON `Supplement` (`name`, `slot`)",
+                "CREATE TABLE IF NOT EXISTS `SupplementDose` (" +
+                    "`supplementId` INTEGER NOT NULL, " +
+                    "`date` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`supplementId`, `date`))",
+                "CREATE INDEX IF NOT EXISTS `index_SupplementDose_date` " +
+                    "ON `SupplementDose` (`date`)",
+            )
+
+        private val MIGRATION_10_11 =
+            object : Migration(10, 11) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration10To11Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -315,6 +353,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_7_8,
                                 MIGRATION_8_9,
                                 MIGRATION_9_10,
+                                MIGRATION_10_11,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

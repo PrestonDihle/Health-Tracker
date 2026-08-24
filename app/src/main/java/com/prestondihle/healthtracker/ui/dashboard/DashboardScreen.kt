@@ -15,15 +15,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -53,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.CaffeineIntake
+import com.prestondihle.healthtracker.data.Supplement
+import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Ketones
@@ -62,6 +68,7 @@ import androidx.compose.material3.FilterChip
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
+import com.prestondihle.healthtracker.ui.components.SupplementEntryDialog
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
@@ -163,6 +170,21 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
                 onDelete = {
                     viewModel.deleteCaffeine(it)
                     toast("Dose removed")
+                },
+            )
+        }
+
+        item {
+            SupplementsCard(
+                state = state,
+                onSetTaken = viewModel::setSupplementTaken,
+                onAdd = { name, dose, slot ->
+                    viewModel.addSupplement(name, dose, slot)
+                    toast("Added $name")
+                },
+                onDelete = {
+                    viewModel.deleteSupplement(it)
+                    toast("Removed ${it.name}")
                 },
             )
         }
@@ -645,6 +667,134 @@ private sealed interface CaffeineDialog {
     data object New : CaffeineDialog
 
     data class Edit(val intake: CaffeineIntake) : CaffeineDialog
+}
+
+/**
+ * The daily stack, grouped by when it is taken.
+ *
+ * A standing list with a tick per day rather than a dose typed out each morning:
+ * a supplement stack is the same every day, and re-entering "Vitamin D3, 5000
+ * IU" seven times a week is how a tracker stops being used by Wednesday.
+ *
+ * Only the slots holding something are drawn. Three empty headings for somebody
+ * who takes two things at breakfast is furniture standing where the data should
+ * be.
+ */
+@Composable
+private fun SupplementsCard(
+    state: DashboardUiState,
+    onSetTaken: (Supplement, Boolean) -> Unit,
+    onAdd: (String, String, SupplementSlot) -> Unit,
+    onDelete: (Supplement) -> Unit,
+) {
+    var adding by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<Supplement?>(null) }
+
+    DashboardCard(
+        title = "Supplements",
+        action = {
+            IconButton(onClick = { adding = true }) {
+                Icon(Icons.Filled.Add, contentDescription = "Add a supplement")
+            }
+        },
+    ) {
+        if (state.supplements.isEmpty()) {
+            Text(
+                "Nothing in the stack yet. Add what you take and when, and it " +
+                    "comes back every day with a box to tick.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            // Counted over the whole stack rather than per slot: the question at
+            // the top of a card is "am I done", and the evening's two are not a
+            // separate question from the morning's five.
+            Text(
+                "${state.supplementsTakenCount} of ${state.supplements.size} taken today",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            SupplementSlot.entries.forEach { slot ->
+                val inSlot = state.supplements.filter { it.slot == slot }
+                if (inSlot.isEmpty()) return@forEach
+
+                HorizontalDivider()
+                Text(
+                    slot.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                inSlot.forEach { supplement ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = supplement.id in state.supplementsTaken,
+                            onCheckedChange = { onSetTaken(supplement, it) },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(supplement.name, style = MaterialTheme.typography.bodyMedium)
+                            // Only where there is one. A blank line under the
+                            // name reads as a missing value rather than as a
+                            // supplement with no figure worth quoting.
+                            if (supplement.dose.isNotBlank()) {
+                                Text(
+                                    supplement.dose,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        IconButton(onClick = { pendingDelete = supplement }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Remove ${supplement.name}",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (adding) {
+        SupplementEntryDialog(
+            onDismiss = { adding = false },
+            onConfirm = { name, dose, slot ->
+                onAdd(name, dose, slot)
+                adding = false
+            },
+        )
+    }
+
+    // Confirmed rather than immediate, because removing one takes its history
+    // with it -- unlike every other delete on this screen, which loses a single
+    // reading.
+    pendingDelete?.let { supplement ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remove ${supplement.name}?") },
+            text = {
+                Text(
+                    "This also clears the record of the days it was taken.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(supplement)
+                        pendingDelete = null
+                    }
+                ) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Keep") } },
+        )
+    }
 }
 
 @Composable

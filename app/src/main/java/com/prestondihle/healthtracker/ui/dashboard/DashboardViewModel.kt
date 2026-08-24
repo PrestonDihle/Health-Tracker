@@ -17,6 +17,8 @@ import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.Supplement
+import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.domain.AdherenceResult
 import com.prestondihle.healthtracker.domain.Caffeine
@@ -121,6 +123,10 @@ data class DashboardUiState(
     val caffeine: List<CaffeineIntake> = emptyList(),
     /** Most recent grip measurement on or before today, with the date it was taken. */
     val latestGrip: GripStrengthEntry? = null,
+    /** The standing stack, morning first. */
+    val supplements: List<Supplement> = emptyList(),
+    /** Ids of the ones already taken today. */
+    val supplementsTaken: Set<Long> = emptySet(),
     val latestBloodPressure: BloodPressureReading? = null,
     val pushupsToday: Int = 0,
     val squatsToday: Int = 0,
@@ -146,6 +152,16 @@ data class DashboardUiState(
                             it.goalDurationMinutes)
                         .coerceIn(0f, 1f)
             }
+
+    /**
+     * How many of the standing stack have been ticked today.
+     *
+     * Intersected rather than counting the tick rows, so a dose left over from a
+     * supplement that has since been removed cannot report more taken than there
+     * are things to take.
+     */
+    val supplementsTakenCount: Int
+        get() = supplements.count { it.id in supplementsTaken }
 
     /**
      * Calories eaten so far today. Nothing logged means nothing eaten.
@@ -291,9 +307,16 @@ private data class TodayBundle(
     val hydrationMl: Int,
     val waist: WaistEntry?,
     val bloodPressures: List<BloodPressureReading>,
+    val body: BodyBundle,
+)
+
+/** Bundled because combine's typed overloads stop at five sources. */
+private data class BodyBundle(
     val pushups: Int,
     val squats: Int,
     val grip: GripStrengthEntry?,
+    val supplements: List<Supplement>,
+    val supplementsTaken: Set<Long>,
 )
 
 private data class SettingsBundle(
@@ -377,9 +400,13 @@ class DashboardViewModel(
                     repository.getRepTotalForDate(MovementType.PUSHUP, date),
                     repository.getRepTotalForDate(MovementType.AIR_SQUAT, date),
                     repository.getLatestGripStrengthOnOrBefore(date),
-                ) { pushups, squats, grip -> Triple(pushups, squats, grip) },
+                    repository.getSupplements(),
+                    repository.getSupplementsTakenOn(date),
+                ) { pushups, squats, grip, supplements, taken ->
+                    BodyBundle(pushups, squats, grip, supplements, taken)
+                },
             ) { log, hydration, waist, bps, body ->
-                TodayBundle(log, hydration, waist, bps, body.first, body.second, body.third)
+                TodayBundle(log, hydration, waist, bps, body)
             }
         }
 
@@ -462,10 +489,12 @@ class DashboardViewModel(
                     glucoseWindow = metabolicBundle.glucoseWindow,
                     settings = metabolicBundle.settings,
                     caffeine = metabolicBundle.caffeine,
-                    latestGrip = todayBundle.grip,
+                    latestGrip = todayBundle.body.grip,
+                    supplements = todayBundle.body.supplements,
+                    supplementsTaken = todayBundle.body.supplementsTaken,
                     latestBloodPressure = todayBundle.bloodPressures.lastOrNull(),
-                    pushupsToday = todayBundle.pushups,
-                    squatsToday = todayBundle.squats,
+                    pushupsToday = todayBundle.body.pushups,
+                    squatsToday = todayBundle.body.squats,
                     goals = settings.goals ?: UserGoals(),
                     healthState = settings.permission,
                     missingPermissions = settings.missingPermissions,
@@ -538,6 +567,28 @@ class DashboardViewModel(
             val current = repository.getDailyLog(today).first() ?: DailyLog(today)
             repository.upsertDailyLog(current.copy(bookPagesRead = pages.coerceAtLeast(0)))
         }
+    }
+
+    /**
+     * Adds an entry to the standing stack.
+     *
+     * A blank name is dropped rather than stored: a row with nothing to read is
+     * a checkbox nobody can identify, and the dialog cannot always stop one
+     * arriving. An empty dose is allowed through -- plenty of things are "one
+     * capsule" and saying so adds nothing.
+     */
+    fun addSupplement(name: String, dose: String, slot: SupplementSlot) {
+        if (name.isBlank()) return
+        viewModelScope.launch { repository.addSupplement(name, dose, slot) }
+    }
+
+    fun deleteSupplement(supplement: Supplement) {
+        viewModelScope.launch { repository.deleteSupplement(supplement) }
+    }
+
+    /** Ticks or unticks one supplement for today. */
+    fun setSupplementTaken(supplement: Supplement, taken: Boolean) {
+        viewModelScope.launch { repository.setSupplementTaken(supplement, today, taken) }
     }
 
     fun logCaffeine(milligrams: Int, at: Instant = Instant.now()) {

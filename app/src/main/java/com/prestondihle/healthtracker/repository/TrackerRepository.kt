@@ -25,6 +25,9 @@ import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeeklyPerformance
+import com.prestondihle.healthtracker.data.Supplement
+import com.prestondihle.healthtracker.data.SupplementDose
+import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.GlucoseGaps
@@ -35,6 +38,7 @@ import com.prestondihle.healthtracker.health.HeartRateSample
 import com.prestondihle.healthtracker.health.StepSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -123,6 +127,37 @@ class TrackerRepository(
         dao.getLatestWaistOnOrBefore(date)
 
     suspend fun setWaistCm(date: LocalDate, cm: Float) = dao.upsertWaist(WaistEntry(date, cm))
+
+    // ----- Supplements -------------------------------------------------------
+
+    fun getSupplements(): Flow<List<Supplement>> = dao.getSupplements()
+
+    suspend fun addSupplement(name: String, dose: String, slot: SupplementSlot) =
+        dao.insertSupplement(Supplement(name = name.trim(), dose = dose.trim(), slot = slot))
+
+    suspend fun updateSupplement(supplement: Supplement) = dao.updateSupplement(supplement)
+
+    /**
+     * Removes a supplement and everything logged against it.
+     *
+     * Both halves, in that order, because there are no foreign keys anywhere in
+     * this schema and so nothing cascades on the app's behalf. Leaving the doses
+     * would leave rows keyed on an id nothing can resolve -- invisible, and
+     * counted by anything that later learns to read the history.
+     */
+    suspend fun deleteSupplement(supplement: Supplement) {
+        dao.deleteDosesOf(supplement.id)
+        dao.deleteSupplement(supplement)
+    }
+
+    /** Which supplements have been taken on [date], by id. */
+    fun getSupplementsTakenOn(date: LocalDate): Flow<Set<Long>> =
+        dao.getSupplementDosesOn(date).map { doses -> doses.map { it.supplementId }.toSet() }
+
+    suspend fun setSupplementTaken(supplement: Supplement, date: LocalDate, taken: Boolean) {
+        if (taken) dao.insertSupplementDose(SupplementDose(supplement.id, date))
+        else dao.deleteSupplementDose(supplement.id, date)
+    }
 
     // ----- Grip strength -----------------------------------------------------
 

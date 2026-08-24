@@ -177,6 +177,36 @@ prefers the manual entry on any day that has both. A sync must never overwrite a
 substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
 Grouping burn figures next to protein/carbs/fat is what originally made the dashboard read as intake.
 
+### Supplements
+
+Two tables, and the split is the same one the weight waypoints made: `Supplement` is a **standing
+list** -- name, dose, and which of morning/midday/evening -- and `SupplementDose` is one row per
+supplement per day it was actually taken. Folding the second into the first would mean a `takenToday`
+column that something has to clear at midnight, and nothing in this app runs at midnight.
+
+**`SupplementDose` has no `taken` column. The row's existence is the fact.** "Not taken" and "not
+answered yet" are the same state for something that resets daily, and a boolean would force a
+distinction the data cannot support -- leaving every past day looking actively missed rather than
+simply over. Its primary key is the pair, so ticking twice is absorbed rather than counted, and it
+carries its own index on `date` because the primary key indexes the *pair* and cannot answer "what
+was taken today".
+
+**The dose is free text**, and deliberately: IU, mcg, mg, grams, capsules, softgels, drops and
+millilitres all appear on one shelf, half of them printed per serving rather than per pill. Nothing
+does arithmetic on it, so parsing could only ever reject something somebody actually takes. This also
+makes the add dialog the **only free-text entry in the app** -- everything else is a quantity with a
+known unit and gets a stepper.
+
+`Supplement` is unique on **name and slot together**. The same thing morning and evening is two rows,
+which is what makes it tickable twice a day; the same thing twice in one morning is one row, because
+that is one dose split across two capsules. Inserts use `IGNORE` rather than `REPLACE`: replacing
+would hand the row a new id and silently orphan every tick already logged against the old one.
+
+**Deleting a supplement clears its doses in the repository**, in that order. There are no foreign
+keys anywhere in this schema, so nothing cascades on the app's behalf, and ticks left behind would be
+keyed on an id nothing can resolve. `DashboardUiState.supplementsTakenCount` intersects rather than
+counting tick rows for the same reason -- a stray dose must not read as "3 of 2 taken today".
+
 ### Health Connect
 
 Read-only. The manifest declares only `READ_*` permissions and no `WRITE_*`, and it must stay that
@@ -252,7 +282,7 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 10, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 11, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -270,6 +300,12 @@ pre-filled. `MIGRATION_8_9` is the case where this matters most: the glucose plo
 blood pressure rules were **hard-coded before they were settings**, so a column arriving NULL would
 read as "no line" and visibly change an existing user's charts — which is the one thing turning a
 constant into a setting must not do. Its defaults are exactly the figures those charts were fixed at.
+
+`MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
+there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
+The parts worth pinning are the unique index on name-and-slot and `SupplementDose`'s **composite**
+primary key: get the latter wrong and every stray tap on a checkbox is another row saying the same
+thing.
 
 `MIGRATION_9_10` adds `WeightSubGoal`, a **table rather than more `UserGoals` columns**, because
 there is no right number of staged weights: thirty pounds to lose may want one every five or a
@@ -415,17 +451,29 @@ The same rule sorts out the other three chart primitives:
   either a measurement or dashed to say it is a model, and a solid line quietly differing from the
   readings under it would break that rule without saying so.
 
-**The legend is the chart's control surface, not a caption.** Tapping a row toggles its line, and
-the switched-off ones are still listed, faded, at the end -- a legend that dropped what it stopped
-drawing would take the only way back with it. They arrive as `HiddenSeries`, which carries a label, a
-colour and a stroke style and *nothing else*: a hidden series must never reach the plot, because a
-point that is not being drawn must not go on setting an axis' ceiling, and a type that cannot hold
-points makes that impossible rather than merely discouraged. Rows are `Modifier.toggleable` rather
-than `clickable`, which is what states the row's meaning to TalkBack and is the only handle a test
-has on a row of plain text. The tap is keyed on `ChartSeries.label` rather than on the caption: the
+**`SeriesToggles` is the control; the legend is a shortcut.** This was briefly the other way round --
+the switch row deleted, names in the legend made the only way to choose what was drawn -- and it
+failed for a reason worth keeping written down. The legend sits at the foot of a 300dp card, so on a
+phone the line explaining that it had become the switch fell below the fold, and the feature read as
+*removed*. **A control has to be visible from where the reader is standing**, and a caption that
+becomes a control without looking like one is not visible in the sense that matters.
+
+So the legend tap only ever *hides* a line. That is not a half-measure, it is what a legend can
+honestly support: a legend lists what is drawn, so there is no row left to tap once a line is off,
+and the way back has to come from a control that shows every line whether or not it is on the plot.
+Legend rows are therefore `Modifier.clickable` with an `onClickLabel`, not `toggleable` -- announcing
+a switch would have a screen reader offer to turn back on a row that disappears the moment it is off.
+The switches keep `toggleable`, which also makes them the only toggleable nodes on the screen and so
+the thing a test can count. The tap is keyed on `ChartSeries.label` rather than on the caption: the
 caption carries the unit, which moves as the axis selection does, and a control keyed on something
-that moves is a control that stops working. Master's `MasterSeries.color` is still the single source
-for the plot, the key swatch and the axis tint.
+that moves is a control that stops working. `MasterSeries.color` remains the single source for the
+plot, the key swatch, the switch and the axis tint.
+
+One trap this left in the tests. Eight switches wrap onto three rows and the chart card no longer
+fits the screen, so the last row is below the fold -- and a click on an off-screen node is clamped
+into view and lands on nothing, silently. `performScrollTo()` before each `performClick()` is what
+makes that deterministic; without it a test that switches everything off leaves two series drawn and
+passes anyway.
 
 **Tapping the plot drops a crosshair**, with every visible line's value at that moment listed under
 it. `selectedTime` lives in `DualAxisTimeChart` via `remember` -- no ViewModel is involved, so every
@@ -488,7 +536,10 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest` and `PanWindowTest`
-are the pure-JVM suites. Adherence
+are the pure-JVM suites. `SupplementsTest` is a Robolectric repository suite alongside
+`MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
+thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,
+and removing a supplement takes its ticks with it. Adherence
 covers the midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life

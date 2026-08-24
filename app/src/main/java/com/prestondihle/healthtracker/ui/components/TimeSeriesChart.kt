@@ -4,7 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -33,7 +33,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
@@ -112,23 +111,6 @@ data class ChartSeries(
      * to print its numbers.
      */
     val scale: AxisSpec? = null,
-)
-
-/**
- * A series that is currently switched off, kept in the legend so it can be
- * switched back on.
- *
- * Deliberately *not* a [ChartSeries] carrying no points. A hidden series must
- * not reach the plot at all -- one that did would go on stretching the axis it
- * shares, which is the whole reason the caller filters the list before passing
- * it. Carrying only the three things a legend row draws makes that mistake
- * impossible rather than merely discouraged.
- */
-data class HiddenSeries(
-    val label: String,
-    val color: Color,
-    val kind: SeriesKind = SeriesKind.LINE,
-    val dashed: Boolean = false,
 )
 
 /**
@@ -214,15 +196,6 @@ private const val BAR_ALPHA = 0.45f
 
 /** Light enough that a gridline still shows through the target band. */
 private const val BAND_ALPHA = 0.16f
-
-/**
- * How far a switched-off legend entry is faded.
- *
- * Faded rather than dropped: the row is the only way back, so it has to stay
- * findable -- and keeping its colour, however faint, is what says *which* line
- * it is. Far enough down that it never reads as a line that is on the plot.
- */
-private const val OFF_ALPHA = 0.3f
 
 /** Room above the plot for marker captions; without it they would clip. */
 private val MARKER_LABEL_HEIGHT = 16.dp
@@ -377,21 +350,13 @@ fun DualAxisTimeChart(
      */
     verticalGridlines: Boolean = false,
     /**
-     * Series the caller has switched off, drawn faded at the end of the legend.
-     *
-     * The legend can only be a complete set of controls if it also shows what is
-     * *not* drawn -- otherwise switching a line off removes the only thing that
-     * could switch it back on. They are passed apart from [series] rather than
-     * flagged inside it because nothing hidden may reach the plot: a point that
-     * is not being drawn must not go on setting an axis' ceiling.
-     */
-    hiddenSeries: List<HiddenSeries> = emptyList(),
-    /**
      * Called with a legend row's [ChartSeries.label] when it is tapped.
      *
-     * Null leaves the legend inert, which is what a chart with nothing to toggle
-     * wants. Keyed by label rather than by index so the caller does not have to
-     * track which list a row came from.
+     * A shortcut for putting that line away while looking straight at the plot,
+     * not the whole control: a legend lists what is drawn, so there is no row
+     * left to tap once a line is off, and the way back on belongs to a control
+     * that shows every line whether or not it is on the chart. Null leaves the
+     * legend inert, which is what a chart with nothing to switch wants.
      */
     onSeriesTap: ((String) -> Unit)? = null,
     /**
@@ -560,7 +525,6 @@ fun DualAxisTimeChart(
 
         Legend(
             series = drawn,
-            hidden = hiddenSeries,
             leftAxis = leftAxis,
             rightAxis = rightAxis,
             onSeriesTap = onSeriesTap,
@@ -697,18 +661,18 @@ private fun CrosshairReadout(
  * A series drawn against a scale of its own also states that scale's range here,
  * since that is the only place its numbers appear at all.
  *
- * Where the caller supplies [onSeriesTap] this is also the plot's control
- * surface: every row toggles its own line, and the switched-off ones follow the
- * drawn ones, faded. Grouping them at the end rather than holding each name in a
- * fixed slot is deliberate -- what is on the chart reads as one block and what
- * is available reads as another, which is the question actually being asked of a
- * legend that doubles as a set of switches.
+ * Where the caller supplies [onSeriesTap] a row is also a shortcut for putting
+ * its own line away, which is the thing most often wanted while looking straight
+ * at the plot. It is deliberately only the *quick* way: a legend lists what is
+ * drawn, so the row of a line that is off is not there to be tapped, and the way
+ * back on has to be a control that shows every line whether or not it is on the
+ * chart. Making the legend carry the off ones too was tried and is what left a
+ * reader with no visible switch at all.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Legend(
     series: List<DrawnSeries>,
-    hidden: List<HiddenSeries>,
     leftAxis: AxisSpec,
     rightAxis: AxisSpec?,
     onSeriesTap: ((String) -> Unit)?,
@@ -743,22 +707,6 @@ private fun Legend(
                 color = item.color,
                 kind = item.kind,
                 dashed = item.dashed,
-                drawn = true,
-                onSeriesTap = onSeriesTap,
-            )
-        }
-
-        // No unit quoted on a hidden row: an axis is worked out from the points
-        // on the plot, and a series that is off has none there. Printing the
-        // range it would have had means inventing a number.
-        hidden.forEach { item ->
-            LegendRow(
-                key = item.label,
-                caption = item.label,
-                color = item.color,
-                kind = item.kind,
-                dashed = item.dashed,
-                drawn = false,
                 onSeriesTap = onSeriesTap,
             )
         }
@@ -766,13 +714,17 @@ private fun Legend(
 }
 
 /**
- * One legend entry: a swatch, a caption, and -- where the chart is switchable --
- * the control for its own line.
+ * One legend entry: a swatch, a caption, and -- where the chart offers it -- a
+ * shortcut for putting that line away.
  *
  * [key] is what a tap reports, and is the series' plain label rather than the
  * [caption] the reader sees. The caption carries the unit, which moves as the
  * axis selection does, and a control keyed on something that moves is a control
  * that stops working.
+ *
+ * Clickable rather than toggleable, because a row that can only ever go one way
+ * is an action and not a switch. Announcing it as a switch would have a screen
+ * reader offer to turn back on a line whose row disappears the moment it is off.
  */
 @Composable
 private fun LegendRow(
@@ -781,25 +733,17 @@ private fun LegendRow(
     color: Color,
     kind: SeriesKind,
     dashed: Boolean,
-    drawn: Boolean,
     onSeriesTap: ((String) -> Unit)?,
 ) {
-    val ink = if (drawn) color else color.copy(alpha = OFF_ALPHA)
+    val ink = color
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
             if (onSeriesTap == null) Modifier
             else
-                // Toggleable rather than merely clickable: it says what the row
-                // does and which way it is currently set, which is what a screen
-                // reader has to be told and is also the only handle a test has on
-                // a row of plain text. The padding is the tap target -- legend
-                // text on its own is a couple of millimetres tall.
-                Modifier.toggleable(
-                        value = drawn,
-                        role = Role.Switch,
-                        onValueChange = { onSeriesTap(key) },
-                    )
+                // The padding is the tap target -- legend text on its own is a
+                // couple of millimetres tall.
+                Modifier.clickable(onClickLabel = "Hide $key") { onSeriesTap(key) }
                     .padding(vertical = 3.dp),
     ) {
         // A short stroke rather than a dot, so a dashed projection is
@@ -824,9 +768,7 @@ private fun LegendRow(
         Text(
             text = caption,
             style = MaterialTheme.typography.labelSmall,
-            color =
-                if (drawn) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.outline,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
