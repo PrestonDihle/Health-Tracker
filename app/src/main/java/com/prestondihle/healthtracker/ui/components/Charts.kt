@@ -75,6 +75,33 @@ private val VALUE_GUTTER = 30.dp
 /** Roughly how many gridlines to aim for; the exact count follows the chosen step. */
 private const val VALUE_TICKS = 4
 
+/** How far a waypoint rule is washed out from the goal it leads to. */
+private const val SUB_GOAL_ALPHA = 0.45f
+
+/**
+ * The span a day-indexed chart has to cover, before it is snapped to round
+ * numbers.
+ *
+ * [marks] are the goal and any waypoints. They belong in the range because a
+ * rule outside the plot is not drawn at all -- it is clipped, silently -- which
+ * leaves the chart scaled to the readings and missing the one number they were
+ * supposed to be read against.
+ *
+ * [minY] and [maxY] still win where they are given: that is a caller stating the
+ * scale deliberately, as the mood chart does with 1 to 10, and a goal must not
+ * quietly stretch an axis whose bounds are the whole point.
+ */
+internal fun chartBounds(
+    values: List<Float>,
+    marks: List<Float>,
+    minY: Float? = null,
+    maxY: Float? = null,
+): ClosedFloatingPointRange<Float> {
+    val all = values + marks
+    if (all.isEmpty()) return (minY ?: 0f)..(maxY ?: 1f)
+    return (minY ?: all.min())..(maxY ?: all.max())
+}
+
 /** An axis snapped to round numbers, with the interval between its gridlines. */
 private data class AxisTicks(val min: Float, val max: Float, val step: Float)
 
@@ -248,6 +275,14 @@ fun MultiLineChart(
     modifier: Modifier = Modifier,
     goalLine: Float? = null,
     goalColor: Color = MaterialTheme.colorScheme.error,
+    /**
+     * Waypoints on the way to [goalLine], drawn lighter than it.
+     *
+     * A staged target is not the destination and must not compete with it for
+     * attention: the goal is the line the chart is read against, and five rules
+     * of equal weight leave the reader working out which of them was the point.
+     */
+    subGoalLines: List<Float> = emptyList(),
     minY: Float? = null,
     maxY: Float? = null,
     showLegend: Boolean = true,
@@ -263,9 +298,11 @@ fun MultiLineChart(
         return
     }
 
-    // Snapped so the gridlines land on round numbers; the data is mapped against
-    // the snapped bounds too, or the lines would not sit on their own gridlines.
-    val axis = niceTicks(minY ?: values.min(), maxY ?: values.max())
+    // The goal is part of the picture, not an annotation on top of it: scaled to
+    // the readings alone, a goal you are not yet near falls outside the plot and
+    // is simply clipped. See [chartBounds].
+    val bounds = chartBounds(values, listOfNotNull(goalLine) + subGoalLines, minY, maxY)
+    val axis = niceTicks(bounds.start, bounds.endInclusive)
     val minVal = axis.min
     val range = if (axis.max - axis.min == 0f) 1f else axis.max - axis.min
 
@@ -293,6 +330,23 @@ fun MultiLineChart(
                 color = axisTextColor,
                 gridColor = gridColor,
             )
+
+            // Waypoints first and lighter: hairline, finer dashes, and washed
+            // out. Same colour family as the goal, because they are the same
+            // kind of thing, but never the same weight -- one of these lines is
+            // where you are going and the rest are only on the way.
+            for (subGoal in subGoalLines) {
+                val y = mapY(subGoal)
+                if (y in 0f..plotHeight) {
+                    drawLine(
+                        color = goalColor.copy(alpha = SUB_GOAL_ALPHA),
+                        start = Offset(plotLeft, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f),
+                    )
+                }
+            }
 
             goalLine?.let {
                 val y = mapY(it)
@@ -402,6 +456,7 @@ fun LineChart(
     lineColor: Color = MaterialTheme.colorScheme.primary,
     goalLine: Float? = null,
     goalColor: Color = MaterialTheme.colorScheme.error,
+    subGoalLines: List<Float> = emptyList(),
     minY: Float? = null,
     maxY: Float? = null,
 ) {
@@ -410,6 +465,7 @@ fun LineChart(
         modifier = modifier,
         goalLine = goalLine,
         goalColor = goalColor,
+        subGoalLines = subGoalLines,
         minY = minY,
         maxY = maxY,
         showLegend = false,

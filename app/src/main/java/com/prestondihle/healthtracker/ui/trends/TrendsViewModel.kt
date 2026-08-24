@@ -13,6 +13,7 @@ import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.StackedBar
@@ -56,6 +57,8 @@ data class TrendsUiState(
     val exerciseSets: List<ExerciseSet> = emptyList(),
     val bloodPressure: List<BloodPressureReading> = emptyList(),
     val goals: UserGoals = UserGoals(),
+    /** Staged weights on the way to the goal, heaviest first. */
+    val weightSubGoals: List<WeightSubGoal> = emptyList(),
     val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     /**
@@ -194,8 +197,16 @@ class TrendsViewModel(
                     ) { hydration, sets, bloodPressure ->
                         Triple(hydration, sets, bloodPressure)
                     },
-                    repository.getUserGoals(),
-                ) { logs, snapshots, body, activity, goals ->
+                    // Paired with the goals rather than given a source of its own:
+                    // the outer combine's typed overloads stop at five, and a
+                    // staged weight is a goal in every sense but the table it
+                    // lives in.
+                    combine(repository.getUserGoals(), repository.getWeightSubGoals()) {
+                        goals,
+                        subGoals ->
+                        goals to subGoals
+                    },
+                ) { logs, snapshots, body, activity, targets ->
                     TrendsUiState(
                         range = selected,
                         startDate = start,
@@ -208,7 +219,8 @@ class TrendsViewModel(
                         hydration = activity.first,
                         exerciseSets = activity.second,
                         bloodPressure = activity.third,
-                        goals = goals ?: UserGoals(),
+                        goals = targets.first ?: UserGoals(),
+                        weightSubGoals = targets.second,
                         zoneId = zoneId,
                     )
                 }

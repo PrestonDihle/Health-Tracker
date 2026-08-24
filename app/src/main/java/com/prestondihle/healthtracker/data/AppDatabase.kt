@@ -14,6 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthDaySnapshot::class,
         BloodPressureReading::class,
         WeightEntry::class,
+        WeightSubGoal::class,
         WaistEntry::class,
         HydrationEntry::class,
         ExerciseSet::class,
@@ -33,7 +34,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -267,6 +268,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Staged weights on the way to the goal.
+         *
+         * A table rather than more `UserGoals` columns because there is no right
+         * number of them -- see [WeightSubGoal]. The unique index on `kg` is what
+         * makes adding the same mark twice a no-op rather than two rules drawn at
+         * the same height.
+         */
+        internal val migration9To10Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `WeightSubGoal` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`kg` REAL NOT NULL)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_WeightSubGoal_kg` " +
+                    "ON `WeightSubGoal` (`kg`)",
+            )
+
+        private val MIGRATION_9_10 =
+            object : Migration(9, 10) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration9To10Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -289,6 +314,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_6_7,
                                 MIGRATION_7_8,
                                 MIGRATION_8_9,
+                                MIGRATION_9_10,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

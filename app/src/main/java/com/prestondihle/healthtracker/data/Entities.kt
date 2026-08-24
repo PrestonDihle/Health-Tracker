@@ -84,6 +84,23 @@ data class BloodPressureReading(
 @Entity
 data class WeightEntry(@PrimaryKey val date: LocalDate, val weightKg: Float)
 
+/**
+ * A staged weight on the way to [UserGoals.goalWeightKg].
+ *
+ * A table rather than more columns on `UserGoals` because there is no right
+ * number of them: someone with thirty pounds to lose may want one every five,
+ * and someone else wants a single halfway mark. A fixed set of columns would
+ * have to guess, and guessing wrong means either unused columns or a ceiling
+ * nobody can raise.
+ *
+ * Unique on the weight itself, so adding a mark that already exists is
+ * absorbed rather than drawn twice at the same height. Kilograms like every
+ * other body measurement, converted at the display boundary -- a second storage
+ * unit is how rounding error gets in.
+ */
+@Entity(indices = [Index(value = ["kg"], unique = true)])
+data class WeightSubGoal(@PrimaryKey(autoGenerate = true) val id: Long = 0, val kg: Float)
+
 /** Stored in centimetres; the UI presents inches in quarter-inch steps. */
 @Entity
 data class WaistEntry(@PrimaryKey val date: LocalDate, val waistCm: Float)

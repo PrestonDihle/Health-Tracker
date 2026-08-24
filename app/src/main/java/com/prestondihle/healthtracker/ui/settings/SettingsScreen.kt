@@ -8,22 +8,31 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.UnitSystemEnum
+import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.IntStepper
@@ -388,6 +397,86 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 )
             }
         }
+
+        item {
+            WeightSubGoalsCard(
+                subGoals = state.weightSubGoals,
+                goalWeightLbs = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
+                onAdd = viewModel::addWeightSubGoalLbs,
+                onDelete = viewModel::deleteWeightSubGoal,
+            )
+        }
+    }
+}
+
+/**
+ * Staged weights on the way to the goal.
+ *
+ * A list rather than a fixed set of steppers, because there is no right number
+ * of them: thirty pounds to lose may want one every five, or a single halfway
+ * mark, and the app is in no position to choose.
+ *
+ * The add stepper starts at the midpoint between the goal and the lightest mark
+ * already staged -- or the goal itself where there are none -- which is where
+ * the next one usually goes, and saves dialling from 200 every time.
+ */
+@Composable
+private fun WeightSubGoalsCard(
+    subGoals: List<WeightSubGoal>,
+    goalWeightLbs: Float?,
+    onAdd: (Float) -> Unit,
+    onDelete: (WeightSubGoal) -> Unit,
+) {
+    val goal = goalWeightLbs ?: 180f
+    val lightestStaged = subGoals.minOfOrNull { Units.kgToLbs(it.kg) }
+    val suggested = lightestStaged?.let { (it + goal) / 2f } ?: goal
+
+    var pending by remember(suggested) { mutableFloatStateOf(suggested) }
+
+    SettingsCard(title = "Weight waypoints") {
+        Text(
+            "Marks on the way to the goal weight, drawn as faint rules across the Weight " +
+                "chart on Trends. Lighter than the goal itself, because they are steps " +
+                "towards it rather than the point of it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        subGoals.forEach { subGoal ->
+            HorizontalDivider()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "${Units.kgToLbs(subGoal.kg).toInt()} lb",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                IconButton(onClick = { onDelete(subGoal) }) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription =
+                            "Remove ${Units.kgToLbs(subGoal.kg).toInt()} lb waypoint",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider()
+        Stepper(
+            label = "Add a waypoint",
+            value = pending,
+            onValueChange = { pending = it },
+            step = 1f,
+            range = 80f..400f,
+            valueFormatter = { "${it.toInt()} lb" },
+        )
+        // Deliberately a separate action rather than saving as the stepper
+        // moves: every tap on the way from 180 to 195 would otherwise stage a
+        // mark, and the reader would be deleting fourteen of them.
+        TextButton(onClick = { onAdd(pending) }) { Text("Add ${pending.toInt()} lb") }
     }
 }
 

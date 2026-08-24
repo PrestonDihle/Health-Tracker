@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.WeightSubGoal
+import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.StepSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +20,8 @@ import java.time.LocalDate
 data class SettingsUiState(
     val settings: UserSettings = UserSettings(),
     val goals: UserGoals = UserGoals(),
+    /** Staged weights on the way to the goal, heaviest first. */
+    val weightSubGoals: List<WeightSubGoal> = emptyList(),
     /** Today's per-app step totals, loaded on demand. */
     val stepSources: List<StepSource> = emptyList(),
     val isLoadingStepSources: Boolean = false,
@@ -31,12 +35,14 @@ class SettingsViewModel(private val repository: TrackerRepository) : ViewModel()
     val uiState: StateFlow<SettingsUiState> = combine(
         repository.getUserSettings(),
         repository.getUserGoals(),
+        repository.getWeightSubGoals(),
         stepSources,
         loadingStepSources,
-    ) { settings, goals, sources, loading ->
+    ) { settings, goals, subGoals, sources, loading ->
         SettingsUiState(
             settings = settings ?: UserSettings(),
             goals = goals ?: UserGoals(),
+            weightSubGoals = subGoals,
             stepSources = sources,
             isLoadingStepSources = loading,
         )
@@ -85,6 +91,22 @@ class SettingsViewModel(private val repository: TrackerRepository) : ViewModel()
         viewModelScope.launch {
             repository.upsertUserGoals(goals)
         }
+    }
+
+    /**
+     * Stages a weight on the way to the goal.
+     *
+     * Takes pounds because that is what the stepper shows, and converts here so
+     * the display boundary stays in one place. Adding one that already exists is
+     * absorbed by the unique index rather than drawing two rules at the same
+     * height.
+     */
+    fun addWeightSubGoalLbs(lbs: Float) {
+        viewModelScope.launch { repository.addWeightSubGoalKg(Units.lbsToKg(lbs)) }
+    }
+
+    fun deleteWeightSubGoal(subGoal: WeightSubGoal) {
+        viewModelScope.launch { repository.deleteWeightSubGoal(subGoal) }
     }
 
     companion object {

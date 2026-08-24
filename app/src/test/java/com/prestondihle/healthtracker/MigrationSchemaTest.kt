@@ -136,6 +136,21 @@ class MigrationSchemaTest {
     }
 
     /**
+     * A new table, so this one can be diffed as DDL text rather than by columns:
+     * nothing was added by `ALTER TABLE`, so there is no SQLite default for the
+     * migration's text to carry and Room's to omit. The unique index on `kg` is
+     * the part worth pinning -- without it the same waypoint can be staged twice
+     * and drawn as two rules at one height.
+     */
+    @Test
+    fun `migration builds WeightSubGoal exactly as Room expects`() {
+        assertEquals(
+            roomSchema("WeightSubGoal"),
+            migrationSchema("WeightSubGoal", AppDatabase.migration9To10Statements),
+        )
+    }
+
+    /**
      * The v4 KetoneReading table, as Room built it before the rename.
      *
      * Spelled out here rather than derived, because the point of the test is to

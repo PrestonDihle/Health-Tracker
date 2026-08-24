@@ -14,7 +14,7 @@ reps and reading.
 | **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour |
 | **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading — each against its own reference line |
 | **History** | Backfill or correct any past day |
-| **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets |
+| **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints |
 
 ## Reference lines
 
@@ -23,6 +23,21 @@ yesterday's says nothing on its own; a bar that is above or below the line you
 set says what you actually wanted to know. Steps, calories, sleep, pages read,
 waist, weight and blood pressure each carry one, all of them set in Settings and
 all drawn dashed to mark them as a target rather than a measurement.
+
+**The chart stretches to hold its goal.** A rule outside the plot is not drawn at
+the edge, it is clipped — so a weight chart scaled to a fortnight of readings
+around 198 lb showed no 180 lb goal at all, and looked exactly like a chart with
+no goal set. Weight and waist now scale to include theirs, so the distance left
+to go is something you can see rather than something you have to know.
+
+### Weight waypoints
+
+Thirty pounds is a long way to read against a single line. Weight takes any
+number of staged marks on the way to the goal — one every five pounds, or a
+single halfway point, or none — added and removed in Settings. They are drawn
+fainter and finer than the goal itself, because one of those lines is where you
+are going and the rest are only on the way; five rules of equal weight would
+leave you working out which of them was the point.
 
 Blood pressure carries **two**, one per line — drawn with a systolic rule alone,
 the diastolic trace had nothing to be read against at all. They start at the
@@ -325,8 +340,8 @@ needs a real upload key. No signing material is stored in this repo.
 
 The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
-series gap-splitting, axis selection, gap backfill and gridline spacing.
-`MasterGraphRenderTest` and
+series gap-splitting, axis selection, gap backfill, gridline spacing and axis
+range. `MasterGraphRenderTest` and
 `ScreenRenderTest` compose whole screens against an in-memory database and
 capture images with Roborazzi, which is what catches the empty-list and
 divide-by-zero cases the chart canvas only reaches under a real layout pass.

@@ -60,6 +60,20 @@ interface TrackerDao {
 
     @Upsert suspend fun upsertWeight(entry: WeightEntry)
 
+    /** Heaviest first, which is the order they are passed on the way down. */
+    @Query("SELECT * FROM WeightSubGoal ORDER BY kg DESC")
+    fun getWeightSubGoals(): Flow<List<WeightSubGoal>>
+
+    /**
+     * IGNORE rather than REPLACE: the unique index means a mark at a weight
+     * already staged is the same mark, and replacing it would hand it a new id
+     * for no reason.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertWeightSubGoal(subGoal: WeightSubGoal)
+
+    @Delete suspend fun deleteWeightSubGoal(subGoal: WeightSubGoal)
+
     @Query("SELECT * FROM WaistEntry WHERE date = :date")
     fun getWaist(date: LocalDate): Flow<WaistEntry?>
 

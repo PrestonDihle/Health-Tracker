@@ -235,7 +235,7 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 9, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 10, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -252,7 +252,12 @@ seeds the glucose target that way, so an upgrading user does not find blank a se
 pre-filled. `MIGRATION_8_9` is the case where this matters most: the glucose plot bounds and the
 blood pressure rules were **hard-coded before they were settings**, so a column arriving NULL would
 read as "no line" and visibly change an existing user's charts — which is the one thing turning a
-constant into a setting must not do. Its defaults are exactly the figures those charts were fixed at. Room only compares a column's default when the entity spells one out with
+constant into a setting must not do. Its defaults are exactly the figures those charts were fixed at.
+
+`MIGRATION_9_10` adds `WeightSubGoal`, a **table rather than more `UserGoals` columns**, because
+there is no right number of staged weights: thirty pounds to lose may want one every five or a
+single halfway mark, and a fixed set of columns has to guess. Unique on `kg`, so staging the same
+mark twice is absorbed rather than drawn as two rules at one height. Room only compares a column's default when the entity spells one out with
 `@ColumnInfo(defaultValue = …)`, so this is invisible to schema validation. It does mean an
 `ALTER TABLE`-added column **cannot** be checked by diffing DDL text the way a new table is: the
 migration's text says `DEFAULT 70` and Room's `CREATE TABLE` does not. `MigrationSchemaTest` therefore
@@ -374,6 +379,16 @@ The same rule sorts out the other three chart primitives:
   cannot answer "how much of that rise was in the hour after eating". The hours are walked one at a
   time rather than added to, so a daylight-saving change does not put every rule after it an hour
   off the clock. On the master graph only — the tick labels say enough on a chart with one line.
+- **Goal lines are part of the scale, not an annotation on it.** `chartBounds` folds `goalLine` and
+  `subGoalLines` into the range a day-indexed chart covers, because a rule outside the plot is not
+  drawn at the edge — it is *clipped*, and nothing appears. A weight chart scaled to a fortnight of
+  readings around 198 lb simply did not show a 180 lb goal, and looked identical to one with no goal
+  set. An explicit `minY`/`maxY` still wins: that is a caller stating the scale deliberately, as the
+  mood chart does with 1 to 10, and a goal must not be able to stretch an axis whose bounds are the
+  point. `niceTicks` only ever floors and ceils, so a mark inside the input bounds stays inside the
+  snapped axis. **Waypoints** (`subGoalLines`) are drawn first, hairline, finer-dashed and at
+  `SUB_GOAL_ALPHA` — same colour family as the goal because they are the same kind of thing, never
+  the same weight, because one of those lines is where you are going and the rest are on the way.
 - **Smoothing** (`domain/GlucoseSmoothing.kt`) is a Gaussian-weighted moving average in *time*, not
   in sample index — index weighting would treat two fingersticks a week apart as neighbours and
   average them together. It never resamples or interpolates: one output per input reading at that
@@ -413,8 +428,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
-`GlucoseGapsTest` and `TimeGridlinesTest` are the pure-JVM suites. Adherence covers the
-midnight-wrapping window,
+`GlucoseGapsTest`, `TimeGridlinesTest` and `ChartBoundsTest` are the pure-JVM suites. Adherence
+covers the midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
 decay, dose accumulation and curve shape. Absorption covers the gastric lag, per-macro peak ordering,
@@ -431,8 +446,10 @@ spends a query on every refresh forever — which is why it carries a fixture fo
 fifteen-minute stutter alongside the four-hour outage. `TimeGridlinesTest` pins that every interval
 divides a day evenly (otherwise the rules drift through the day), that the density guard is about the
 screen and not the clock, and that a spring-forward day keeps every rule on the hour.
-New adherence, interval, stats, decay, absorption, smoothing, duplicate, gap or gridline behaviour
-belongs there. `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
+`ChartBoundsTest` pins the silent failure: a goal outside the readings is clipped rather than drawn
+small, so a chart missing its goal looks exactly like a chart that has none.
+New adherence, interval, stats, decay, absorption, smoothing, duplicate, gap, gridline or axis-range
+behaviour belongs there. `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
 
 Awkwardly, the duplicate-collapse cannot be reached through the repository any more: the sync rejects
 duplicates on the way in, so a render test that needs rows in the state a *previous* version left

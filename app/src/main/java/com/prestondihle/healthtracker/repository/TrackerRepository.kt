@@ -26,6 +26,7 @@ import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeeklyPerformance
 import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.GlucoseGaps
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.health.HealthDataSource
@@ -104,6 +105,12 @@ class TrackerRepository(
         dao.getWeights(start, end)
 
     suspend fun setWeightKg(date: LocalDate, kg: Float) = dao.upsertWeight(WeightEntry(date, kg))
+
+    fun getWeightSubGoals(): Flow<List<WeightSubGoal>> = dao.getWeightSubGoals()
+
+    suspend fun addWeightSubGoalKg(kg: Float) = dao.insertWeightSubGoal(WeightSubGoal(kg = kg))
+
+    suspend fun deleteWeightSubGoal(subGoal: WeightSubGoal) = dao.deleteWeightSubGoal(subGoal)
 
     fun getWaist(date: LocalDate): Flow<WaistEntry?> = dao.getWaist(date)
 

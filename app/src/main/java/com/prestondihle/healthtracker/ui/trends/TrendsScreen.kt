@@ -100,6 +100,10 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                 LineChart(
                     days = state.weightSeries(Units::kgToLbs),
                     goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
+                    // Lighter than the goal, because they are on the way to it
+                    // rather than the point of it. The axis stretches to hold
+                    // them, so a mark you have not reached is still drawn.
+                    subGoalLines = state.weightSubGoals.map { Units.kgToLbs(it.kg) },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
             }
