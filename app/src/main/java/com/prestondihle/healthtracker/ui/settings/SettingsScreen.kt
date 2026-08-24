@@ -401,7 +401,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         item {
             WeightSubGoalsCard(
                 subGoals = state.weightSubGoals,
-                goalWeightLbs = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
+                suggestedLbs = state.suggestedWaypointLbs,
                 onAdd = viewModel::addWeightSubGoalLbs,
                 onDelete = viewModel::deleteWeightSubGoal,
             )
@@ -416,22 +416,21 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
  * of them: thirty pounds to lose may want one every five, or a single halfway
  * mark, and the app is in no position to choose.
  *
- * The add stepper starts at the midpoint between the goal and the lightest mark
- * already staged -- or the goal itself where there are none -- which is where
- * the next one usually goes, and saves dialling from 200 every time.
+ * Where the add stepper opens is [SettingsUiState.suggestedWaypointLbs] -- the
+ * current weight before anything is staged, the midpoint to the goal after --
+ * which saves dialling the whole way from wherever the control would otherwise
+ * have started.
  */
 @Composable
 private fun WeightSubGoalsCard(
     subGoals: List<WeightSubGoal>,
-    goalWeightLbs: Float?,
+    suggestedLbs: Float,
     onAdd: (Float) -> Unit,
     onDelete: (WeightSubGoal) -> Unit,
 ) {
-    val goal = goalWeightLbs ?: 180f
-    val lightestStaged = subGoals.minOfOrNull { Units.kgToLbs(it.kg) }
-    val suggested = lightestStaged?.let { (it + goal) / 2f } ?: goal
-
-    var pending by remember(suggested) { mutableFloatStateOf(suggested) }
+    // Keyed on the suggestion, so staging a mark re-seeds the stepper for the
+    // next one instead of leaving it on the value just added.
+    var pending by remember(suggestedLbs) { mutableFloatStateOf(suggestedLbs) }
 
     SettingsCard(title = "Weight waypoints") {
         Text(
@@ -470,7 +469,7 @@ private fun WeightSubGoalsCard(
             value = pending,
             onValueChange = { pending = it },
             step = 1f,
-            range = 80f..400f,
+            range = WaypointRangeLbs,
             valueFormatter = { "${it.toInt()} lb" },
         )
         // Deliberately a separate action rather than saving as the stepper

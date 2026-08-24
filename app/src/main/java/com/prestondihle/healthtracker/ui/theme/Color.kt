@@ -68,8 +68,23 @@ val GlucoseSeries = BalticBlue
 val KetoneSeries = OliveBark
 val ThresholdLine = Inferno
 
-/** Caffeine decay curve. Yale Blue keeps it in-palette and distinct from glucose. */
-val CaffeineSeries = YaleBlue
+/**
+ * Caffeine decay curve.
+ *
+ * Yale Blue until this, which is a shade of the same blue the glucose trace is
+ * drawn in -- fine on the dashboard, where caffeine has a chart to itself, and
+ * not fine on the master graph, where the two are read against each other and
+ * cross constantly. Where they crossed there was nothing but the dash pattern
+ * left to tell them apart.
+ *
+ * A deep berry instead. It is the one stretch of the wheel none of the other
+ * seven series occupy, so it separates by hue rather than by lightness: the
+ * nearest neighbours are the heart-rate brick a long way round one side and the
+ * fat curve's purple further round the other. Roast brown would have been the
+ * semantic choice for coffee and is exactly the mistake being fixed -- it lands
+ * on top of heart rate.
+ */
+val CaffeineSeries = Color(0xFF9E3A6B)
 
 /**
  * Macro stack colors.

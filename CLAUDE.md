@@ -61,6 +61,23 @@ that width so switching windows is a redraw rather than a round trip. Six chips 
 of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the widest
 options behind a gesture nobody knows is there.
 
+**The master graph's window is no longer anchored to now.** `MasterGraphUiState.panOffset` is how
+far back a horizontal drag has pulled the right edge, and `windowEnd` is `now - panOffset`.
+Everything that draws must measure from `windowEnd`, never from `now`: the absorption and caffeine
+curves are *sampled between two bounds* rather than clipped afterwards, so one still ending at `now`
+does not stop short on a panned window -- it runs on past the right-hand edge, in the same ink as the
+part of it that belongs there. `mealsInWindow` needs the same upper bound, since it is also what the
+marker rules are built from, and a meal listed with no rule to find is worse than one left out.
+`now` itself stays `now`: the "Right now" card, `rateNow`, `stepsLastHour` and every `asAgo` are
+about this moment whatever the plot is showing.
+
+Two consequences worth knowing. `advanceNow()` grows `panOffset` by exactly what the clock gained
+whenever it is panned, so the ticker cannot drag a parked window along behind it -- the reader went
+back to a particular evening and that evening does not move. And the series queries are keyed on an
+anchor **snapped down to the hour** rather than on the raw offset: a drag emits once a frame, every
+emission of a raw key would tear down six Room subscriptions and open six more, and every one of
+those queries is open-ended forward, so an anchor an hour early is a superset and never a subset.
+
 **`TrackerRepository` is the only data entry point** and owns the conversion between the domain's
 `Instant`/`LocalDate` vocabulary and the epoch-millisecond bounds the DAO queries expect
 (`startOfDayMillis` / `endOfDayMillis`). Callers never do that arithmetic themselves.
@@ -398,6 +415,48 @@ The same rule sorts out the other three chart primitives:
   either a measurement or dashed to say it is a model, and a solid line quietly differing from the
   readings under it would break that rule without saying so.
 
+**The legend is the chart's control surface, not a caption.** Tapping a row toggles its line, and
+the switched-off ones are still listed, faded, at the end -- a legend that dropped what it stopped
+drawing would take the only way back with it. They arrive as `HiddenSeries`, which carries a label, a
+colour and a stroke style and *nothing else*: a hidden series must never reach the plot, because a
+point that is not being drawn must not go on setting an axis' ceiling, and a type that cannot hold
+points makes that impossible rather than merely discouraged. Rows are `Modifier.toggleable` rather
+than `clickable`, which is what states the row's meaning to TalkBack and is the only handle a test
+has on a row of plain text. The tap is keyed on `ChartSeries.label` rather than on the caption: the
+caption carries the unit, which moves as the axis selection does, and a control keyed on something
+that moves is a control that stops working. Master's `MasterSeries.color` is still the single source
+for the plot, the key swatch and the axis tint.
+
+**Tapping the plot drops a crosshair**, with every visible line's value at that moment listed under
+it. `selectedTime` lives in `DualAxisTimeChart` via `remember` -- no ViewModel is involved, so every
+chart in the app has it. Three things about it are load-bearing:
+
+- The readout is a compose `FlowRow` under the plot, **never text painted on the canvas**. Anywhere
+  a bubble could go on a plot carrying eight series is on top of one of them.
+- The hairline is the only new ink on the plot: solid, 1dp, in the label grey -- heavier than the
+  meal rules, which are dashed gridline grey and mark context, and lighter than any series. Nothing
+  is drawn *on* the lines being read. A ring at each matched point would be fresh ink in the data's
+  own colours, which is exactly how the meal markers came to be read as a carbohydrate spike.
+- A **bar** answers for the column that *contains* the moment, not for its nearest point. A bar's
+  timestamp is the start of an interval, so on hourly step buckets the nearest start to a moment
+  halfway through the hour is half an hour away -- an em dash printed under a column plainly visible
+  beneath the crosshair. Lines keep the nearest-within-tolerance rule, and a line with nothing near
+  enough genuinely prints the dash: quoting a heart rate from the far side of an eight-hour hole
+  invents a measurement.
+
+Tap and drag are read by **two separate detectors** on the same Box. `detectTapGestures` gives up as
+soon as the finger travels and `detectHorizontalDragGestures` waits for *horizontal* slop, so a
+vertical swipe reaches neither and the LazyColumn underneath goes on scrolling. Both read the window
+and the points through `rememberUpdatedState`: the handlers are launched once and never restarted, so
+a plain local read inside one is the value the chart had when it first composed, for ever. That is a
+real bug that was written and caught here -- the crosshair would not dismiss, because the "is there
+one standing?" check was reading `null` from the first composition.
+
+The plot takes an optional `contentDescription`, which the master graph fills in. A Canvas is a blank
+to TalkBack, and that mattered less while a chart was only something to look at; it is a control now,
+and a control with no name is not there at all for anyone using one. It is also the only handle the
+render tests have on the plot, since nothing inside it carries text.
+
 `DualAxisTimeChart` clips every series to the window **once**, up front, and every axis, legend
 caption and empty check is computed from the clipped points. This matters because series here are
 routinely queried wider than they are drawn — meals reach back an absorption window, a heart rate or
@@ -422,13 +481,14 @@ numbers in the gutter, and `axisColorFor` sets it from the single *visible* seri
 unit. Where several share it there is no honest answer — tinting g/h in the carbohydrate colour
 claims the protein and fat curves are read against some other axis — so it stays the ordinary label
 grey. Switching two of the three macros off hands the axis to the survivor, which is emergent rather
-than special-cased. `MasterSeries.color` is the single source for all three uses: plot, switch, axis.
+than special-cased. `MasterSeries.color` is the single source for all three uses: plot, key, axis.
 
 ## Testing
 
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
-`GlucoseGapsTest`, `TimeGridlinesTest` and `ChartBoundsTest` are the pure-JVM suites. Adherence
+`GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest` and `PanWindowTest`
+are the pure-JVM suites. Adherence
 covers the midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
@@ -448,6 +508,11 @@ divides a day evenly (otherwise the rules drift through the day), that the densi
 screen and not the clock, and that a spring-forward day keeps every rule on the hour.
 `ChartBoundsTest` pins the silent failure: a goal outside the readings is clipped rather than drawn
 small, so a chart missing its goal looks exactly like a chart that has none.
+`WaypointSeedTest` pins where a control *opens*, which is not behaviour any other test would notice
+and is the difference between one tap and a hundred. `PanWindowTest` pins the quiet half of panning:
+that the curves stop at `windowEnd` rather than running past it, that a meal beyond the right edge is
+neither listed nor marked, and that a drag cannot put the window in the future or leave it three
+minutes short of live -- a window three minutes short of now looks exactly like a live one and is not.
 New adherence, interval, stats, decay, absorption, smoothing, duplicate, gap, gridline or axis-range
 behaviour belongs there. `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
 

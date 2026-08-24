@@ -26,7 +26,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -161,6 +163,15 @@ data class MasterGraphUiState(
      * built around.
      */
     val labelledAxes: List<AxisMetric> = listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS),
+    /**
+     * How far back from [now] the window's right edge has been dragged.
+     *
+     * Zero is live, and is where every window starts. Anything else is a window
+     * the reader has pulled off the clock to look at a particular evening --
+     * which is the only way to examine yesterday's lunch at 3h zoom, since every
+     * range is otherwise anchored to this moment.
+     */
+    val panOffset: Duration = Duration.ZERO,
 ) {
     fun isVisible(series: MasterSeries): Boolean = series in visibleSeries
 
@@ -174,8 +185,23 @@ data class MasterGraphUiState(
 
     fun isLabelled(metric: AxisMetric): Boolean = metric in labelledAxes
 
+    /**
+     * The right edge of the plot: [now] while live, earlier once panned.
+     *
+     * Everything drawn stops here, curves included. A modelled line sampled to
+     * `now` on a window that ends before it runs straight off the right-hand
+     * side, which is the one place on a chart where a stray line looks most like
+     * data.
+     */
+    val windowEnd: Instant
+        get() = now.minus(panOffset)
+
     val windowStart: Instant
-        get() = now.minus(Duration.ofHours(range.hours))
+        get() = windowEnd.minus(Duration.ofHours(range.hours))
+
+    /** Whether the window has been dragged off the clock. */
+    val isPanned: Boolean
+        get() = !panOffset.isZero
 
     /**
      * The blood sugar trace as it should be drawn: raw, or run through the
@@ -218,7 +244,7 @@ data class MasterGraphUiState(
             Caffeine.curve(
                 doses = caffeine.map { CaffeineDose(it.timestamp, it.milligrams) },
                 from = windowStart,
-                to = now,
+                to = windowEnd,
                 step = curveStep,
             )
 
@@ -243,11 +269,16 @@ data class MasterGraphUiState(
      * [meals] itself reaches further back than the plot, because a meal eaten
      * before the left edge is still being absorbed inside it -- but only the ones
      * actually visible belong in the list under the chart.
+     *
+     * Bounded at both ends rather than only at the left, which the right edge
+     * being *now* used to make unnecessary. A panned window has time to the right
+     * of it, and a list of meals eaten after the chart stops is a list of meals
+     * whose rules the reader cannot find.
      */
     val mealsInWindow: List<MealEntry>
         get() =
             distinctMeals
-                .filter { !it.timestamp.isBefore(windowStart) }
+                .filter { it.timestamp in windowStart..windowEnd }
                 .sortedByDescending { it.timestamp }
 
     /**
@@ -303,7 +334,7 @@ data class MasterGraphUiState(
 
     /** Grams per hour of one macro reaching the blood, sampled across the window. */
     fun absorptionCurve(macro: Macro): List<Pair<Instant, Float>> =
-        MacroAbsorption.curve(servings, macro, windowStart, now, curveStep)
+        MacroAbsorption.curve(servings, macro, windowStart, windowEnd, curveStep)
 
     /** Sampling interval for the curves, scaled to the window. See [CURVE_SAMPLES]. */
     private val curveStep: Duration
@@ -381,6 +412,31 @@ private data class PreferenceBundle(
     val labelledAxes: List<AxisMetric>,
 )
 
+/** Which slice of the timeline is on screen: how wide, and how far back. */
+private data class WindowBundle(val range: MasterRange, val panOffset: Duration)
+
+/**
+ * How near live a drag has to land before the window snaps back to it.
+ *
+ * A window three minutes short of now looks exactly like a live one and is not,
+ * which is the worst of both -- so a small drag either moves the window
+ * somewhere worth being or returns it to following the clock.
+ */
+internal val PAN_SNAP: Duration = Duration.ofMinutes(2)
+
+/**
+ * Where a drag of [delta] leaves a window currently offset by [current].
+ *
+ * Separated out because it is the whole of the rule and it is arithmetic: never
+ * past now, since there is nothing to the right of it and a window with its right
+ * edge in the future is a plot with a blank third; and back to live once it is
+ * within [PAN_SNAP].
+ */
+internal fun pannedTo(current: Duration, delta: Duration): Duration {
+    val next = current.plus(delta)
+    return if (next <= PAN_SNAP) Duration.ZERO else next
+}
+
 /**
  * Everything that happens on one timeline: what was eaten, how it is being
  * absorbed, and how blood sugar, ketones and heart rate moved in response.
@@ -396,6 +452,7 @@ class MasterGraphViewModel(
     private val visibleSeries = MutableStateFlow(MasterSeries.entries.toSet())
     private val labelledAxes =
         MutableStateFlow(listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS))
+    private val panOffset = MutableStateFlow(Duration.ZERO)
 
     /**
      * Recomputed on a coarse tick rather than every second.
@@ -406,11 +463,32 @@ class MasterGraphViewModel(
      */
     private val minuteTicker = MutableStateFlow(Instant.now())
 
+    private val window: Flow<WindowBundle> = combine(range, panOffset, ::WindowBundle)
+
+    /**
+     * How far back the queries reach, snapped down to the hour.
+     *
+     * The pan moves continuously under a finger, and every emission here tears
+     * down six Room subscriptions and opens six more -- once a frame, if the raw
+     * offset were the key. Snapping is what makes that once an hour panned
+     * instead, and it is safe because every query below is open-ended forward: an
+     * anchor an hour early loads a superset of what the window needs, never a
+     * subset.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val queryAnchor: Flow<Instant> =
+        window
+            .map { (selected, offset) ->
+                Instant.now()
+                    .minus(offset)
+                    .minus(Duration.ofHours(selected.hours))
+                    .truncatedTo(ChronoUnit.HOURS)
+            }
+            .distinctUntilChanged()
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private val seriesFlow =
-        range.flatMapLatest { selected ->
-            val now = Instant.now()
-            val windowStart = now.minus(Duration.ofHours(selected.hours))
+        queryAnchor.flatMapLatest { windowStart ->
             // Meals reach back a further absorption window: one eaten before the
             // left edge is still contributing a curve inside it, and dropping it
             // would start the line at the wrong height.
@@ -458,14 +536,15 @@ class MasterGraphViewModel(
         }
 
     val uiState: StateFlow<MasterGraphUiState> =
-        combine(seriesFlow, range, minuteTicker, healthState, preferences) {
+        combine(seriesFlow, window, minuteTicker, healthState, preferences) {
             series,
-            selected,
+            viewed,
             now,
             permission,
             prefs ->
             MasterGraphUiState(
-                range = selected,
+                range = viewed.range,
+                panOffset = viewed.panOffset,
                 now = now,
                 meals = series.meals,
                 glucose = series.glucose,
@@ -495,6 +574,39 @@ class MasterGraphViewModel(
     fun setRange(selected: MasterRange) {
         range.value = selected
         refresh()
+    }
+
+    /**
+     * Drags the window back through time, or forward when [delta] is negative.
+     *
+     * No sync of its own. Panning is a look at history already on disk, and
+     * firing a Health Connect read per frame of a drag would be several hundred
+     * of them for one gesture; the refresh button covers whatever window is being
+     * shown when it is pressed.
+     */
+    fun panBy(delta: Duration) {
+        panOffset.value = pannedTo(panOffset.value, delta)
+    }
+
+    /** Puts the window back on the clock. */
+    fun backToNow() {
+        panOffset.value = Duration.ZERO
+    }
+
+    /**
+     * Moves `now` on, leaving a panned window where it was put.
+     *
+     * The clock advancing is what makes a live window follow the day, and it must
+     * not also drag a panned one along behind it: the reader went back to a
+     * particular evening and that evening does not move. Growing the offset by
+     * exactly what the clock gained leaves `windowEnd` where it was.
+     */
+    private fun advanceNow() {
+        val next = Instant.now()
+        if (!panOffset.value.isZero) {
+            panOffset.value = panOffset.value.plus(Duration.between(minuteTicker.value, next))
+        }
+        minuteTicker.value = next
     }
 
     fun setSeriesVisible(series: MasterSeries, visible: Boolean) {
@@ -580,18 +692,24 @@ class MasterGraphViewModel(
      */
     fun refresh() {
         viewModelScope.launch {
-            minuteTicker.value = Instant.now()
+            advanceNow()
             healthState.value = repository.healthPermissionState()
             if (healthState.value != HealthPermissionState.GRANTED) return@launch
 
-            val now = Instant.now()
+            val now = minuteTicker.value
+            // The window on screen, not the last day. Refreshing a chart panned
+            // back to Tuesday and syncing today instead would leave the button
+            // looking broken and Tuesday still full of holes.
+            val to = now.minus(panOffset.value)
             val from =
-                now.minus(Duration.ofHours(range.value.hours + MacroAbsorption.RELEVANT_HISTORY_HOURS))
+                to.minus(Duration.ofHours(range.value.hours + MacroAbsorption.RELEVANT_HISTORY_HOURS))
             syncing.value = true
-            repository.syncTimeSeries(from, now)
+            repository.syncTimeSeries(from, to)
             // Glucose is not part of syncTimeSeries -- it is cached a calendar
             // day at a time -- so a hole in the trace this chart is drawing is
-            // only ever filled by going back for it deliberately.
+            // only ever filled by going back for it deliberately. Anchored at now
+            // rather than at the window: the backfill covers a fixed 72 hours,
+            // which is as far back as a monitor's late writes are worth chasing.
             repository.backfillGlucoseGaps(now)
             syncing.value = false
         }

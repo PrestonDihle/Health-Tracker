@@ -39,6 +39,11 @@ fainter and finer than the goal itself, because one of those lines is where you
 are going and the rest are only on the way; five rules of equal weight would
 leave you working out which of them was the point.
 
+The stepper for adding one opens at the weight you are actually at, not at the
+goal: a waypoint goes somewhere between the two, so the goal is the one figure it
+is never set to. Once a mark is staged it opens halfway between the lightest of
+them and the goal, which is where the next one usually goes.
+
 Blood pressure carries **two**, one per line — drawn with a systolic rule alone,
 the diastolic trace had nothing to be read against at all. They start at the
 published 120/80 and are adjustable because a clinician may have named different
@@ -199,6 +204,32 @@ macro curves and for the same reason: what was measured is the dose and the
 minute it was drunk, and everything between two doses is a half-life model of
 what became of it.
 
+### Reading the plot
+
+The chart is a control as well as a picture.
+
+**Tap it** and a hairline drops at the nearest sampled moment, with every visible
+line's value at that moment listed underneath — glucose, each macro's arrival
+rate, heart rate, caffeine, the hour's steps. A line with nothing recorded near
+enough says so with a dash rather than quoting a reading from the far side of a
+hole. The values are printed under the plot rather than in a bubble on it:
+anywhere a bubble could go on a chart carrying eight series is on top of one of
+them. Tap the same place again, or tap outside the plot, to put it away.
+
+**Drag it sideways** and the window comes off the clock, so yesterday evening can
+be read at 3h zoom instead of only as a seventh of a week. The stretch being
+viewed is then spelled out above the chart with a *Back to now* chip beside it —
+a panned chart that still looked live would be a lie. Vertical swipes are left
+alone, so the screen goes on scrolling. Panning shows what is already on the
+phone; the refresh button re-syncs whatever window is on screen when it is
+pressed.
+
+**Tap a name in the key** to draw that line or put it away. Switched-off lines
+stay in the key, faded, which is what makes it a complete set of switches rather
+than a caption for whatever survived. A line that is off is genuinely not on the
+plot — it stops stretching the axis it shares, which is the point of switching it
+off in the first place.
+
 ## Blood sugar
 
 The glucose axis runs 60–180 mg/dL by default, and **both bounds are settable**:
@@ -310,6 +341,14 @@ same database is how rounding error gets in.
 | Accent | Yale Blue | `#16425B` |
 | Accent | Inferno | `#A30000` |
 
+The master graph's eight lines are picked to be told apart from each other rather
+than to stay inside those five: glucose steel-blue, ketones olive, heart rate
+brick, steps sage, carbohydrate gold, protein teal, fat purple, caffeine a deep
+berry. Caffeine was a shade of the glucose blue until the two were watched
+crossing on a real phone, where nothing but the dash pattern separated them.
+Roast brown is the obvious colour for coffee and is the one that could not be
+used: it lands on heart rate.
+
 The scheme is light-only and dynamic color is disabled — leaving it on would let
 Android 12+ derive the palette from the user's wallpaper and discard these
 entirely.
@@ -340,8 +379,10 @@ needs a real upload key. No signing material is stored in this repo.
 
 The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
-series gap-splitting, axis selection, gap backfill, gridline spacing and axis
-range. `MasterGraphRenderTest` and
+series gap-splitting, axis selection, gap backfill, gridline spacing, axis range,
+where the waypoint stepper opens, and the panned window's own arithmetic --
+whether the curves stop at the right edge, and whether a meal past it is still
+listed. `MasterGraphRenderTest` and
 `ScreenRenderTest` compose whole screens against an in-memory database and
 capture images with Roborazzi, which is what catches the empty-list and
 divide-by-zero cases the chart canvas only reaches under a real layout pass.

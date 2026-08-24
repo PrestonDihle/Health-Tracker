@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -25,8 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,7 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,6 +53,7 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.HiddenSeries
 import com.prestondihle.healthtracker.ui.components.MealDraft
 import com.prestondihle.healthtracker.ui.components.MealEntryDialog
 import com.prestondihle.healthtracker.ui.components.SeriesKind
@@ -128,6 +127,8 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
                 state = state,
                 onToggleSeries = viewModel::setSeriesVisible,
                 onToggleAxis = viewModel::toggleLabelledAxis,
+                onPan = viewModel::panBy,
+                onBackToNow = viewModel::backToNow,
             )
         }
 
@@ -338,6 +339,8 @@ private fun CombinedChartCard(
     state: MasterGraphUiState,
     onToggleSeries: (MasterSeries, Boolean) -> Unit,
     onToggleAxis: (AxisMetric) -> Unit,
+    onPan: (Duration) -> Unit,
+    onBackToNow: () -> Unit,
 ) {
     fun series(
         key: MasterSeries,
@@ -446,13 +449,56 @@ private fun CombinedChartCard(
         )
 
     MasterCard(title = "Food, blood and body") {
+        // A window dragged off the clock has to say so. Everything else on this
+        // screen -- the range chips, the "Right now" card above -- reads as live,
+        // and a plot of last Tuesday under all of it looks exactly like a plot of
+        // this afternoon.
+        if (state.isPanned) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Weighted, so the chip is measured at its own width first and
+                // the label takes what is left. Sharing the row evenly squeezed
+                // "Back to now" onto two lines on a real phone, which reads as a
+                // broken control rather than a compact one.
+                Text(
+                    state.windowLabel(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                )
+                AssistChip(
+                    onClick = onBackToNow,
+                    label = { Text("Back to now", maxLines = 1) },
+                )
+            }
+        }
+
         DualAxisTimeChart(
             windowStart = state.windowStart,
-            windowEnd = state.now,
+            windowEnd = state.windowEnd,
             zoneId = state.zoneId,
             // Filtered rather than drawn-then-hidden, so a switched-off series
             // also stops stretching the axis it shares.
             series = allSeries.filterKeys(state::isVisible).values.toList(),
+            // The off ones, carrying nothing but a name and a colour. The legend
+            // is the only switch on this chart now, so it has to be able to show
+            // what is not drawn -- and it has to do it without handing the plot
+            // points it must not scale itself to.
+            hiddenSeries =
+                allSeries
+                    .filterKeys { !state.isVisible(it) }
+                    .values
+                    .map { HiddenSeries(it.label, it.color, it.kind, it.dashed) },
+            onSeriesTap = { label ->
+                // Matched on the label the series was actually built with, which
+                // is how "Glucose (smoothed)" still finds its own switch.
+                allSeries.entries.firstOrNull { it.value.label == label }?.key?.let {
+                    onToggleSeries(it, !state.isVisible(it))
+                }
+            },
             // Falls back rather than throwing: the toggle refuses to empty the list,
             // but the field is public and a plot has to be drawn against
             // something regardless of who built the state.
@@ -474,16 +520,27 @@ private fun CombinedChartCard(
             // another in time, and every such question is asked in hours: did
             // the heart rate climb before the coffee or after it.
             verticalGridlines = true,
+            onPan = onPan,
+            contentDescription =
+                "Food, blood and body plot. Tap to read every line at one moment, " +
+                    "drag sideways to move back through time.",
             modifier = Modifier.fillMaxWidth().height(ChartHeight),
+        )
+
+        // The legend is a set of switches now, and nothing about a row of names
+        // says so on its own -- a control nobody knows is a control is the same
+        // as no control.
+        Text(
+            "Tap the plot to read every line at one moment, drag sideways to go " +
+                "back through the day, and tap a name in the key to draw that " +
+                "line or put it away.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         HorizontalDivider()
 
         AxisPicker(state = state, onToggle = onToggleAxis)
-
-        HorizontalDivider()
-
-        SeriesToggles(state = state, onToggle = onToggleSeries)
     }
 }
 
@@ -521,48 +578,7 @@ private fun AxisPicker(state: MasterGraphUiState, onToggle: (AxisMetric) -> Unit
     )
 }
 
-/**
- * A switch per line, coloured to match it.
- *
- * The swatch is what ties a row to its line -- the labels alone would mean
- * re-reading the legend to work out which switch does what.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SeriesToggles(
-    state: MasterGraphUiState,
-    onToggle: (MasterSeries, Boolean) -> Unit,
-) {
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        MasterSeries.entries.forEach { series ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(end = 8.dp),
-            ) {
-                Switch(
-                    checked = state.isVisible(series),
-                    onCheckedChange = { onToggle(series, it) },
-                    colors =
-                        SwitchDefaults.colors(
-                            checkedThumbColor = series.color,
-                            checkedTrackColor = series.color.copy(alpha = 0.4f),
-                        ),
-                    modifier = Modifier.scale(0.75f),
-                )
-                Text(
-                    series.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-/** The colour this series is drawn in — on the plot, on its switch, and on its axis. */
+/** The colour this series is drawn in — on the plot, in the key, and on its axis. */
 internal val MasterSeries.color: Color
     get() =
         when (this) {
@@ -802,6 +818,40 @@ private val Macro.label: String
 
 private fun List<Pair<Instant, Float>>.asPoints(): List<TimePoint> =
     map { TimePoint(it.first, it.second) }
+
+/** Clock times on the panned-window banner. */
+private val PannedTimeFormat = DateTimeFormatter.ofPattern("h:mm a")
+
+/** The same with the day, for a window that begins and ends on one date. */
+private val PannedDayFormat = DateTimeFormatter.ofPattern("EEE d MMM, h:mm a")
+
+/**
+ * Both ends of a window that straddles midnight.
+ *
+ * No weekday on this one. Two of them plus two dates and two clock times is
+ * more line than a phone has beside a chip, and the date is the half that
+ * settles which day it was -- the weekday only ever restates it.
+ */
+private val PannedSpanFormat = DateTimeFormatter.ofPattern("d MMM h:mm a")
+
+/**
+ * The stretch of time on the plot, spelled out.
+ *
+ * Shown only while the window is panned, where it is the answer to the one
+ * question the chart can no longer be assumed to answer. The day is printed once
+ * where both edges fall on it and twice where they do not -- a window straddling
+ * midnight that named only its start would put the small hours on the wrong
+ * date.
+ */
+private fun MasterGraphUiState.windowLabel(): String {
+    val start = windowStart.atZone(zoneId)
+    val end = windowEnd.atZone(zoneId)
+    return if (start.toLocalDate() == end.toLocalDate()) {
+        "${PannedDayFormat.format(start)} - ${PannedTimeFormat.format(end)}"
+    } else {
+        "${PannedSpanFormat.format(start)} - ${PannedSpanFormat.format(end)}"
+    }
+}
 
 /** `12 g/h`, or a dash while nothing is arriving -- a bare "0" reads as an error. */
 private fun Float.asRate(): String = if (this < 0.5f) "--" else "${toInt()} g/h"

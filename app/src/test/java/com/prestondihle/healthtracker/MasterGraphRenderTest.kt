@@ -4,17 +4,25 @@ import android.content.Context
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isOff
+import androidx.compose.ui.test.isOn
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeRight
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -378,20 +386,139 @@ class MasterGraphRenderTest {
         // empty lists. It is also what makes the meal rules the only thing on the
         // plot, which is how they came to be read as a data spike.
         //
-        // Driven off the switches rather than their captions: the caption is a
-        // plain Text beside the control, so clicking it does nothing and the
-        // assertion below would pass without a single series being turned off.
-        val switches = composeRule.onAllNodes(isToggleable())
+        // The legend is the switch surface now, so there is one toggleable node
+        // per series and no separate row of controls. Taken one at a time off
+        // whatever is still on, rather than by index: a switched-off name moves
+        // to the end of the legend, so a fixed index would come back round and
+        // turn things on again.
         assertEquals(
             MasterSeries.entries.size,
-            switches.fetchSemanticsNodes().size,
+            composeRule.onAllNodes(isToggleable()).fetchSemanticsNodes().size,
         )
-        MasterSeries.entries.indices.forEach { switches[it].performClick() }
-        composeRule.waitForIdle()
+        repeat(MasterSeries.entries.size) {
+            composeRule.onAllNodes(isToggleable() and isOn()).onFirst().performClick()
+            composeRule.waitForIdle()
+        }
 
         composeRule.onNodeWithText("No readings in this window").assertIsDisplayed()
+
+        // And every name is still there to tap. A legend that dropped the lines
+        // it stopped drawing would take the only way back with it.
+        composeRule
+            .onAllNodes(isToggleable() and isOff())
+            .assertCountEquals(MasterSeries.entries.size)
+    }
+
+    /**
+     * The legend doubling as the switch for its own line.
+     *
+     * Caffeine because it is the one series drawn against a scale of its own
+     * here, so its caption changes shape between the two states -- with a range
+     * quoted while it is on the plot, and the bare name once it is off, because a
+     * line that is not drawn has no axis to quote.
+     */
+    @Test
+    fun `tapping a name in the key puts its line away and brings it back`() {
+        renderScreen { repository ->
+            repository.addCaffeine(mg = 120, at = Instant.now().minus(Duration.ofMinutes(30)))
+        }
+
+        // The legend sits at the foot of the chart card, below the fold on a
+        // phone. Scrolled to the line that explains it, which is directly under.
+        composeRule
+            .onNode(hasScrollAction())
+            .performScrollToNode(hasText("tap a name in the key", substring = true))
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Caffeine (", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithText("Caffeine (", substring = true).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithText("Caffeine (", substring = true).assertCountEquals(0)
+        // Matched on the toggle rather than the text alone: "Caffeine" is also an
+        // axis chip further down the card, and only one of the two is a switch.
+        composeRule.onNode(hasText("Caffeine") and isToggleable() and isOff()).assertIsDisplayed()
+
+        composeRule.onNode(hasText("Caffeine") and isToggleable()).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Caffeine (", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * Tapping the plot to read every line at one moment.
+     *
+     * The glucose trace is planted flat, so what is asserted does not depend on
+     * where in the window the tap lands. The arithmetic that picks the nearest
+     * sample is pinned on its own terms; what this covers is that a tap on a
+     * Canvas reaches the readout at all, which nothing below the composition can
+     * answer.
+     */
+    @Test
+    fun `tapping the plot reads every line at that moment`() {
+        renderScreen { repository ->
+            val now = Instant.now()
+            repeat(30) { index ->
+                repository.addBloodSugar(
+                    mgDl = 111,
+                    at = now.minus(Duration.ofMinutes(index * 5L)),
+                )
+            }
+        }
+
+        chooseRange(MasterRange.THREE)
+
+        composeRule
+            .onNodeWithContentDescription(PLOT_DESCRIPTION, substring = true)
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Glucose 111", substring = true).assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/master_graph_crosshair.png")
+
+        // And tapping the same place again puts it away, rather than leaving a
+        // hairline across the plot with no way off it.
+        composeRule
+            .onNodeWithContentDescription(PLOT_DESCRIPTION, substring = true)
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithText("Glucose 111", substring = true).assertCountEquals(0)
+    }
+
+    /**
+     * Dragging the window off the clock, and getting back to it.
+     *
+     * The gesture is the risk here rather than the arithmetic: the plot sits
+     * inside a scrolling list, and a drag detector that claimed the whole pointer
+     * would stop the screen scrolling at all. Only the horizontal one is taken,
+     * which is something a swipe can check and a unit test cannot.
+     */
+    @Test
+    fun `dragging the plot sideways moves the window back and says so`() {
+        renderScreen()
+        chooseRange(MasterRange.THREE)
+
+        composeRule.onAllNodesWithText("Back to now").assertCountEquals(0)
+
+        composeRule
+            .onNodeWithContentDescription(PLOT_DESCRIPTION, substring = true)
+            .performTouchInput { swipeRight() }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Back to now").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/master_graph_panned.png")
+
+        composeRule.onNodeWithText("Back to now").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithText("Back to now").assertCountEquals(0)
     }
 }
+
+/** Enough of the plot's screen-reader label to find it by, and no more. */
+private const val PLOT_DESCRIPTION = "Food, blood and body plot"
 
 /**
  * The instant a date-only source is pretending a meal happened at.

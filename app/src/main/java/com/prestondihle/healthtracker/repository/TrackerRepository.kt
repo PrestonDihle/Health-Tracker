@@ -106,6 +106,8 @@ class TrackerRepository(
 
     suspend fun setWeightKg(date: LocalDate, kg: Float) = dao.upsertWeight(WeightEntry(date, kg))
 
+    fun getLatestWeight(): Flow<WeightEntry?> = dao.getLatestWeight()
+
     fun getWeightSubGoals(): Flow<List<WeightSubGoal>> = dao.getWeightSubGoals()
 
     suspend fun addWeightSubGoalKg(kg: Float) = dao.insertWeightSubGoal(WeightSubGoal(kg = kg))

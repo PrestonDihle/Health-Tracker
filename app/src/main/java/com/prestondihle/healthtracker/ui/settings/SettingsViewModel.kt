@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.StepSource
@@ -17,34 +18,86 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
+/**
+ * Where the goal-weight stepper opens when no goal has been set.
+ *
+ * The same figure the goal stepper itself falls back to, in pounds rather than
+ * the kilograms it is stored in -- two different defaults would have the
+ * waypoint suggestion disagree with the goal it is measured against.
+ */
+private const val DEFAULT_GOAL_WEIGHT_LBS = 180f
+
+/**
+ * What the waypoint stepper will accept.
+ *
+ * Shared with the control itself rather than repeated, because a seed outside
+ * the range would open the stepper on a value its own arrows cannot return to.
+ */
+internal val WaypointRangeLbs = 80f..400f
+
 data class SettingsUiState(
     val settings: UserSettings = UserSettings(),
     val goals: UserGoals = UserGoals(),
     /** Staged weights on the way to the goal, heaviest first. */
     val weightSubGoals: List<WeightSubGoal> = emptyList(),
+    /** The last weight logged by hand, which is where the waypoint stepper opens. */
+    val latestWeight: WeightEntry? = null,
     /** Today's per-app step totals, loaded on demand. */
     val stepSources: List<StepSource> = emptyList(),
     val isLoadingStepSources: Boolean = false,
-)
+) {
+    /** The goal in the unit every weight control on this screen is dialled in. */
+    val goalWeightLbs: Float?
+        get() = goals.goalWeightKg?.let(Units::kgToLbs)
+
+    /**
+     * Where the "add a waypoint" stepper opens.
+     *
+     * With nothing staged this is the weight the reader is actually at, not the
+     * goal. Opening at the goal was 55 lb from where the first waypoint was
+     * going to be dialled to -- a waypoint is a mark on the way, so the way is
+     * where the control has to start.
+     *
+     * Once a mark exists the next one usually goes halfway between the lightest
+     * of them and the goal, which is what the original rule got right and is
+     * kept. The goal is the last resort, for a reader who has staged nothing and
+     * logged no weight: it is at least a number they chose.
+     */
+    val suggestedWaypointLbs: Float
+        get() {
+            val goal = goalWeightLbs ?: DEFAULT_GOAL_WEIGHT_LBS
+            val lightestStaged = weightSubGoals.minOfOrNull { Units.kgToLbs(it.kg) }
+            val seed =
+                if (lightestStaged != null) (lightestStaged + goal) / 2f
+                else latestWeight?.let { Units.kgToLbs(it.weightKg) } ?: goal
+            return seed.coerceIn(WaypointRangeLbs)
+        }
+}
+
+/** Bundled because combine's typed overloads stop at five sources. */
+private data class StepSourceBundle(val sources: List<StepSource>, val isLoading: Boolean)
 
 class SettingsViewModel(private val repository: TrackerRepository) : ViewModel() {
 
     private val stepSources = MutableStateFlow<List<StepSource>>(emptyList())
     private val loadingStepSources = MutableStateFlow(false)
 
+    private val stepSourceState = combine(stepSources, loadingStepSources, ::StepSourceBundle)
+
     val uiState: StateFlow<SettingsUiState> = combine(
         repository.getUserSettings(),
         repository.getUserGoals(),
         repository.getWeightSubGoals(),
-        stepSources,
-        loadingStepSources,
-    ) { settings, goals, subGoals, sources, loading ->
+        repository.getLatestWeight(),
+        stepSourceState,
+    ) { settings, goals, subGoals, latestWeight, steps ->
         SettingsUiState(
             settings = settings ?: UserSettings(),
             goals = goals ?: UserGoals(),
             weightSubGoals = subGoals,
-            stepSources = sources,
-            isLoadingStepSources = loading,
+            latestWeight = latestWeight,
+            stepSources = steps.sources,
+            isLoadingStepSources = steps.isLoading,
         )
     }.stateIn(
         scope = viewModelScope,

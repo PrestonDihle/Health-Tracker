@@ -1,7 +1,10 @@
 package com.prestondihle.healthtracker.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -11,10 +14,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,10 +32,16 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.Duration
@@ -34,6 +49,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 import kotlin.math.ceil
 
 data class TimePoint(val time: Instant, val value: Float)
@@ -96,6 +112,23 @@ data class ChartSeries(
      * to print its numbers.
      */
     val scale: AxisSpec? = null,
+)
+
+/**
+ * A series that is currently switched off, kept in the legend so it can be
+ * switched back on.
+ *
+ * Deliberately *not* a [ChartSeries] carrying no points. A hidden series must
+ * not reach the plot at all -- one that did would go on stretching the axis it
+ * shares, which is the whole reason the caller filters the list before passing
+ * it. Carrying only the three things a legend row draws makes that mistake
+ * impossible rather than merely discouraged.
+ */
+data class HiddenSeries(
+    val label: String,
+    val color: Color,
+    val kind: SeriesKind = SeriesKind.LINE,
+    val dashed: Boolean = false,
 )
 
 /**
@@ -182,6 +215,15 @@ private const val BAR_ALPHA = 0.45f
 /** Light enough that a gridline still shows through the target band. */
 private const val BAND_ALPHA = 0.16f
 
+/**
+ * How far a switched-off legend entry is faded.
+ *
+ * Faded rather than dropped: the row is the only way back, so it has to stay
+ * findable -- and keeping its colour, however faint, is what says *which* line
+ * it is. Far enough down that it never reads as a line that is on the plot.
+ */
+private const val OFF_ALPHA = 0.3f
+
 /** Room above the plot for marker captions; without it they would clip. */
 private val MARKER_LABEL_HEIGHT = 16.dp
 
@@ -193,6 +235,45 @@ private val MIN_ROW_SPACING = 28.dp
 
 /** Least horizontal room between two time rules before the interval widens. */
 private val MIN_GRIDLINE_SPACING = 14.dp
+
+/**
+ * Room down the sides for the axis numbers.
+ *
+ * Named constants rather than figures inline in the drawing, because the
+ * gestures have to arrive at exactly the same plot rectangle. A crosshair placed
+ * against one set of gutters and drawn against another lands beside the moment
+ * it was asked about, and a pan measured against the wrong width moves the
+ * window at the wrong speed.
+ */
+private val LEFT_GUTTER = 36.dp
+private val RIGHT_GUTTER_LABELLED = 36.dp
+private val RIGHT_GUTTER_BARE = 8.dp
+
+/**
+ * How near a series has to have been sampled to answer for an inspected moment.
+ *
+ * A fraction of the window rather than a fixed span, because what counts as "at
+ * that moment" is a question about the plot: a minute is a hair's breadth across
+ * a week and a quarter of the gap between two readings across three hours.
+ * Anything further off reads as an em dash instead, which is the honest answer --
+ * quoting the value from an hour either side would invent a measurement.
+ */
+private const val INSPECT_TOLERANCE_DIVISOR = 40L
+
+/** Shown for a series with nothing sampled near the inspected moment. */
+private const val NO_READING = "\u2014"
+
+/** How near a tap has to land to the standing crosshair to be putting it away. */
+private val DISMISS_SLOP = 12.dp
+
+/**
+ * The moment being inspected, spelled out.
+ *
+ * The weekday is always printed even where the window is three hours wide: the
+ * crosshair survives a change of range and a pan, so the one thing it must never
+ * do is leave the reader assuming today.
+ */
+private val INSPECT_TIME_FORMAT = DateTimeFormatter.ofPattern("EEE h:mm a")
 
 /**
  * Where the vertical rules go on a time chart.
@@ -295,6 +376,42 @@ fun DualAxisTimeChart(
      * the tick labels already say enough.
      */
     verticalGridlines: Boolean = false,
+    /**
+     * Series the caller has switched off, drawn faded at the end of the legend.
+     *
+     * The legend can only be a complete set of controls if it also shows what is
+     * *not* drawn -- otherwise switching a line off removes the only thing that
+     * could switch it back on. They are passed apart from [series] rather than
+     * flagged inside it because nothing hidden may reach the plot: a point that
+     * is not being drawn must not go on setting an axis' ceiling.
+     */
+    hiddenSeries: List<HiddenSeries> = emptyList(),
+    /**
+     * Called with a legend row's [ChartSeries.label] when it is tapped.
+     *
+     * Null leaves the legend inert, which is what a chart with nothing to toggle
+     * wants. Keyed by label rather than by index so the caller does not have to
+     * track which list a row came from.
+     */
+    onSeriesTap: ((String) -> Unit)? = null,
+    /**
+     * Called with how far back a horizontal drag asks the window to move.
+     *
+     * Positive is further into the past, which is the direction a drag to the
+     * right goes -- the plot moves under the finger the way a map does. Null
+     * leaves the chart anchored, which is what every chart with a window it does
+     * not own wants.
+     */
+    onPan: ((Duration) -> Unit)? = null,
+    /**
+     * One line naming the plot for a screen reader.
+     *
+     * A Canvas is a blank to TalkBack, which mattered less while a chart was only
+     * something to look at. It is a control now -- tapping it reads the lines out
+     * and dragging it moves the window -- and a control with no name is a control
+     * that is not there at all for anyone using one.
+     */
+    contentDescription: String? = null,
 ) {
     val textMeasurer = rememberTextMeasurer()
     val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -308,8 +425,99 @@ fun DualAxisTimeChart(
     val drawn = series.map { DrawnSeries(it, it.points.inWindow(windowStart, windowEnd)) }
     val hasData = drawn.any { it.points.isNotEmpty() }
 
+    // The moment being inspected, or null while nothing is. Kept here rather than
+    // hoisted to a ViewModel: nothing outside this chart needs to know, and a
+    // round trip through state per tap would have the hairline lag the finger.
+    var selectedTime by remember { mutableStateOf<Instant?>(null) }
+    // Held as an instant, so it stays on the moment it was put on through a
+    // change of range or a pan -- and simply stops being drawn once that moment
+    // is off the plot, rather than sliding along to the edge.
+    val inspected = selectedTime?.takeIf { it in windowStart..windowEnd }
+
+    // Read by the gesture handlers without keying the pointer input on them. The
+    // window and the points change every frame of a pan; restarting the gesture
+    // detector that often would drop the drag being handled.
+    val currentStart by rememberUpdatedState(windowStart)
+    val currentEnd by rememberUpdatedState(windowEnd)
+    val currentDrawn by rememberUpdatedState(drawn)
+    val currentHasRightAxis by rememberUpdatedState(rightAxis != null)
+    val currentOnPan by rememberUpdatedState(onPan)
+
     Column(modifier = modifier) {
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+        Box(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .weight(1f)
+                    // Tap and drag are read by two detectors rather than one on
+                    // purpose. Both watch the same pointer: the tap detector
+                    // gives up the moment the finger travels, and the drag
+                    // detector waits for *horizontal* slop specifically, so a
+                    // vertical swipe reaches neither and the list underneath goes
+                    // on scrolling.
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            val plot =
+                                plotSpan(size.width.toFloat(), currentHasRightAxis)
+                            val span = Duration.between(currentStart, currentEnd)
+                            if (plot == null || span.isZero || span.isNegative) {
+                                return@detectTapGestures
+                            }
+                            // Read back off the state rather than from the
+                            // `inspected` above: this block is launched once and
+                            // never restarted, so a plain local read here would
+                            // be the value the chart had when it first composed,
+                            // for ever. The delegated property goes through the
+                            // remembered state and is current.
+                            val standing =
+                                selectedTime?.takeIf { it in currentStart..currentEnd }
+                            // Tapping the gutter puts the crosshair away, and so
+                            // does tapping the standing one again. Judged in
+                            // pixels rather than against the snapped instant: on
+                            // a dense trace "the same place" is several samples
+                            // wide, and a second tap that landed on the neighbour
+                            // would move the hairline instead of dismissing it.
+                            val standingX =
+                                standing?.let {
+                                    plot.start + plot.fraction(it, currentStart, span) * plot.width
+                                }
+                            selectedTime =
+                                when {
+                                    offset.x !in plot.start..plot.end -> null
+                                    standingX != null &&
+                                        abs(offset.x - standingX) <= DISMISS_SLOP.toPx() -> null
+                                    else ->
+                                        currentDrawn.nearestSampleTo(
+                                            plot.timeAt(offset.x, currentStart, span)
+                                        )
+                                }
+                        }
+                    }
+                    .then(
+                        if (contentDescription == null) Modifier
+                        else Modifier.semantics { this.contentDescription = contentDescription }
+                    )
+                    .then(
+                        if (onPan == null) Modifier
+                        else
+                            Modifier.pointerInput(Unit) {
+                                detectHorizontalDragGestures { change, dragAmount ->
+                                    val pan = currentOnPan ?: return@detectHorizontalDragGestures
+                                    val plot =
+                                        plotSpan(size.width.toFloat(), currentHasRightAxis)
+                                    val span = Duration.between(currentStart, currentEnd)
+                                    if (plot == null || span.isZero || span.isNegative) {
+                                        return@detectHorizontalDragGestures
+                                    }
+                                    change.consume()
+                                    pan(
+                                        Duration.ofMillis(
+                                            ((dragAmount / plot.width) * span.toMillis()).toLong()
+                                        )
+                                    )
+                                }
+                            }
+                    )
+        ) {
             if (!hasData) {
                 Text(
                     "No readings in this window",
@@ -331,12 +539,32 @@ fun DualAxisTimeChart(
                         zoneId = zoneId,
                         markers = markers,
                         verticalGridlines = verticalGridlines,
+                        inspected = inspected,
                     )
                 }
             }
         }
 
-        Legend(series = drawn, leftAxis = leftAxis, rightAxis = rightAxis)
+        if (inspected != null) {
+            CrosshairReadout(
+                at = inspected,
+                series = drawn,
+                leftAxis = leftAxis,
+                rightAxis = rightAxis,
+                tolerance =
+                    Duration.between(windowStart, windowEnd)
+                        .dividedBy(INSPECT_TOLERANCE_DIVISOR),
+                zoneId = zoneId,
+            )
+        }
+
+        Legend(
+            series = drawn,
+            hidden = hiddenSeries,
+            leftAxis = leftAxis,
+            rightAxis = rightAxis,
+            onSeriesTap = onSeriesTap,
+        )
     }
 }
 
@@ -349,14 +577,142 @@ fun DualAxisTimeChart(
 private data class DrawnSeries(val spec: ChartSeries, val points: List<TimePoint>)
 
 /**
+ * The horizontal stretch the plot itself occupies, and the mapping between it
+ * and the clock.
+ *
+ * Separate from the drawing so a gesture can work in the same rectangle rather
+ * than a rectangle of its own that happens to agree today.
+ */
+private class PlotSpan(val start: Float, val end: Float) {
+    val width: Float
+        get() = end - start
+
+    fun timeAt(x: Float, windowStart: Instant, span: Duration): Instant =
+        windowStart.plusMillis((((x - start) / width) * span.toMillis()).toLong())
+
+    fun fraction(at: Instant, windowStart: Instant, span: Duration): Float =
+        Duration.between(windowStart, at).toMillis().toFloat() / span.toMillis()
+}
+
+/** Null where the gutters leave no room at all, which nothing may divide by. */
+private fun Density.plotSpan(widthPx: Float, hasRightAxis: Boolean): PlotSpan? {
+    val left = LEFT_GUTTER.toPx()
+    val right =
+        widthPx - (if (hasRightAxis) RIGHT_GUTTER_LABELLED else RIGHT_GUTTER_BARE).toPx()
+    return if (right - left <= 0f) null else PlotSpan(left, right)
+}
+
+/** How far [at] is from this reading, either way round. */
+private fun TimePoint.distanceTo(at: Instant): Long =
+    abs(Duration.between(time, at).toMillis())
+
+/**
+ * The sampled moment nearest [at], across every series on the plot.
+ *
+ * The crosshair lands on a moment something was actually recorded rather than
+ * wherever the finger fell. A hairline at 4:37 over a trace sampled on the
+ * five-minute mark would be quoting 4:35's reading under 4:37's caption.
+ */
+private fun List<DrawnSeries>.nearestSampleTo(at: Instant): Instant? =
+    flatMap { it.points }.minByOrNull { it.distanceTo(at) }?.time
+
+/** The reading nearest [at], or null when none was taken within [tolerance]. */
+private fun List<TimePoint>.nearestTo(at: Instant, tolerance: Duration): TimePoint? =
+    minByOrNull { it.distanceTo(at) }?.takeIf { it.distanceTo(at) <= tolerance.toMillis() }
+
+/**
+ * What this series read at [at].
+ *
+ * A line is answered by its nearest sample, and by nothing at all where the
+ * nearest is further off than [tolerance] -- quoting a heart rate from either
+ * side of an eight-hour hole is inventing a measurement.
+ *
+ * A bar is answered by the column that *contains* the moment instead. Its
+ * timestamp is the start of an interval rather than an instant it was measured
+ * at, so on an hourly step bucket the nearest start to a moment halfway through
+ * the hour is half an hour away -- an em dash printed under a column the reader
+ * can plainly see beneath the crosshair.
+ */
+private fun DrawnSeries.readingAt(at: Instant, tolerance: Duration): TimePoint? {
+    val width = spec.barWidth
+    if (spec.kind == SeriesKind.BAR && width != null) {
+        return points.lastOrNull { !at.isBefore(it.time) && at.isBefore(it.time.plus(width)) }
+    }
+    return points.nearestTo(at, tolerance)
+}
+
+/**
+ * What every series read at the inspected moment.
+ *
+ * Under the plot as ordinary text rather than painted on the canvas as a bubble:
+ * a bubble has to go somewhere, and everywhere on a plot carrying eight series
+ * is on top of one of them. Here it costs a strip of plot height and collides
+ * with nothing.
+ *
+ * A series with nothing sampled near enough says so. The alternative is quoting
+ * whatever it last managed, which on a watch taken off overnight is a heart rate
+ * from eight hours before the moment being asked about.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CrosshairReadout(
+    at: Instant,
+    series: List<DrawnSeries>,
+    leftAxis: AxisSpec,
+    rightAxis: AxisSpec?,
+    tolerance: Duration,
+    zoneId: ZoneId,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = INSPECT_TIME_FORMAT.format(at.atZone(zoneId)),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        series.forEach { drawn ->
+            val item = drawn.spec
+            // The same axis the line itself is drawn against, so the number in
+            // the readout is the number the reader would take off the gutter.
+            val axis =
+                item.scale
+                    ?: if (item.axis == ChartAxis.LEFT) leftAxis else rightAxis ?: leftAxis
+            val reading = drawn.readingAt(at, tolerance)
+            Text(
+                text = "${item.label} ${reading?.let { axis.format(it.value) } ?: NO_READING}",
+                style = MaterialTheme.typography.labelSmall,
+                color = item.color,
+            )
+        }
+    }
+}
+
+/**
  * Series names with their units, wrapping onto as many rows as it takes.
  *
  * A series drawn against a scale of its own also states that scale's range here,
  * since that is the only place its numbers appear at all.
+ *
+ * Where the caller supplies [onSeriesTap] this is also the plot's control
+ * surface: every row toggles its own line, and the switched-off ones follow the
+ * drawn ones, faded. Grouping them at the end rather than holding each name in a
+ * fixed slot is deliberate -- what is on the chart reads as one block and what
+ * is available reads as another, which is the question actually being asked of a
+ * legend that doubles as a set of switches.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Legend(series: List<DrawnSeries>, leftAxis: AxisSpec, rightAxis: AxisSpec?) {
+private fun Legend(
+    series: List<DrawnSeries>,
+    hidden: List<HiddenSeries>,
+    leftAxis: AxisSpec,
+    rightAxis: AxisSpec?,
+    onSeriesTap: ((String) -> Unit)?,
+) {
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -364,51 +720,114 @@ private fun Legend(series: List<DrawnSeries>, leftAxis: AxisSpec, rightAxis: Axi
     ) {
         series.forEach { drawn ->
             val item = drawn.spec
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // A short stroke rather than a dot, so a dashed projection is
-                // identifiable in the legend and not just on the plot. A bar
-                // series gets a block instead, at the same wash it is drawn in.
-                Canvas(modifier = Modifier.width(14.dp).height(8.dp)) {
-                    if (item.kind == SeriesKind.BAR) {
-                        drawRect(color = item.color.copy(alpha = BAR_ALPHA))
-                    } else {
-                        drawLine(
-                            color = item.color,
-                            start = androidx.compose.ui.geometry.Offset(0f, size.height / 2f),
-                            end = androidx.compose.ui.geometry.Offset(size.width, size.height / 2f),
-                            strokeWidth = 2.dp.toPx(),
-                            cap = StrokeCap.Round,
-                            pathEffect =
-                                if (item.dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f)
-                                else null,
-                        )
-                    }
+            // Expanded exactly as the canvas expands it. Quoting the configured
+            // range instead would print a ceiling the plot is not using the
+            // moment anything exceeds it -- and this is the only place a
+            // self-scaled series' numbers appear at all, so the caption *is* its
+            // axis.
+            val scale = item.scale?.expandedFor(drawn.points)
+            val caption =
+                when {
+                    scale != null ->
+                        "${item.label} (${scale.format(scale.min)}-" +
+                            "${scale.format(scale.max)} ${scale.label})"
+                    item.axis == ChartAxis.LEFT && leftAxis.label.isNotBlank() ->
+                        "${item.label} (${leftAxis.label})"
+                    item.axis == ChartAxis.RIGHT && !rightAxis?.label.isNullOrBlank() ->
+                        "${item.label} (${rightAxis?.label})"
+                    else -> item.label
                 }
-                Spacer(Modifier.width(4.dp))
-                // Expanded exactly as the canvas expands it. Quoting the
-                // configured range instead would print a ceiling the plot is not
-                // using the moment anything exceeds it -- and this is the only
-                // place a self-scaled series' numbers appear at all, so the
-                // caption *is* its axis.
-                val scale = item.scale?.expandedFor(drawn.points)
-                val caption =
-                    when {
-                        scale != null ->
-                            "${item.label} (${scale.format(scale.min)}-" +
-                                "${scale.format(scale.max)} ${scale.label})"
-                        item.axis == ChartAxis.LEFT && leftAxis.label.isNotBlank() ->
-                            "${item.label} (${leftAxis.label})"
-                        item.axis == ChartAxis.RIGHT && !rightAxis?.label.isNullOrBlank() ->
-                            "${item.label} (${rightAxis?.label})"
-                        else -> item.label
-                    }
-                Text(
-                    text = caption,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            LegendRow(
+                key = item.label,
+                caption = caption,
+                color = item.color,
+                kind = item.kind,
+                dashed = item.dashed,
+                drawn = true,
+                onSeriesTap = onSeriesTap,
+            )
+        }
+
+        // No unit quoted on a hidden row: an axis is worked out from the points
+        // on the plot, and a series that is off has none there. Printing the
+        // range it would have had means inventing a number.
+        hidden.forEach { item ->
+            LegendRow(
+                key = item.label,
+                caption = item.label,
+                color = item.color,
+                kind = item.kind,
+                dashed = item.dashed,
+                drawn = false,
+                onSeriesTap = onSeriesTap,
+            )
+        }
+    }
+}
+
+/**
+ * One legend entry: a swatch, a caption, and -- where the chart is switchable --
+ * the control for its own line.
+ *
+ * [key] is what a tap reports, and is the series' plain label rather than the
+ * [caption] the reader sees. The caption carries the unit, which moves as the
+ * axis selection does, and a control keyed on something that moves is a control
+ * that stops working.
+ */
+@Composable
+private fun LegendRow(
+    key: String,
+    caption: String,
+    color: Color,
+    kind: SeriesKind,
+    dashed: Boolean,
+    drawn: Boolean,
+    onSeriesTap: ((String) -> Unit)?,
+) {
+    val ink = if (drawn) color else color.copy(alpha = OFF_ALPHA)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+            if (onSeriesTap == null) Modifier
+            else
+                // Toggleable rather than merely clickable: it says what the row
+                // does and which way it is currently set, which is what a screen
+                // reader has to be told and is also the only handle a test has on
+                // a row of plain text. The padding is the tap target -- legend
+                // text on its own is a couple of millimetres tall.
+                Modifier.toggleable(
+                        value = drawn,
+                        role = Role.Switch,
+                        onValueChange = { onSeriesTap(key) },
+                    )
+                    .padding(vertical = 3.dp),
+    ) {
+        // A short stroke rather than a dot, so a dashed projection is
+        // identifiable in the legend and not just on the plot. A bar series gets
+        // a block instead, at the same wash it is drawn in.
+        Canvas(modifier = Modifier.width(14.dp).height(8.dp)) {
+            if (kind == SeriesKind.BAR) {
+                drawRect(color = ink.copy(alpha = ink.alpha * BAR_ALPHA))
+            } else {
+                drawLine(
+                    color = ink,
+                    start = androidx.compose.ui.geometry.Offset(0f, size.height / 2f),
+                    end = androidx.compose.ui.geometry.Offset(size.width, size.height / 2f),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect =
+                        if (dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f) else null,
                 )
             }
         }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = caption,
+            style = MaterialTheme.typography.labelSmall,
+            color =
+                if (drawn) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.outline,
+        )
     }
 }
 
@@ -506,9 +925,11 @@ private fun DrawScope.drawChart(
     zoneId: ZoneId,
     markers: List<ChartMarker> = emptyList(),
     verticalGridlines: Boolean = false,
+    inspected: Instant? = null,
 ) {
-    val leftGutter = 36.dp.toPx()
-    val rightGutter = if (rightAxis != null) 36.dp.toPx() else 8.dp.toPx()
+    val leftGutter = LEFT_GUTTER.toPx()
+    val rightGutter =
+        (if (rightAxis != null) RIGHT_GUTTER_LABELLED else RIGHT_GUTTER_BARE).toPx()
     val bottomGutter = 18.dp.toPx()
     val topPad = if (markers.any { it.label != null }) MARKER_LABEL_HEIGHT.toPx() else 6.dp.toPx()
 
@@ -823,6 +1244,28 @@ private fun DrawScope.drawChart(
                     )
                 }
             }
+        }
+    }
+
+    // The crosshair, last, so no bar or curve is drawn over the one line the
+    // reader put there themselves.
+    //
+    // Solid and in the label grey: heavier than the meal rules, which are dashed
+    // gridline grey and mark context, and lighter than any series, which are 2dp
+    // and coloured. Nothing is drawn *on* the lines it is asking about -- a ring
+    // at each matched point would be fresh ink on the plot in the data's own
+    // colours, which is exactly how the meal markers came to be read as a
+    // carbohydrate spike. The readout under the chart says which value belongs
+    // to which line, in words.
+    if (inspected != null) {
+        val x = xFor(inspected)
+        if (x in plotLeft..plotRight) {
+            drawLine(
+                color = axisTextColor,
+                start = androidx.compose.ui.geometry.Offset(x, plotTop),
+                end = androidx.compose.ui.geometry.Offset(x, plotBottom),
+                strokeWidth = 1.dp.toPx(),
+            )
         }
     }
 }

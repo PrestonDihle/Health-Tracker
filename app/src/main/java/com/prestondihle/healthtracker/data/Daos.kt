@@ -60,6 +60,17 @@ interface TrackerDao {
 
     @Upsert suspend fun upsertWeight(entry: WeightEntry)
 
+    /**
+     * The most recent weight logged, used to seed the waypoint stepper.
+     *
+     * Manual entries only, unlike the trend, which merges these with the synced
+     * snapshot. This is where a control opens rather than a figure anybody
+     * reads, so the extra query to find out whether Health Connect happens to
+     * hold something a day fresher buys nothing.
+     */
+    @Query("SELECT * FROM WeightEntry ORDER BY date DESC LIMIT 1")
+    fun getLatestWeight(): Flow<WeightEntry?>
+
     /** Heaviest first, which is the order they are passed on the way down. */
     @Query("SELECT * FROM WeightSubGoal ORDER BY kg DESC")
     fun getWeightSubGoals(): Flow<List<WeightSubGoal>>
