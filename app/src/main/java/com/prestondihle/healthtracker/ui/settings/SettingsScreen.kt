@@ -220,6 +220,18 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     range = Glucose.ENTRY_RANGE,
                     valueFormatter = { "$it ${Glucose.UNIT}" },
                 )
+                HorizontalDivider()
+                IntStepper(
+                    label = "Reference line",
+                    value = state.goals.glucoseReferenceMgDl ?: Glucose.DEFAULT_REFERENCE,
+                    onValueChange = {
+                        viewModel.saveGoals(state.goals.copy(glucoseReferenceMgDl = it))
+                    },
+                    step = 5,
+                    range = Glucose.ENTRY_RANGE,
+                    supportingText = "solid rule across the Today chart",
+                    valueFormatter = { "$it ${Glucose.UNIT}" },
+                )
             }
         }
 

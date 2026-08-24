@@ -16,6 +16,7 @@ import com.prestondihle.healthtracker.domain.MacroServing
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
+import com.prestondihle.healthtracker.ui.components.ChartAxis
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -66,6 +67,41 @@ enum class MasterSeries(val label: String) {
 }
 
 /**
+ * A unit that can be printed down the side of the master chart.
+ *
+ * The plot has two gutters and the series carry five different units, so at most
+ * two of them can ever have their numbers on screen; the rest are drawn to their
+ * own scale with the range quoted in the legend instead. Which two is a reading
+ * decision, not a fixed one -- comparing steps against heart rate wants a
+ * different pair of axes than comparing carbohydrate against glucose -- so it is
+ * left to whoever is reading.
+ *
+ * Grouped by unit rather than by series: the three macro curves share one g/h
+ * scale and would be meaningless drawn against separate ones.
+ */
+enum class AxisMetric(val label: String) {
+    GLUCOSE("Glucose"),
+    MACROS("Macros"),
+    HEART_RATE("Heart rate"),
+    KETONES("Ketones"),
+    STEPS("Steps"),
+}
+
+/** The unit a series is measured in, and so which axis can carry it. */
+val MasterSeries.metric: AxisMetric
+    get() =
+        when (this) {
+            MasterSeries.GLUCOSE -> AxisMetric.GLUCOSE
+            MasterSeries.CARBS, MasterSeries.PROTEIN, MasterSeries.FAT -> AxisMetric.MACROS
+            MasterSeries.HEART_RATE -> AxisMetric.HEART_RATE
+            MasterSeries.KETONES -> AxisMetric.KETONES
+            MasterSeries.STEPS -> AxisMetric.STEPS
+        }
+
+/** How many units can have their numbers printed at once. */
+const val MAX_LABELLED_AXES = 2
+
+/**
  * Roughly how many points an absorption curve is sampled at across the window.
  *
  * The step is derived from this rather than fixed, and then clamped: a fixed ten
@@ -95,8 +131,26 @@ data class MasterGraphUiState(
     val zoneId: ZoneId = ZoneId.systemDefault(),
     /** Everything starts on; the switches are for narrowing, not for building up. */
     val visibleSeries: Set<MasterSeries> = MasterSeries.entries.toSet(),
+    /**
+     * Which units have their numbers printed, in order: first left, then right.
+     *
+     * Ordered rather than a set, because which side a unit lands on is the whole
+     * point. Glucose and macros to begin with, which is the pairing the chart was
+     * built around.
+     */
+    val labelledAxes: List<AxisMetric> = listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS),
 ) {
     fun isVisible(series: MasterSeries): Boolean = series in visibleSeries
+
+    /** Which side [metric] is printed on, or null when it is not printed at all. */
+    fun axisFor(metric: AxisMetric): ChartAxis? =
+        when (labelledAxes.indexOf(metric)) {
+            0 -> ChartAxis.LEFT
+            1 -> ChartAxis.RIGHT
+            else -> null
+        }
+
+    fun isLabelled(metric: AxisMetric): Boolean = metric in labelledAxes
 
     val windowStart: Instant
         get() = now.minus(Duration.ofHours(range.hours))
@@ -273,6 +327,7 @@ private data class PreferenceBundle(
     val visibleSeries: Set<MasterSeries>,
     val goals: UserGoals,
     val smoothGlucose: Boolean,
+    val labelledAxes: List<AxisMetric>,
 )
 
 /**
@@ -288,6 +343,8 @@ class MasterGraphViewModel(
     private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
     private val syncing = MutableStateFlow(false)
     private val visibleSeries = MutableStateFlow(MasterSeries.entries.toSet())
+    private val labelledAxes =
+        MutableStateFlow(listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS))
 
     /**
      * Recomputed on a coarse tick rather than every second.
@@ -321,16 +378,19 @@ class MasterGraphViewModel(
 
     /** Bundled because combine's typed overloads stop at five sources. */
     private val preferences: Flow<PreferenceBundle> =
-        combine(syncing, visibleSeries, repository.getUserGoals(), repository.getUserSettings()) {
-            isSyncing,
-            visible,
-            goals,
-            settings ->
+        combine(
+            syncing,
+            visibleSeries,
+            repository.getUserGoals(),
+            repository.getUserSettings(),
+            labelledAxes,
+        ) { isSyncing, visible, goals, settings, axes ->
             PreferenceBundle(
                 isSyncing = isSyncing,
                 visibleSeries = visible,
                 goals = goals ?: UserGoals(),
                 smoothGlucose = settings?.smoothGlucose ?: false,
+                labelledAxes = axes,
             )
         }
 
@@ -355,6 +415,7 @@ class MasterGraphViewModel(
                 isSyncing = prefs.isSyncing,
                 zoneId = zoneId,
                 visibleSeries = prefs.visibleSeries,
+                labelledAxes = prefs.labelledAxes,
             )
         }
             .stateIn(
@@ -375,6 +436,25 @@ class MasterGraphViewModel(
     fun setSeriesVisible(series: MasterSeries, visible: Boolean) {
         visibleSeries.value =
             if (visible) visibleSeries.value + series else visibleSeries.value - series
+    }
+
+    /**
+     * Adds or removes a unit from the labelled axes.
+     *
+     * Adding a third drops the oldest rather than refusing the tap: a control
+     * that silently does nothing reads as broken, and the reader almost always
+     * means "show me this one instead". The last one cannot be removed -- the
+     * plot has to be drawn against something, and an unlabelled chart is not a
+     * state worth being able to reach.
+     */
+    fun toggleLabelledAxis(metric: AxisMetric) {
+        val current = labelledAxes.value
+        labelledAxes.value =
+            when {
+                metric !in current -> (current + metric).takeLast(MAX_LABELLED_AXES)
+                current.size > 1 -> current - metric
+                else -> current
+            }
     }
 
     /**

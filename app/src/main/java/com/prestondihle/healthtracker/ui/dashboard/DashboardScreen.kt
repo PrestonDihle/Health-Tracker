@@ -862,6 +862,10 @@ private fun MetabolicCard(
                     max = Glucose.PLOT_MAX,
                     label = Glucose.UNIT,
                     band = state.glucoseTarget,
+                    // Solid, because this is the reader's own line rather than
+                    // a published figure -- see AxisSpec.thresholdDashed.
+                    threshold = state.glucoseReference,
+                    thresholdDashed = false,
                 ),
             rightAxis =
                 AxisSpec(

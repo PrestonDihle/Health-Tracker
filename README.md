@@ -2,17 +2,19 @@
 
 A personal health and lifestyle tracker for Android. Pulls objective metrics from
 Health Connect and pairs them with the subjective and manual things it cannot
-know about: fasting, hydration, waist, blood pressure, ketones, reps and reading.
+know about: fasting, hydration, waist, grip strength, blood pressure, ketones,
+reps and reading.
 
 ## Screens
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, 24-hour glucose and ketone chart, waist, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
+| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
-| **Trends** | 14-day and 90-day history for steps, waist, weight, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading |
+| **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate and steps per hour |
+| **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading |
 | **History** | Backfill or correct any past day |
-| **Settings** | Units, daily goals, body targets |
+| **Settings** | Units, step source, daily goals, blood sugar target and reference line, body targets |
 
 ## Health Connect
 
@@ -34,11 +36,14 @@ cached per day in `HealthDaySnapshot` so trends and history survive offline.
 
 ### Steps and the source picker
 
-More than one app usually writes steps — a watch's companion app and the phone's
-own health app both counting the same walk. Health Connect's aggregate sums
-them, which double-counts. The app instead reads raw step records grouped by the
-app that wrote them, and **Settings → Step source** shows the per-app totals for
-today so one can be pinned as the one that counts.
+More than one app usually writes steps -- a watch's companion app and the phone's
+own health app both counting the same walk. An unfiltered aggregate sums them,
+which double-counts. The app instead derives the contributing packages from the
+aggregate's own data origins and re-aggregates per source, and
+**Settings -> Step source** shows the per-app totals for today so one can be
+pinned as the one that counts. The same pinned source drives the hourly step
+bars on the Master screen, so the two screens can never disagree about how far
+you walked.
 
 ### Calories
 
@@ -100,6 +105,96 @@ Every total is computed with interval set algebra, so two sessions that overlap
 finished fasts contribute to longest and average; a running one would report its
 length so far and beat itself an hour later.
 
+
+## The master graph
+
+One timeline carrying everything that might explain everything else: what was
+eaten, how it is being absorbed, and what blood sugar, ketones, heart rate and
+walking did in response. Windows run from 3 hours — about one meal, start to
+finish — out to 7 days, where individual meals stop being legible but habits do
+not.
+
+### Meals become curves
+
+Health Connect records a meal as one lump of grams at a single instant, which
+drawn literally is a vertical spike that says nothing about the hours the food is
+actually acting over. Each meal is instead spread into a compartmental
+absorption curve, normalised so the area under it is the grams eaten and its
+height is grams per hour arriving. Carbohydrate peaks at 45 minutes, protein at
+90, fat at 3.5 hours. All three are drawn dashed, because they are a model of
+what the food is doing and not a measurement of it.
+
+### Fixing what the source got wrong
+
+A nutrition source is free to record only the *date*. Real data here arrived with
+every meal stamped 10:00:00 local, three of them on one Tuesday — so every
+absorption curve sat in an hour nobody ate in. No amount of arithmetic recovers a
+clock time that was never written, so instead:
+
+- A time of day **shared to the second by two different meals** is treated as a
+  stamp rather than a measurement, and the meal is flagged rather than shown with
+  a plausible-looking time. Real timestamps do not repeat to the second.
+- Meals can be **corrected, deleted, or logged by hand** — the only Health
+  Connect cache that is editable at all. Corrections survive re-syncing.
+- The same source may also write one meal as several records. Records agreeing on
+  timestamp, energy, all three macros and name are counted once; anything
+  differing at all is kept, so a genuine second helping survives.
+
+### Reading two units at a time
+
+The plot has two gutters and the series carry five different units, so which two
+get their numbers printed is a choice, not a fixed layout — comparing steps
+against heart rate wants a different pair than comparing carbohydrate against
+glucose. Unchosen units still plot, correctly shaped, against their own range
+with the numbers quoted in the legend.
+
+Steps are drawn as hourly **bars** rather than a line: a step count belongs to
+the hour it accumulated over, and joining the hours would claim a walking rate at
+instants when nothing was counted.
+
+## Blood sugar
+
+The glucose axis runs 60–180 mg/dL. Outliers expand it rather than being clipped,
+so a 210 reading still plots; it is simply not budgeted for.
+
+Three things can be drawn on it, and they are deliberately distinct:
+
+- A **grey band** for the target range, set in Settings. A filled region answers
+  "was it in range" at a glance.
+- A **solid rule** at a single reference value, also set in Settings and
+  defaulting to 100 mg/dL. This answers "above or below". It is solid where the
+  blood pressure chart's 120 rule is dashed: that one is a published clinical
+  figure, this one is wherever you decided to put it, and the two should not look
+  alike.
+- An optional **smoothed line**, off by default. A Gaussian-weighted moving
+  average in *time* rather than in sample index, so it works on a dense monitor
+  trace and a handful of hand-typed fingersticks alike. It never resamples or
+  interpolates — one output per reading, at that reading's own timestamp — and
+  being a weighted mean of real readings it cannot overshoot their range. The
+  series is relabelled while it is on, because everything else on these charts is
+  either a measurement or dashed to say it is a model.
+
+### Gaps stay gaps
+
+A line joining the last reading before a gap to the first one after draws a
+straight run through hours that were never recorded, in the same ink as the
+readings either side — a watch taken off overnight produced an eight-hour
+diagonal that looked exactly like data. Measured series break instead.
+
+The threshold comes from each series' own cadence (four times its median
+spacing) rather than being fixed, because a fixed one is wrong for somebody:
+twenty minutes of silence is a dropout for a monitor writing every five minutes
+and an ordinary afternoon for three fingersticks a day. An isolated reading is
+drawn as a dot rather than dropped.
+
+## Grip strength
+
+Dominant and non-dominant, logged in pounds and stored in kilograms like every
+other body measurement. Dominant and non-dominant rather than left and right
+because the pair is read as a ratio — a dominant hand normally squeezes about a
+tenth harder — and that comparison survives a reader who does not know which hand
+you write with. Both hands are tracked separately on the Trends chart, since a
+gap that widens over months says something neither line says alone.
 ## Caffeine
 
 Caffeine is eliminated first-order with a **5-hour half-life**, so each dose
@@ -128,7 +223,10 @@ The maths is in `domain/Caffeine.kt` and covered by `CaffeineTest`.
 ## Units
 
 Everything is **stored in metric** to match Health Connect, and converted at the
-display boundary. Waist steps in exact quarter-inches and defaults to 42".
+display boundary. Waist steps in exact quarter-inches and defaults to 42"; grip
+strength is stored in kilograms and shown in pounds. Health Connect has no grip
+record, so nothing outside forces that unit -- but a second storage unit in the
+same database is how rounding error gets in.
 
 ## Colors
 
@@ -168,9 +266,15 @@ needs a real upload key. No signing material is stored in this repo.
 ./gradlew :app:testDebugUnitTest
 ```
 
-`FastingAdherenceTest` is pure JVM and covers the adherence maths, including the
-midnight-wrapping feeding window, extended fasts overriding the daily plan,
-disabled days, and the rule that future planned time is not scored.
+The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
+macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
+series gap-splitting and axis selection. `MasterGraphRenderTest` and
+`ScreenRenderTest` compose whole screens against an in-memory database and
+capture images with Roborazzi, which is what catches the empty-list and
+divide-by-zero cases the chart canvas only reaches under a real layout pass.
+`MigrationSchemaTest` diffs every hand-written migration against the schema Room
+generates from the entities -- a mismatch there does not fail a build, it throws
+on the next launch for anyone upgrading.
 
 ### Verified toolchain
 

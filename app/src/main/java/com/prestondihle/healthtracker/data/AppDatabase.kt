@@ -33,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserGoals::class,
         UserSettings::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -217,6 +217,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Adds the glucose reference line, seeded so it is there on first sight.
+         *
+         * A SQLite default again, for the reason the v6 columns carry one: the
+         * entity default only applies to rows this app constructs, and an
+         * upgrading user has a UserGoals row already. Without it their chart
+         * would come back with the new line silently switched off.
+         */
+        internal val migration7To8Statements =
+            listOf(
+                "ALTER TABLE `UserGoals` ADD COLUMN `glucoseReferenceMgDl` INTEGER DEFAULT 100"
+            )
+
+        private val MIGRATION_7_8 =
+            object : Migration(7, 8) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration7To8Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -237,6 +257,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_4_5,
                                 MIGRATION_5_6,
                                 MIGRATION_6_7,
+                                MIGRATION_7_8,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

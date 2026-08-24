@@ -363,6 +363,21 @@ data class UserGoals(
      */
     val glucoseTargetLowMgDl: Int? = 70,
     val glucoseTargetHighMgDl: Int? = 140,
+
+    /**
+     * A single value marked with a solid rule across the glucose chart.
+     *
+     * Separate from the band and drawn differently on purpose: a band answers
+     * "was it in range", which is a region; a line answers "was it above or
+     * below", which is a threshold. Solid rather than the dashed rule the blood
+     * pressure chart uses -- that one marks a published clinical figure, this
+     * one is wherever the reader has decided to draw it, and the two should not
+     * look alike.
+     *
+     * 100 mg/dL to start: near the middle of the seeded target, so it reads as
+     * a centre line rather than a limit.
+     */
+    val glucoseReferenceMgDl: Int? = 100,
 )
 
 @Entity

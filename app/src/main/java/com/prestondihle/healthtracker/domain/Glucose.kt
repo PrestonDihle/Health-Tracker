@@ -32,4 +32,7 @@ object Glucose {
     /** Seeds the target band on first run; the real values come from settings. */
     const val DEFAULT_TARGET_LOW = 70
     const val DEFAULT_TARGET_HIGH = 140
+
+    /** Where the solid reference rule sits until the reader moves it. */
+    const val DEFAULT_REFERENCE = 100
 }

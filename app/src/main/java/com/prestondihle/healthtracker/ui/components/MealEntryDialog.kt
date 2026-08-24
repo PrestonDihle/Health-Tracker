@@ -67,7 +67,8 @@ fun MealEntryDialog(
     onConfirm: (MealDraft) -> Unit,
     zoneId: ZoneId = ZoneId.systemDefault(),
     /** Supplied when correcting an existing meal; absent when logging a new one. */
-    onDelete: (() -> Unit)? = null,
+    /** Titles the dialog "Edit meal" rather than "Log meal"; deleting lives on the row. */
+    isEdit: Boolean = false,
 ) {
     val initialLocal = remember(initial.at, zoneId) { LocalDateTime.ofInstant(initial.at, zoneId) }
 
@@ -89,7 +90,7 @@ fun MealEntryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (onDelete == null) "Log meal" else "Edit meal") },
+        title = { Text(if (isEdit) "Edit meal" else "Log meal") },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -156,9 +157,6 @@ fun MealEntryDialog(
 
                 TimePicker(state = timeState, modifier = Modifier.fillMaxWidth())
 
-                if (onDelete != null) {
-                    TextButton(onClick = onDelete) { Text("Delete this meal") }
-                }
             }
         },
         confirmButton = {

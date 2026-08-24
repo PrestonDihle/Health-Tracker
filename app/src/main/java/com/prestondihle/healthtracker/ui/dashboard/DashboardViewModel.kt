@@ -184,6 +184,16 @@ data class DashboardUiState(
             return if (high > low) low.toFloat()..high.toFloat() else null
         }
 
+    /**
+     * The solid rule across the glucose chart, or null when cleared.
+     *
+     * Kept apart from [glucoseTarget]: the band says which region was wanted,
+     * this says which side of one number the trace is on, and a reader wants
+     * either or both.
+     */
+    val glucoseReference: Float?
+        get() = goals.glucoseReferenceMgDl?.toFloat()
+
     /** True only when the most recent grip measurement is today's. */
     val hasGripToday: Boolean
         get() = latestGrip?.date == today

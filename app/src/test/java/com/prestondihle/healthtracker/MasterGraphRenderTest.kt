@@ -175,9 +175,14 @@ class MasterGraphRenderTest {
 
         composeRule.onNodeWithText("Right now").assertIsDisplayed()
         composeRule.onNodeWithText("Food, blood and body").assertIsDisplayed()
-        composeRule.onNodeWithText("About the food curves").assertIsDisplayed()
-
         composeRule.onRoot().captureRoboImage("build/screenshots/master_graph.png")
+
+        // Below the fold once the axis picker was added to the chart card, so
+        // this one has to be scrolled to rather than asserted where it opens.
+        composeRule
+            .onNode(hasScrollAction())
+            .performScrollToNode(hasText("About the food curves"))
+        composeRule.onNodeWithText("About the food curves").assertIsDisplayed()
     }
 
     @Test

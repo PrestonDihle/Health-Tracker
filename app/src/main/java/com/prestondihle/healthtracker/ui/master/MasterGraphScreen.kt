@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -118,7 +121,13 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
 
         item { NowCard(state = state, onRefresh = viewModel::refresh) }
 
-        item { CombinedChartCard(state, viewModel::setSeriesVisible) }
+        item {
+            CombinedChartCard(
+                state = state,
+                onToggleSeries = viewModel::setSeriesVisible,
+                onToggleAxis = viewModel::toggleLabelledAxis,
+            )
+        }
 
         item { AbsorptionModelCard() }
 
@@ -244,93 +253,147 @@ private fun NowCard(state: MasterGraphUiState, onRefresh: () -> Unit) {
     }
 }
 
+/**
+ * The scale one unit is drawn against.
+ *
+ * One place, whether the unit ends up labelled down the side of the plot or
+ * quietly mapped to its own range with the numbers in the legend. Two copies of
+ * these bounds would let a series change shape as it moved between axes, which
+ * is the one thing switching axes must not do.
+ */
+private fun MasterGraphUiState.specFor(metric: AxisMetric): AxisSpec =
+    when (metric) {
+        AxisMetric.GLUCOSE ->
+            AxisSpec(
+                min = Glucose.PLOT_MIN,
+                max = Glucose.PLOT_MAX,
+                label = Glucose.UNIT,
+                band = glucoseTarget,
+            )
+        AxisMetric.MACROS -> AxisSpec(min = 0f, max = 40f, label = "g/h")
+        AxisMetric.HEART_RATE -> AxisSpec(min = 40f, max = 180f, label = "bpm")
+        AxisMetric.KETONES ->
+            AxisSpec(
+                min = Ketones.PLOT_MIN,
+                max = Ketones.PLOT_MAX,
+                label = Ketones.UNIT,
+                format = Ketones::format,
+            )
+        AxisMetric.STEPS -> AxisSpec(min = 0f, max = 1_200f, label = "steps/h")
+    }
+
+/**
+ * Where a series is drawn: against a labelled side, or against a scale of its
+ * own.
+ *
+ * Exactly one of the two is ever meaningful. [ChartSeries.scale] overrides
+ * [ChartSeries.axis], so a unit that has been given a gutter must pass null
+ * here, or it would go on being drawn to its private range while the numbers
+ * printed beside it described something else.
+ */
+private fun MasterGraphUiState.placementOf(metric: AxisMetric): Pair<ChartAxis, AxisSpec?> =
+    axisFor(metric)?.let { it to null } ?: (ChartAxis.LEFT to specFor(metric))
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CombinedChartCard(
     state: MasterGraphUiState,
     onToggleSeries: (MasterSeries, Boolean) -> Unit,
+    onToggleAxis: (AxisMetric) -> Unit,
 ) {
+    fun series(
+        key: MasterSeries,
+        label: String,
+        points: List<TimePoint>,
+        color: Color,
+        showPoints: Boolean = true,
+        dashed: Boolean = false,
+        breakOnGaps: Boolean = false,
+        kind: SeriesKind = SeriesKind.LINE,
+        barWidth: Duration? = null,
+    ): Pair<MasterSeries, ChartSeries> {
+        val (axis, scale) = state.placementOf(key.metric)
+        return key to
+            ChartSeries(
+                label = label,
+                points = points,
+                color = color,
+                axis = axis,
+                scale = scale,
+                showPoints = showPoints,
+                dashed = dashed,
+                breakOnGaps = breakOnGaps,
+                kind = kind,
+                barWidth = barWidth,
+            )
+    }
+
     val allSeries =
         mapOf(
-            MasterSeries.GLUCOSE to
-                ChartSeries(
-                    label = if (state.smoothGlucose) "Glucose (smoothed)" else "Glucose",
-                    points = state.glucoseCurve.map { TimePoint(it.first, it.second) },
-                    color = GlucoseSeries,
-                    axis = ChartAxis.LEFT,
-                    // A CGM writes every few minutes; dots would merge into a band.
-                    showPoints = state.glucose.size <= 24,
-                    breakOnGaps = true,
-                ),
-            MasterSeries.CARBS to
-                ChartSeries(
-                    label = "Carbs",
-                    points = state.absorptionCurve(Macro.CARB).asPoints(),
-                    color = CarbAbsorptionSeries,
-                    axis = ChartAxis.RIGHT,
-                    showPoints = false,
-                    // Dashed throughout: these three are a model of what the food
-                    // is doing, not a measurement of it.
-                    dashed = true,
-                ),
-            MasterSeries.PROTEIN to
-                ChartSeries(
-                    label = "Protein",
-                    points = state.absorptionCurve(Macro.PROTEIN).asPoints(),
-                    color = ProteinAbsorptionSeries,
-                    axis = ChartAxis.RIGHT,
-                    showPoints = false,
-                    dashed = true,
-                ),
-            MasterSeries.FAT to
-                ChartSeries(
-                    label = "Fat",
-                    points = state.absorptionCurve(Macro.FAT).asPoints(),
-                    color = FatAbsorptionSeries,
-                    axis = ChartAxis.RIGHT,
-                    showPoints = false,
-                    dashed = true,
-                ),
-            // Heart rate and ketones carry scales of their own: the two drawn axes
-            // are already spoken for, and bpm on a mg/dL axis -- or ppm on a g/h
-            // one -- would misstate both.
-            MasterSeries.HEART_RATE to
-                ChartSeries(
-                    label = "Heart rate",
-                    points = state.heartRate.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
-                    color = HeartRateSeries,
-                    showPoints = false,
-                    // A watch off the wrist leaves hours unrecorded, and joining
-                    // across them drew a smooth diagonal through the night that
-                    // looked exactly like a measurement.
-                    breakOnGaps = true,
-                    scale = AxisSpec(min = 40f, max = 180f, label = "bpm"),
-                ),
-            MasterSeries.KETONES to
-                ChartSeries(
-                    label = "Ketones",
-                    points = state.ketones.map { TimePoint(it.timestamp, it.ppm) },
-                    color = KetoneSeries,
-                    scale =
-                        AxisSpec(
-                            min = Ketones.PLOT_MIN,
-                            max = Ketones.PLOT_MAX,
-                            label = Ketones.UNIT,
-                            format = Ketones::format,
-                        ),
-                ),
+            series(
+                key = MasterSeries.GLUCOSE,
+                label = if (state.smoothGlucose) "Glucose (smoothed)" else "Glucose",
+                points = state.glucoseCurve.map { TimePoint(it.first, it.second) },
+                color = GlucoseSeries,
+                // A CGM writes every few minutes; dots would merge into a band.
+                showPoints = state.glucose.size <= 24,
+                breakOnGaps = true,
+            ),
+            // Dashed throughout: the three macro curves are a model of what the
+            // food is doing, not a measurement of it.
+            series(
+                key = MasterSeries.CARBS,
+                label = "Carbs",
+                points = state.absorptionCurve(Macro.CARB).asPoints(),
+                color = CarbAbsorptionSeries,
+                showPoints = false,
+                dashed = true,
+            ),
+            series(
+                key = MasterSeries.PROTEIN,
+                label = "Protein",
+                points = state.absorptionCurve(Macro.PROTEIN).asPoints(),
+                color = ProteinAbsorptionSeries,
+                showPoints = false,
+                dashed = true,
+            ),
+            series(
+                key = MasterSeries.FAT,
+                label = "Fat",
+                points = state.absorptionCurve(Macro.FAT).asPoints(),
+                color = FatAbsorptionSeries,
+                showPoints = false,
+                dashed = true,
+            ),
+            series(
+                key = MasterSeries.HEART_RATE,
+                label = "Heart rate",
+                points = state.heartRate.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
+                color = HeartRateSeries,
+                showPoints = false,
+                // A watch off the wrist leaves hours unrecorded, and joining
+                // across them drew a smooth diagonal through the night that
+                // looked exactly like a measurement.
+                breakOnGaps = true,
+            ),
+            series(
+                key = MasterSeries.KETONES,
+                label = "Ketones",
+                points = state.ketones.map { TimePoint(it.timestamp, it.ppm) },
+                color = KetoneSeries,
+            ),
             // Bars, not a line: a step count belongs to the hour it was
             // accumulated over, and joining the hours would claim a walking rate
             // at instants when nothing was counted.
-            MasterSeries.STEPS to
-                ChartSeries(
-                    label = "Steps",
-                    points = state.steps.map { TimePoint(it.timestamp, it.steps.toFloat()) },
-                    color = StepsSeries,
-                    kind = SeriesKind.BAR,
-                    barWidth = Duration.ofMinutes(StepBucket.BUCKET_MINUTES),
-                    showPoints = false,
-                    scale = AxisSpec(min = 0f, max = 1_200f, label = "steps/h"),
-                ),
+            series(
+                key = MasterSeries.STEPS,
+                label = "Steps",
+                points = state.steps.map { TimePoint(it.timestamp, it.steps.toFloat()) },
+                color = StepsSeries,
+                showPoints = false,
+                kind = SeriesKind.BAR,
+                barWidth = Duration.ofMinutes(StepBucket.BUCKET_MINUTES),
+            ),
         )
 
     MasterCard(title = "Food, blood and body") {
@@ -341,14 +404,11 @@ private fun CombinedChartCard(
             // Filtered rather than drawn-then-hidden, so a switched-off series
             // also stops stretching the axis it shares.
             series = allSeries.filterKeys(state::isVisible).values.toList(),
-            leftAxis =
-                AxisSpec(
-                    min = Glucose.PLOT_MIN,
-                    max = Glucose.PLOT_MAX,
-                    label = Glucose.UNIT,
-                    band = state.glucoseTarget,
-                ),
-            rightAxis = AxisSpec(min = 0f, max = 40f, label = "g/h"),
+            // Falls back rather than throwing: the toggle refuses to empty the list,
+            // but the field is public and a plot has to be drawn against
+            // something regardless of who built the state.
+            leftAxis = state.specFor(state.labelledAxes.firstOrNull() ?: AxisMetric.GLUCOSE),
+            rightAxis = state.labelledAxes.getOrNull(1)?.let { state.specFor(it) },
             // A rule at each meal, so a rise in any of the other lines can be
             // read against the moment the food went in. Subdued, because at full
             // weight these were read as a carbohydrate spike -- and went on being
@@ -366,8 +426,46 @@ private fun CombinedChartCard(
 
         HorizontalDivider()
 
+        AxisPicker(state = state, onToggle = onToggleAxis)
+
+        HorizontalDivider()
+
         SeriesToggles(state = state, onToggle = onToggleSeries)
     }
+}
+
+/**
+ * Which units get their numbers down the sides.
+ *
+ * Chips rather than switches, to keep them apart from the series toggles below:
+ * these do not decide what is drawn, only what is labelled. A line whose unit is
+ * unlabelled is still on the plot and still the right shape, with its range
+ * printed in the legend -- which is the sentence the caption has to get across,
+ * because otherwise unselecting a unit looks like it deleted the data.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AxisPicker(state: MasterGraphUiState, onToggle: (AxisMetric) -> Unit) {
+    Text(
+        "Axis units",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        AxisMetric.entries.forEach { metric ->
+            FilterChip(
+                selected = state.isLabelled(metric),
+                onClick = { onToggle(metric) },
+                label = { Text(metric.label) },
+            )
+        }
+    }
+    Text(
+        "Up to two at a time, left then right. The rest still plot to their own " +
+            "range, quoted in the legend.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**
@@ -470,6 +568,7 @@ private fun MealListCard(
 ) {
     var editing by remember { mutableStateOf<MealEntry?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf<MealEntry?>(null) }
 
     MasterCard(
         title = "Meals in this window",
@@ -537,6 +636,20 @@ private fun MealListCard(
                         if (placed) MaterialTheme.colorScheme.onSurfaceVariant
                         else MaterialTheme.colorScheme.error,
                 )
+                // A bin on the row itself. The editor can delete too, but it
+                // keeps that button below four steppers and a clock face, which
+                // on a phone is off the bottom of the dialog -- a delete nobody
+                // can find is not a delete.
+                IconButton(
+                    onClick = { confirmingDelete = meal },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "Delete meal, ${meal.macroSummary()}",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
 
@@ -563,13 +676,36 @@ private fun MealListCard(
                 onUpdate(meal, it.calories, it.proteinGrams, it.carbGrams, it.fatGrams, it.at)
                 editing = null
             },
-            onDelete = {
-                onDelete(meal)
-                editing = null
-            },
+            isEdit = true,
         )
     }
 
+
+    // Confirmed, unlike the caffeine bin beside it. A meal carries a whole
+    // absorption curve rather than one number, the bins sit in a list people
+    // scroll past, and for a synced meal this is one-way: the row is kept hidden
+    // precisely so the next sync cannot bring it back.
+    confirmingDelete?.let { meal ->
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = null },
+            title = { Text("Delete this meal?") },
+            text = { Text(meal.macroSummary()) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(meal)
+                        confirmingDelete = null
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+        )
+    }
     if (adding) {
         MealEntryDialog(
             initial = MealDraft(calories = 0, proteinGrams = 0, carbGrams = 0, fatGrams = 0, at = state.now),

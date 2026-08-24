@@ -217,7 +217,7 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 7, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 8, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -337,6 +337,10 @@ The same rule sorts out the other three chart primitives:
 - **Target bands** (`AxisSpec.band`) shade a range behind the data. A filled area answers "was it in
   range" at a glance where two threshold rules leave the reader working out which side of each the
   trace is on.
+  A single value gets `AxisSpec.threshold` instead, which answers "above or below" rather than "in
+  range". `thresholdDashed` keeps the two kinds of rule apart: dashed for a published clinical figure
+  (the blood pressure chart), solid for one the reader chose in Settings (the Today glucose chart).
+  Drawing both the same way quietly lends one the authority of the other.
 - **Smoothing** (`domain/GlucoseSmoothing.kt`) is a Gaussian-weighted moving average in *time*, not
   in sample index — index weighting would treat two fingersticks a week apart as neighbours and
   average them together. It never resamples or interpolates: one output per input reading at that
@@ -354,10 +358,22 @@ setting the chart's ceiling flattens every point that is. The legend runs the sa
 for a series carrying its own `AxisSpec.scale` the caption *is* its axis: quoting the configured
 range there would print a ceiling the plot stopped using the moment anything exceeded it.
 
+**Which two units get printed down the sides is a reading decision.** `AxisMetric` groups the master
+graph series by unit -- glucose, macros, heart rate, ketones, steps -- and `labelledAxes` holds the
+chosen pair in order, first left then right. Everything unchosen still plots, against its own
+`ChartSeries.scale`, with its range quoted in the legend. **A series takes a labelled axis or a scale
+of its own, never both**: `scale` overrides `axis`, so a unit that has been given a gutter must pass
+`scale = null`, or it goes on being drawn to its private range while the numbers printed beside it
+describe something else. Picking a third drops the oldest rather than refusing the tap; the last one
+cannot be removed, because the plot has to be drawn against something. One consequence worth knowing:
+the glucose target band rides on the glucose `AxisSpec`, so it is only shaded while glucose is one of
+the labelled pair.
+
 ## Testing
 
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
-`GlucoseSmoothingTest`, `MealDuplicatesTest` and `SeriesGapsTest` are the pure-JVM suites. Adherence covers the midnight-wrapping window,
+`GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest` and `AxisSelectionTest` are the
+pure-JVM suites. Adherence covers the midnight-wrapping window,
 extended fasts overriding the daily plan, no-eating days, and the future-time exclusion. Stats covers
 overlap de-duplication, midnight splits, streak rules and open sessions. Caffeine covers half-life
 decay, dose accumulation and curve shape. Absorption covers the gastric lag, per-macro peak ordering,

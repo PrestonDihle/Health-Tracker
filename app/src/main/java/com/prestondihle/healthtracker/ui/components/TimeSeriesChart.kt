@@ -109,6 +109,13 @@ data class AxisSpec(
     val format: (Float) -> String = { it.toInt().toString() },
     val threshold: Float? = null,
     /**
+     * Dashed marks a figure that came from outside -- a published clinical
+     * threshold. Solid marks one the reader chose. Keeping them apart matters
+     * because the two carry very different authority, and a rule drawn the same
+     * way in both cases quietly lends one the weight of the other.
+     */
+    val thresholdDashed: Boolean = true,
+    /**
      * A range shaded behind the data, for a target the series is read against.
      *
      * A band rather than two threshold lines because what is being asked is
@@ -514,8 +521,8 @@ private fun DrawScope.drawChart(
     }
 
     // Threshold lines, drawn under the data.
-    leftAxis.threshold?.let { drawThreshold(yFor(it, leftAxis), plotLeft, plotRight) }
-    rightAxis?.threshold?.let { drawThreshold(yFor(it, rightAxis), plotLeft, plotRight) }
+    leftAxis.threshold?.let { drawThreshold(yFor(it, leftAxis), plotLeft, plotRight, leftAxis.thresholdDashed) }
+    rightAxis?.threshold?.let { drawThreshold(yFor(it, rightAxis), plotLeft, plotRight, rightAxis.thresholdDashed) }
 
     // Bars before rules and lines. A column is a block of ink the width of a
     // whole hour; anything drawn under one is simply gone.
@@ -679,13 +686,13 @@ private fun DrawScope.drawChart(
     }
 }
 
-private fun DrawScope.drawThreshold(y: Float, left: Float, right: Float) {
+private fun DrawScope.drawThreshold(y: Float, left: Float, right: Float, dashed: Boolean) {
     drawLine(
         color = Color(0xFFA30000),
         start = androidx.compose.ui.geometry.Offset(left, y),
         end = androidx.compose.ui.geometry.Offset(right, y),
         strokeWidth = 1.5.dp.toPx(),
-        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f),
+        pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f) else null,
     )
 }
 

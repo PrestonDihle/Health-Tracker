@@ -304,9 +304,13 @@ class MigrationSchemaTest {
             raw.execSQL("DROP TABLE IF EXISTS `UserSettings`")
             settingsV5.forEach { raw.execSQL(it) }
 
+            // Both migrations that alter these tables, in order: UserGoals is
+            // added to twice, and replaying only the first leaves it a column
+            // short of what Room now builds.
             AppDatabase.migration5To6Statements
                 .filter { it.startsWith("ALTER TABLE") }
                 .forEach { raw.execSQL(it) }
+            AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -335,19 +339,24 @@ class MigrationSchemaTest {
                     "VALUES (1, 'IMPERIAL', 'MONDAY')"
             )
 
+            // Both migrations that alter these tables, in order: UserGoals is
+            // added to twice, and replaying only the first leaves it a column
+            // short of what Room now builds.
             AppDatabase.migration5To6Statements
                 .filter { it.startsWith("ALTER TABLE") }
                 .forEach { raw.execSQL(it) }
+            AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
 
             raw.query(
-                    "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl` " +
-                        "FROM `UserGoals`"
+                    "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
+                        "`glucoseReferenceMgDl` FROM `UserGoals`"
                 )
                 .use {
                     it.moveToNext()
                     assertEquals(12_000, it.getInt(0))
                     assertEquals(70, it.getInt(1))
                     assertEquals(140, it.getInt(2))
+                    assertEquals(100, it.getInt(3))
                 }
             raw.query("SELECT `smoothGlucose` FROM `UserSettings`").use {
                 it.moveToNext()
