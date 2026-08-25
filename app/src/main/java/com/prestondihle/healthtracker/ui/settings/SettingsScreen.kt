@@ -20,6 +20,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,6 +45,16 @@ import com.prestondihle.healthtracker.ui.components.Stepper
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+
+/**
+ * Where the bedtime caffeine limit starts once it is switched on.
+ *
+ * Roughly a third of a cup still circulating -- low enough to be a real
+ * constraint on an afternoon coffee, high enough not to fire on a single
+ * morning one. It is a starting point and not a recommendation; the stepper
+ * beside it is the actual answer.
+ */
+private const val DEFAULT_BEDTIME_LIMIT_MG = 25
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
@@ -413,6 +424,48 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 onDelete = viewModel::deleteWeightSubGoal,
             )
         }
+        item {
+            SettingsCard(title = "Caffeine last call") {
+                Text(
+                    "Warns when one more cup would leave you over this much " +
+                        "caffeine at 9 PM. The warning is about the next dose " +
+                        "rather than the one already drunk, because that is the " +
+                        "only one still worth a decision.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val limit = state.goals.caffeineBedtimeLimitMg
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = limit != null,
+                        onCheckedChange = { on ->
+                            viewModel.saveGoals(
+                                state.goals.copy(
+                                    // Off is null rather than zero: zero is a
+                                    // limit nothing can satisfy, and would warn
+                                    // every hour forever.
+                                    caffeineBedtimeLimitMg = if (on) DEFAULT_BEDTIME_LIMIT_MG else null
+                                )
+                            )
+                        },
+                    )
+                    Text("Warn me", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (limit != null) {
+                    IntStepper(
+                        label = "At 9 PM, keep under",
+                        value = limit,
+                        onValueChange = {
+                            viewModel.saveGoals(state.goals.copy(caffeineBedtimeLimitMg = it))
+                        },
+                        step = 5,
+                        range = 5..300,
+                        valueFormatter = { "$it mg" },
+                    )
+                }
+            }
+        }
+
         item {
             BackupCard(isExporting = state.isExporting, onExport = viewModel::exportBackup)
         }

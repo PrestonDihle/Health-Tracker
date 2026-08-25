@@ -81,6 +81,33 @@ object Caffeine {
      * directly would draw it as a straight ramp. A dose landing between two
      * samples still counts, because each sample sums the whole history.
      */
+    /**
+     * Whether one more ordinary dose, taken now, would still be over [limitMg] at
+     * [bedtime].
+     *
+     * This is the "last call" question, and it is deliberately about the *next*
+     * dose rather than the current level. Told after the fact that bedtime
+     * caffeine is now too high, there is nothing to be done about it -- the
+     * useful moment is the one before the cup that does it, which is what this
+     * finds. Answering it needs no new model: it is [levelAt] with one dose added
+     * at the front.
+     *
+     * False once the projection is already over, because at that point every
+     * remaining choice is equally too late and a warning would only be scolding.
+     */
+    fun lastCallReached(
+        doses: List<CaffeineDose>,
+        now: Instant,
+        bedtime: Instant,
+        limitMg: Int,
+        nextDoseMg: Int,
+    ): Boolean {
+        if (!bedtime.isAfter(now)) return false
+        val current = levelAt(doses, bedtime)
+        if (current > limitMg) return false
+        return levelAt(doses + CaffeineDose(now, nextDoseMg), bedtime) > limitMg
+    }
+
     fun curve(
         doses: List<CaffeineDose>,
         from: Instant,

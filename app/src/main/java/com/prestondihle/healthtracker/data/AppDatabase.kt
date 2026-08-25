@@ -36,7 +36,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Supplement::class,
         SupplementDose::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -330,6 +330,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The bedtime caffeine limit that drives the last-call notification.
+         *
+         * **Deliberately no SQLite `DEFAULT`**, which is the opposite of what
+         * `MIGRATION_5_6` and `MIGRATION_8_9` do. Those seeded a value because
+         * the column drove something already on screen and a NULL would have
+         * visibly changed an existing user's charts. This one drives a
+         * notification: a default would mean upgrading and then being
+         * interrupted by something never asked for. Arriving NULL is exactly
+         * right -- it means "say nothing", and the reader turns it on.
+         */
+        internal val migration11To12Statements =
+            listOf("ALTER TABLE `UserGoals` ADD COLUMN `caffeineBedtimeLimitMg` INTEGER")
+
+        private val MIGRATION_11_12 =
+            object : Migration(11, 12) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration11To12Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -354,6 +375,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_8_9,
                                 MIGRATION_9_10,
                                 MIGRATION_10_11,
+                                MIGRATION_11_12,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

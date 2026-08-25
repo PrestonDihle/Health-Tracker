@@ -36,25 +36,17 @@ import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.LineChart
 import com.prestondihle.healthtracker.ui.components.LineSeries
+import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.components.LineStyle
 import com.prestondihle.healthtracker.ui.components.MultiLineChart
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
-import com.prestondihle.healthtracker.ui.theme.CarbSeries
-import com.prestondihle.healthtracker.ui.theme.DiastolicSeries
-import com.prestondihle.healthtracker.ui.theme.EnergySeries
-import com.prestondihle.healthtracker.ui.theme.FatSeries
-import com.prestondihle.healthtracker.ui.theme.FocusSeries
-import com.prestondihle.healthtracker.ui.theme.GripDominantSeries
-import com.prestondihle.healthtracker.ui.theme.GripNonDominantSeries
-import com.prestondihle.healthtracker.ui.theme.ProteinSeries
-import com.prestondihle.healthtracker.ui.theme.SystolicSeries
-import com.prestondihle.healthtracker.ui.theme.VibeSeries
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val chartColors = LocalChartColors.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -120,13 +112,13 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                             LineSeries(
                                 label = "Dominant",
                                 points = state.gripSeries(dominant = true),
-                                color = GripDominantSeries,
+                                color = chartColors.gripDominant,
                                 style = LineStyle.SOLID,
                             ),
                             LineSeries(
                                 label = "Non-dominant",
                                 points = state.gripSeries(dominant = false),
-                                color = GripNonDominantSeries,
+                                color = chartColors.gripNonDominant,
                                 style = LineStyle.DASHED,
                             ),
                         ),
@@ -152,7 +144,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                                     state.bloodPressure.map {
                                         TimePoint(it.timestamp, it.systolic.toFloat())
                                     },
-                                color = SystolicSeries,
+                                color = chartColors.systolic,
                             ),
                             ChartSeries(
                                 label = "Diastolic",
@@ -160,7 +152,7 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                                     state.bloodPressure.map {
                                         TimePoint(it.timestamp, it.diastolic.toFloat())
                                     },
-                                color = DiastolicSeries,
+                                color = chartColors.diastolic,
                             ),
                         ),
                     // A rule per line. One alone left the diastolic trace with
@@ -215,15 +207,15 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
             TrendCard(title = "Macros", subtitle = "calories from protein, carbs and fat") {
                 StackedBarChart(
                     bars = state.macroBars,
-                    colors = listOf(ProteinSeries, CarbSeries, FatSeries),
+                    colors = listOf(chartColors.proteinStack, chartColors.carbStack, chartColors.fatStack),
                     goalLine = state.goals.dailyCalorieTarget?.toFloat(),
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     listOf(
-                            "Protein" to ProteinSeries,
-                            "Carbs" to CarbSeries,
-                            "Fat" to FatSeries,
+                            "Protein" to chartColors.proteinStack,
+                            "Carbs" to chartColors.carbStack,
+                            "Fat" to chartColors.fatStack,
                         )
                         .forEach { (label, color) ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -272,19 +264,19 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                             LineSeries(
                                 label = "Vibe",
                                 points = state.logSeries { it.vibe?.toFloat() },
-                                color = VibeSeries,
+                                color = chartColors.vibe,
                                 style = LineStyle.SOLID,
                             ),
                             LineSeries(
                                 label = "Energy",
                                 points = state.logSeries { it.energy?.toFloat() },
-                                color = EnergySeries,
+                                color = chartColors.energy,
                                 style = LineStyle.DASHED,
                             ),
                             LineSeries(
                                 label = "Focus",
                                 points = state.logSeries { it.focus?.toFloat() },
-                                color = FocusSeries,
+                                color = chartColors.focus,
                                 style = LineStyle.DOTTED,
                             ),
                         ),

@@ -5,6 +5,13 @@
       Health Connect read permissions. This app never writes to Health Connect,
       so no WRITE_* permissions are declared.
     -->
+    <!--
+      The app's first runtime permission. Asked for once, and a refusal has to
+      keep working: the last-call worker checks before posting rather than
+      assuming, so saying no simply means the warning never appears.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
@@ -93,6 +100,22 @@
           means the receiving app gets read access to that one file for that one
           share, rather than the provider being exported to everything.
         -->
+        <!--
+          The home-screen widget. Water, caffeine and the fast are the three
+          entries made while doing something else, and each of them otherwise
+          costs unlocking the phone and finding a card.
+        -->
+        <receiver
+            android:name=".widget.TrackerWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/tracker_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

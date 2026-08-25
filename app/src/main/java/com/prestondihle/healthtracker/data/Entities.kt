@@ -482,6 +482,18 @@ data class UserGoals(
      * against whether or not it is the right one for them.
      */
     val sleepMinutesGoal: Int? = 480,
+
+    /**
+     * Caffeine still in the body at bedtime that the reader is willing to accept,
+     * in milligrams, or null to say nothing about it.
+     *
+     * Null rather than a seeded figure, unlike almost every other goal here.
+     * The others describe something already being drawn, so a blank one would
+     * change a chart; this one drives a notification, and a default would mean
+     * an upgrading user is interrupted by something they never asked for. It
+     * starts silent and is switched on deliberately.
+     */
+    val caffeineBedtimeLimitMg: Int? = null,
 )
 
 @Entity

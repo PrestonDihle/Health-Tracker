@@ -80,9 +80,7 @@ import com.prestondihle.healthtracker.ui.components.LabeledSlider
 import com.prestondihle.healthtracker.ui.components.ScaleDescriptors
 import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.components.TimePoint
-import com.prestondihle.healthtracker.ui.theme.CaffeineSeries
-import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
-import com.prestondihle.healthtracker.ui.theme.KetoneSeries
+import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
 import java.time.Instant
 import java.time.LocalDate
@@ -890,6 +888,7 @@ private fun CaffeineCard(
     onUpdate: (CaffeineIntake, Int, Instant) -> Unit,
     onDelete: (CaffeineIntake) -> Unit,
 ) {
+    val chartColors = LocalChartColors.current
     var dialog by remember { mutableStateOf<CaffeineDialog?>(null) }
 
     DashboardCard(title = "Caffeine") {
@@ -931,7 +930,7 @@ private fun CaffeineCard(
                     ChartSeries(
                         label = "Caffeine",
                         points = state.caffeineCurve.map { TimePoint(it.first, it.second) },
-                        color = CaffeineSeries,
+                        color = chartColors.caffeine,
                         axis = ChartAxis.LEFT,
                         // The curve is a dense sampling of a continuous function,
                         // so dots would obscure the shape they are drawn from.
@@ -940,7 +939,7 @@ private fun CaffeineCard(
                     ChartSeries(
                         label = "Projected",
                         points = state.caffeineForecast.map { TimePoint(it.first, it.second) },
-                        color = CaffeineSeries,
+                        color = chartColors.caffeine,
                         axis = ChartAxis.LEFT,
                         showPoints = false,
                         // Dashed so a projection is never mistaken for a reading.
@@ -1054,6 +1053,8 @@ private fun MetabolicCard(
     onAddKetone: (Float) -> Unit,
     onAddGlucose: (Int) -> Unit,
 ) {
+    val chartColors = LocalChartColors.current
+
     DashboardCard(title = "Glucose and ketones") {
         // Zooming in is the point: a CGM trace over 24 hours flattens the swing
         // around a single meal into a wiggle, and 3 to 6 hours is where that
@@ -1077,7 +1078,7 @@ private fun MetabolicCard(
                     ChartSeries(
                         label = if (state.settings.smoothGlucose) "Glucose (smoothed)" else "Glucose",
                         points = state.glucoseCurve.map { TimePoint(it.first, it.second) },
-                        color = GlucoseSeries,
+                        color = chartColors.glucose,
                         axis = ChartAxis.LEFT,
                         // A CGM writes every few minutes; dots would merge into a
                         // band. A short window holds few enough to mark, though.
@@ -1089,7 +1090,7 @@ private fun MetabolicCard(
                     ChartSeries(
                         label = "Ketones",
                         points = state.ketones.map { TimePoint(it.timestamp, it.ppm) },
-                        color = KetoneSeries,
+                        color = chartColors.ketone,
                         axis = ChartAxis.RIGHT,
                     ),
                 ),

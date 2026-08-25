@@ -6,7 +6,8 @@ import com.prestondihle.healthtracker.ui.master.MAX_LABELLED_AXES
 import com.prestondihle.healthtracker.ui.master.MasterGraphUiState
 import com.prestondihle.healthtracker.ui.master.MasterSeries
 import com.prestondihle.healthtracker.ui.master.axisColorFor
-import com.prestondihle.healthtracker.ui.master.color
+import com.prestondihle.healthtracker.ui.master.colorIn
+import com.prestondihle.healthtracker.ui.theme.LightChartColors
 import com.prestondihle.healthtracker.ui.master.metric
 import com.prestondihle.healthtracker.ui.master.series
 import org.junit.Assert.assertEquals
@@ -74,8 +75,8 @@ class AxisSelectionTest {
     fun `an axis serving one line takes that line's colour`() {
         val uiState = MasterGraphUiState()
 
-        assertEquals(MasterSeries.GLUCOSE.color, uiState.axisColorFor(AxisMetric.GLUCOSE))
-        assertEquals(MasterSeries.CAFFEINE.color, uiState.axisColorFor(AxisMetric.CAFFEINE))
+        assertEquals(MasterSeries.GLUCOSE.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.GLUCOSE, LightChartColors))
+        assertEquals(MasterSeries.CAFFEINE.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.CAFFEINE, LightChartColors))
     }
 
     @Test
@@ -85,7 +86,7 @@ class AxisSelectionTest {
         // here, and the ordinary label grey is the honest answer.
         val uiState = MasterGraphUiState()
 
-        assertNull(uiState.axisColorFor(AxisMetric.MACROS))
+        assertNull(uiState.axisColorFor(AxisMetric.MACROS, LightChartColors))
     }
 
     @Test
@@ -96,7 +97,7 @@ class AxisSelectionTest {
                     MasterSeries.FAT
             )
 
-        assertEquals(MasterSeries.CARBS.color, uiState.axisColorFor(AxisMetric.MACROS))
+        assertEquals(MasterSeries.CARBS.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.MACROS, LightChartColors))
     }
 
     @Test
@@ -106,7 +107,7 @@ class AxisSelectionTest {
         val uiState =
             MasterGraphUiState(visibleSeries = MasterSeries.entries.toSet() - MasterSeries.GLUCOSE)
 
-        assertNull(uiState.axisColorFor(AxisMetric.GLUCOSE))
+        assertNull(uiState.axisColorFor(AxisMetric.GLUCOSE, LightChartColors))
     }
 
     @Test

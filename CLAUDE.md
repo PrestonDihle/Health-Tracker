@@ -177,6 +177,34 @@ prefers the manual entry on any day that has both. A sync must never overwrite a
 substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
 Grouping burn figures next to protein/carbs/fat is what originally made the dashboard read as intake.
 
+### Notifications and the widget
+
+`work/CaffeineLastCall.kt` warns when *one more* ordinary cup would leave the reader over their
+bedtime limit at 9 PM. **The question is about the next dose, not the current level**, and that is
+the whole feature: told after the fact that bedtime caffeine is too high there is nothing left to do
+about it. `Caffeine.lastCallReached` answers it with the existing decay model and one hypothetical
+dose added at the front — no new maths, and testable without a worker. It returns false once the
+projection is *already* over, because at that point every remaining choice is equally too late and a
+warning is only scolding.
+
+The check is **periodic rather than fired on a log**, because the interesting moment usually arrives
+with nothing being logged at all: caffeine already drunk keeps decaying and the afternoon crosses the
+threshold on its own. Hourly, idempotent, and uniquely named, so a deferred or coalesced run costs
+nothing.
+
+`POST_NOTIFICATIONS` is the app's **first runtime permission**. It is asked for once at launch and
+never insisted on: the worker checks before posting, so a refusal means the warning never appears and
+nothing else changes. The channel and the work are registered in `MainActivity`, *not*
+`Application.onCreate` — WorkManager initialises through an `androidx.startup` provider that does not
+run under Robolectric, and scheduling from the Application made every test that constructs it throw.
+
+`widget/TrackerWidget.kt` is a Glance widget for water, caffeine and the fast: the three entries made
+while doing something else, each of which otherwise costs unlocking the phone and finding a card. The
+fast button reads the goal from the plan exactly as the Today card does — a widget that started every
+fast at a fixed length would quietly score the week's adherence against the wrong target. Each action
+calls `update` explicitly rather than trusting a flow, because a widget is not composed while the
+home screen is idle and nothing is collecting.
+
 ### Backup
 
 `data/CsvBackup.kt` writes every table to a zip of CSVs, handed to the share sheet through a
@@ -305,7 +333,7 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 11, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 12, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -323,6 +351,14 @@ pre-filled. `MIGRATION_8_9` is the case where this matters most: the glucose plo
 blood pressure rules were **hard-coded before they were settings**, so a column arriving NULL would
 read as "no line" and visibly change an existing user's charts — which is the one thing turning a
 constant into a setting must not do. Its defaults are exactly the figures those charts were fixed at.
+
+`MIGRATION_11_12` adds `UserGoals.caffeineBedtimeLimitMg` and is the one added column here that
+**deliberately carries no SQLite default**, the opposite of `MIGRATION_5_6` and `MIGRATION_8_9`.
+Those seeded values because the column drove something already on screen and a NULL would visibly
+change an existing user's charts. This one drives a *notification*: a default would mean upgrading
+and then being interrupted by something never asked for. NULL means "say nothing", and the reader
+turns it on. It joins the UserGoals replay in `MigrationSchemaTest` rather than taking a test of its
+own, since that table is now altered four separate times and only the full replay catches a gap.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
@@ -357,10 +393,29 @@ the top fifth of a 200 ceiling is never reached and spending it flattens the 30 
 meal into a wiggle. Both charts still widen an axis to fit an outlier, so a 210 reading plots; it is
 simply not budgeted for.
 
-The theme is light-only and dynamic color is deliberately absent — leaving it on would let Android
-12+ derive the palette from the user's wallpaper and discard the brand colors entirely. Palette:
-Baltic Blue `#2F6690` (primary), Olive Bark `#625834` (secondary), Alabaster Grey `#D9DCD6`
-(background), Yale Blue `#16425B`, Inferno `#A30000` (error).
+The theme follows the system light/dark setting, with **no in-app override** — a per-app switch is a
+setting to maintain and a state to get out of step with the phone. Dynamic color is deliberately
+absent in both: leaving it on would let Android 12+ derive the palette from the user's wallpaper and
+discard the brand colors entirely. Palette: Baltic Blue `#2F6690` (primary), Olive Bark `#625834`
+(secondary), Alabaster Grey `#D9DCD6` (background), Yale Blue `#16425B`, Inferno `#A30000` (error).
+
+**The dark scheme is not the light one inverted.** The brand's own tones *are* the dark ones — Yale
+Blue and Olive Bark exist to be read on alabaster — so reusing them as foreground colours puts
+near-black on near-black. The primary lifts to a tint bright enough to carry dark text, and cards
+stay *above* the background, which on a dark ground means lighter rather than darker.
+
+**Chart series colours had to stop being top-level constants**, which is the part of this that was
+not a drive-by. A series colour depends on what it is drawn *on*, so `ui/theme/ChartColors.kt` holds
+the whole set twice and the theme provides one through `LocalChartColors`. Each dark value keeps its
+hue and gains lightness, so a line is recognisably itself between themes and every separation the
+light set was chosen for survives — caffeine still occupies the stretch of the wheel nothing else
+does, the macro stack's two blues are still kept apart by the olive between them.
+
+The set is **passed explicitly** rather than read at the point of use, because what needs a colour is
+often not a composable: `MasterSeries.colorIn(colors)` is an extension on an enum and the plot's
+drawing happens in a `DrawScope`. That is also why the reference-rule colour is now a parameter of
+`drawChart` instead of the hardcoded `#A30000` it was — that value on a near-black surface is a rule
+nobody can see.
 
 `domain/FastingStats.kt` aggregates logged sessions for the Fasting screen — per-day segments for the
 timeline, plus totals, longest, average and streaks. It works off `Interval` set algebra rather than
@@ -565,7 +620,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest` and `PanWindowTest`
-and `CsvTest` are the pure-JVM suites. `CsvBackupTest` and `SupplementsTest` are Robolectric
+`CsvTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest` and `SupplementsTest` are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
 thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,

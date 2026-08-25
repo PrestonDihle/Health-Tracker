@@ -43,6 +43,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -383,6 +384,7 @@ fun DualAxisTimeChart(
 ) {
     val textMeasurer = rememberTextMeasurer()
     val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val ruleColor = LocalChartColors.current.threshold
     val axisTextColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // Clipped to the window once, here, rather than again per use. Every axis is
@@ -411,12 +413,9 @@ fun DualAxisTimeChart(
     val currentHasRightAxis by rememberUpdatedState(rightAxis != null)
     val currentOnPan by rememberUpdatedState(onPan)
 
-    val spokenDescription =
-        listOfNotNull(
-                contentDescription,
-                spokenSummary(drawn, windowStart, windowEnd, leftAxis, rightAxis, zoneId),
-            )
-            .joinToString(" ")
+    // Captured under another name so the semantics block below can set its own
+    // `contentDescription` without the parameter shadowing it.
+    val plotName = contentDescription
 
     Column(modifier = modifier) {
         Box(
@@ -471,7 +470,28 @@ fun DualAxisTimeChart(
                     // the summary below is derived from the series and is the
                     // part that carries the data, which is the whole of what a
                     // Canvas otherwise fails to say.
-                    .semantics { this.contentDescription = spokenDescription }
+                    // Built inside the block rather than in the composable body.
+                    // The summary walks every point of every series, and computed
+                    // eagerly it ran on each composition and produced a new
+                    // String each time -- which also invalidated the semantics
+                    // modifier on every frame, for a description nothing was
+                    // reading. In here it is paid for when the semantics tree is
+                    // actually built.
+                    .semantics {
+                        this.contentDescription =
+                            listOfNotNull(
+                                    plotName,
+                                    spokenSummary(
+                                        drawn,
+                                        windowStart,
+                                        windowEnd,
+                                        leftAxis,
+                                        rightAxis,
+                                        zoneId,
+                                    ),
+                                )
+                                .joinToString(" ")
+                    }
                     .then(
                         if (onPan == null) Modifier
                         else
@@ -516,6 +536,7 @@ fun DualAxisTimeChart(
                         markers = markers,
                         verticalGridlines = verticalGridlines,
                         inspected = inspected,
+                        ruleColor = ruleColor,
                     )
                 }
             }
@@ -931,6 +952,14 @@ private fun DrawScope.drawChart(
     markers: List<ChartMarker> = emptyList(),
     verticalGridlines: Boolean = false,
     inspected: Instant? = null,
+    /**
+     * Threshold and reference rules.
+     *
+     * Passed in rather than the constant it used to be: `#A30000` on a near-black
+     * surface is all but invisible, and a reference line nobody can see is the
+     * same as no reference line.
+     */
+    ruleColor: Color,
 ) {
     val leftGutter = LEFT_GUTTER.toPx()
     val rightGutter =
@@ -1088,8 +1117,12 @@ private fun DrawScope.drawChart(
     }
 
     // Reference rules, drawn under the data.
-    leftAxis.rules.forEach { drawRule(yFor(it.value, leftAxis), plotLeft, plotRight, it.dashed) }
-    rightAxis?.rules?.forEach { drawRule(yFor(it.value, rightAxis), plotLeft, plotRight, it.dashed) }
+    leftAxis.rules.forEach {
+        drawRule(yFor(it.value, leftAxis), plotLeft, plotRight, it.dashed, ruleColor)
+    }
+    rightAxis?.rules?.forEach {
+        drawRule(yFor(it.value, rightAxis), plotLeft, plotRight, it.dashed, ruleColor)
+    }
 
     // Bars before rules and lines. A column is a block of ink the width of a
     // whole hour; anything drawn under one is simply gone.
@@ -1275,9 +1308,15 @@ private fun DrawScope.drawChart(
     }
 }
 
-private fun DrawScope.drawRule(y: Float, left: Float, right: Float, dashed: Boolean) {
+private fun DrawScope.drawRule(
+    y: Float,
+    left: Float,
+    right: Float,
+    dashed: Boolean,
+    color: Color,
+) {
     drawLine(
-        color = Color(0xFFA30000),
+        color = color,
         start = androidx.compose.ui.geometry.Offset(left, y),
         end = androidx.compose.ui.geometry.Offset(right, y),
         strokeWidth = 1.5.dp.toPx(),

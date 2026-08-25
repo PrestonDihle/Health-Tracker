@@ -60,14 +60,8 @@ import com.prestondihle.healthtracker.ui.components.MealDraft
 import com.prestondihle.healthtracker.ui.components.MealEntryDialog
 import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
-import com.prestondihle.healthtracker.ui.theme.CaffeineSeries
-import com.prestondihle.healthtracker.ui.theme.CarbAbsorptionSeries
-import com.prestondihle.healthtracker.ui.theme.FatAbsorptionSeries
-import com.prestondihle.healthtracker.ui.theme.GlucoseSeries
-import com.prestondihle.healthtracker.ui.theme.HeartRateSeries
-import com.prestondihle.healthtracker.ui.theme.KetoneSeries
-import com.prestondihle.healthtracker.ui.theme.ProteinAbsorptionSeries
-import com.prestondihle.healthtracker.ui.theme.StepsSeries
+import com.prestondihle.healthtracker.ui.theme.ChartColors
+import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -277,8 +271,8 @@ internal val AxisMetric.series: List<MasterSeries>
  * protein and fat curves are read against some other axis. Switching two of the
  * three off resolves it, and the axis takes the survivor's colour.
  */
-internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric): Color? =
-    metric.series.filter(::isVisible).singleOrNull()?.color
+internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric, colors: ChartColors): Color? =
+    metric.series.filter(::isVisible).singleOrNull()?.colorIn(colors)
 
 /**
  * The scale one unit is drawn against.
@@ -288,7 +282,7 @@ internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric): Color? =
  * these bounds would let a series change shape as it moved between axes, which
  * is the one thing switching axes must not do.
  */
-private fun MasterGraphUiState.specFor(metric: AxisMetric): AxisSpec =
+private fun MasterGraphUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisSpec =
     when (metric) {
         AxisMetric.GLUCOSE ->
             AxisSpec(
@@ -299,28 +293,28 @@ private fun MasterGraphUiState.specFor(metric: AxisMetric): AxisSpec =
                 // Solid: the reader put this one wherever they wanted it. The
                 // same rule the Today chart draws, so the two agree.
                 rules = listOfNotNull(glucoseReference?.let { AxisRule(it, dashed = false) }),
-                color = axisColorFor(metric),
+                color = axisColorFor(metric, colors),
             )
         AxisMetric.MACROS ->
-            AxisSpec(min = 0f, max = 40f, label = "g/h", color = axisColorFor(metric))
+            AxisSpec(min = 0f, max = 40f, label = "g/h", color = axisColorFor(metric, colors))
         AxisMetric.HEART_RATE ->
-            AxisSpec(min = 40f, max = 180f, label = "bpm", color = axisColorFor(metric))
+            AxisSpec(min = 40f, max = 180f, label = "bpm", color = axisColorFor(metric, colors))
         AxisMetric.KETONES ->
             AxisSpec(
                 min = Ketones.PLOT_MIN,
                 max = Ketones.PLOT_MAX,
                 label = Ketones.UNIT,
                 format = Ketones::format,
-                color = axisColorFor(metric),
+                color = axisColorFor(metric, colors),
             )
         AxisMetric.STEPS ->
-            AxisSpec(min = 0f, max = 1_200f, label = "steps/h", color = axisColorFor(metric))
+            AxisSpec(min = 0f, max = 1_200f, label = "steps/h", color = axisColorFor(metric, colors))
         // 200 mg is around two strong coffees still in the body at once, which
         // is where the dashboard's caffeine chart tops out; both plot the same
         // quantity and a reader moving between them should not have to re-learn
         // the height of a line.
         AxisMetric.CAFFEINE ->
-            AxisSpec(min = 0f, max = 200f, label = "mg", color = axisColorFor(metric))
+            AxisSpec(min = 0f, max = 200f, label = "mg", color = axisColorFor(metric, colors))
     }
 
 /**
@@ -332,8 +326,11 @@ private fun MasterGraphUiState.specFor(metric: AxisMetric): AxisSpec =
  * here, or it would go on being drawn to its private range while the numbers
  * printed beside it described something else.
  */
-private fun MasterGraphUiState.placementOf(metric: AxisMetric): Pair<ChartAxis, AxisSpec?> =
-    axisFor(metric)?.let { it to null } ?: (ChartAxis.LEFT to specFor(metric))
+private fun MasterGraphUiState.placementOf(
+    metric: AxisMetric,
+    colors: ChartColors,
+): Pair<ChartAxis, AxisSpec?> =
+    axisFor(metric)?.let { it to null } ?: (ChartAxis.LEFT to specFor(metric, colors))
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -344,6 +341,8 @@ private fun CombinedChartCard(
     onPan: (Duration) -> Unit,
     onBackToNow: () -> Unit,
 ) {
+    val chartColors = LocalChartColors.current
+
     fun series(
         key: MasterSeries,
         label: String,
@@ -355,7 +354,7 @@ private fun CombinedChartCard(
         kind: SeriesKind = SeriesKind.LINE,
         barWidth: Duration? = null,
     ): Pair<MasterSeries, ChartSeries> {
-        val (axis, scale) = state.placementOf(key.metric)
+        val (axis, scale) = state.placementOf(key.metric, chartColors)
         return key to
             ChartSeries(
                 label = label,
@@ -377,7 +376,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.GLUCOSE,
                 label = if (state.smoothGlucose) "Glucose (smoothed)" else "Glucose",
                 points = state.glucoseCurve.map { TimePoint(it.first, it.second) },
-                color = GlucoseSeries,
+                color = chartColors.glucose,
                 // A CGM writes every few minutes; dots would merge into a band.
                 showPoints = state.glucose.size <= 24,
                 breakOnGaps = true,
@@ -388,7 +387,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.CARBS,
                 label = "Carbs",
                 points = state.absorptionCurve(Macro.CARB).asPoints(),
-                color = CarbAbsorptionSeries,
+                color = chartColors.carbAbsorption,
                 showPoints = false,
                 dashed = true,
             ),
@@ -396,7 +395,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.PROTEIN,
                 label = "Protein",
                 points = state.absorptionCurve(Macro.PROTEIN).asPoints(),
-                color = ProteinAbsorptionSeries,
+                color = chartColors.proteinAbsorption,
                 showPoints = false,
                 dashed = true,
             ),
@@ -404,7 +403,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.FAT,
                 label = "Fat",
                 points = state.absorptionCurve(Macro.FAT).asPoints(),
-                color = FatAbsorptionSeries,
+                color = chartColors.fatAbsorption,
                 showPoints = false,
                 dashed = true,
             ),
@@ -412,7 +411,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.HEART_RATE,
                 label = "Heart rate",
                 points = state.heartRate.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
-                color = HeartRateSeries,
+                color = chartColors.heartRate,
                 showPoints = false,
                 // A watch off the wrist leaves hours unrecorded, and joining
                 // across them drew a smooth diagonal through the night that
@@ -423,7 +422,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.KETONES,
                 label = "Ketones",
                 points = state.ketones.map { TimePoint(it.timestamp, it.ppm) },
-                color = KetoneSeries,
+                color = chartColors.ketone,
             ),
             // Bars, not a line: a step count belongs to the hour it was
             // accumulated over, and joining the hours would claim a walking rate
@@ -432,7 +431,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.STEPS,
                 label = "Steps",
                 points = state.steps.map { TimePoint(it.timestamp, it.steps.toFloat()) },
-                color = StepsSeries,
+                color = chartColors.steps,
                 showPoints = false,
                 kind = SeriesKind.BAR,
                 barWidth = Duration.ofMinutes(StepBucket.BUCKET_MINUTES),
@@ -444,7 +443,7 @@ private fun CombinedChartCard(
                 key = MasterSeries.CAFFEINE,
                 label = "Caffeine",
                 points = state.caffeineCurve.asPoints(),
-                color = CaffeineSeries,
+                color = chartColors.caffeine,
                 showPoints = false,
                 dashed = true,
             ),
@@ -500,8 +499,8 @@ private fun CombinedChartCard(
             // Falls back rather than throwing: the toggle refuses to empty the list,
             // but the field is public and a plot has to be drawn against
             // something regardless of who built the state.
-            leftAxis = state.specFor(state.labelledAxes.firstOrNull() ?: AxisMetric.GLUCOSE),
-            rightAxis = state.labelledAxes.getOrNull(1)?.let { state.specFor(it) },
+            leftAxis = state.specFor(state.labelledAxes.firstOrNull() ?: AxisMetric.GLUCOSE, chartColors),
+            rightAxis = state.labelledAxes.getOrNull(1)?.let { state.specFor(it, chartColors) },
             // A rule at each meal, so a rise in any of the other lines can be
             // read against the moment the food went in. Subdued, because at full
             // weight these were read as a carbohydrate spike -- and went on being
@@ -596,6 +595,8 @@ private fun SeriesToggles(
     state: MasterGraphUiState,
     onToggle: (MasterSeries, Boolean) -> Unit,
 ) {
+    val chartColors = LocalChartColors.current
+
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -610,8 +611,8 @@ private fun SeriesToggles(
                     onCheckedChange = { onToggle(series, it) },
                     colors =
                         SwitchDefaults.colors(
-                            checkedThumbColor = series.color,
-                            checkedTrackColor = series.color.copy(alpha = 0.4f),
+                            checkedThumbColor = series.colorIn(chartColors),
+                            checkedTrackColor = series.colorIn(chartColors).copy(alpha = 0.4f),
                         ),
                     modifier = Modifier.scale(0.75f),
                 )
@@ -625,19 +626,26 @@ private fun SeriesToggles(
     }
 }
 
-/** The colour this series is drawn in — on the plot, in the key, and on its axis. */
-internal val MasterSeries.color: Color
-    get() =
-        when (this) {
-            MasterSeries.GLUCOSE -> GlucoseSeries
-            MasterSeries.CARBS -> CarbAbsorptionSeries
-            MasterSeries.PROTEIN -> ProteinAbsorptionSeries
-            MasterSeries.FAT -> FatAbsorptionSeries
-            MasterSeries.HEART_RATE -> HeartRateSeries
-            MasterSeries.KETONES -> KetoneSeries
-            MasterSeries.STEPS -> StepsSeries
-            MasterSeries.CAFFEINE -> CaffeineSeries
-        }
+/**
+ * The colour this series is drawn in — on the plot, in the key, on its switch
+ * and in the axis gutter.
+ *
+ * Takes the palette rather than reading one, because this is an extension on an
+ * enum and not a composable: the caller is the one standing inside a theme. Four
+ * uses, one source, so a line cannot be one colour on the plot and another on
+ * the control that turns it off.
+ */
+internal fun MasterSeries.colorIn(colors: ChartColors): Color =
+    when (this) {
+        MasterSeries.GLUCOSE -> colors.glucose
+        MasterSeries.CARBS -> colors.carbAbsorption
+        MasterSeries.PROTEIN -> colors.proteinAbsorption
+        MasterSeries.FAT -> colors.fatAbsorption
+        MasterSeries.HEART_RATE -> colors.heartRate
+        MasterSeries.KETONES -> colors.ketone
+        MasterSeries.STEPS -> colors.steps
+        MasterSeries.CAFFEINE -> colors.caffeine
+    }
 
 /** Where the absorption curves come from, since they are the one modelled thing here. */
 @Composable

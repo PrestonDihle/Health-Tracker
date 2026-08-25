@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A status bar icon has to be a flat white silhouette on transparency: Android
+  tints it and discards every colour in it, so anything with detail or fill
+  arrives as a white blob. This is the cup outline alone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,19h16v2H4zM18,3H6v9c0,2.21 1.79,4 4,4h4c2.21,0 4,-1.79 4,-4v-2h2c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2zM18,8h2V5h-2z" />
+</vector>

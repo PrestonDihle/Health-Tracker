@@ -298,6 +298,38 @@ asks "was this measured"; going back to the source asks "is it worth a query",
 and a reader taking three fingersticks a day has hours of genuine emptiness that
 no re-read will ever fill.
 
+## Dark mode
+
+Follows the system setting, with no in-app switch — nobody wants this app light
+while everything else is dark. The dark scheme is not the light one inverted:
+the brand's own tones *are* dark ones, so they lift rather than flip, and cards
+stay above the background, which on a dark ground means lighter.
+
+Every chart line has a dark variant that keeps its hue and gains lightness, so a
+line is recognisably itself in either theme and the separations the palette was
+built for survive — caffeine still sits where nothing else does, the two blues
+of the macro stack are still kept apart by the olive between them.
+
+## Caffeine last call
+
+Set a bedtime limit in Settings and the app warns when **one more cup** would
+leave you over it at 9 PM. The warning is about the next dose rather than the one
+already drunk, because that is the only one still worth a decision — told after
+the fact, there is nothing to be done.
+
+It checks hourly rather than when you log something, since the moment usually
+arrives with nothing logged at all: what is already in you keeps decaying and the
+afternoon crosses the line on its own. Off until you switch it on, and a refused
+notification permission simply means it never appears.
+
+## Widget
+
+Water, caffeine and the fast, on the home screen. Those are the three entries
+made while doing something else, and each otherwise costs unlocking the phone
+and finding a card — which is why they go unlogged, and an unlogged glass is
+worse than a roughly-logged one because the chart then says zero. The fast
+button takes its goal from the plan, exactly as the Today card does.
+
 ## Backup
 
 Everything the app knows is one SQLite file in one app's private storage. An

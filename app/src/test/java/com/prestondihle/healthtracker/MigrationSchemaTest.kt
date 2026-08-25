@@ -353,6 +353,12 @@ class MigrationSchemaTest {
                 .forEach { raw.execSQL(it) }
             AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration8To9Statements.forEach { raw.execSQL(it) }
+            // The fourth: the bedtime caffeine limit. Unlike the three above it
+            // carries no SQLite default, which is deliberate -- it drives a
+            // notification, and a default would interrupt an upgrading user with
+            // something they never asked for. NULL is what keeps it silent until
+            // it is switched on, and that is part of what this pins.
+            AppDatabase.migration11To12Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))

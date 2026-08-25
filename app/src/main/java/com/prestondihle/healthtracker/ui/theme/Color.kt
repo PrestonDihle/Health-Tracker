@@ -60,8 +60,43 @@ val SurfaceBright = Color(0xFFF7F9F4)
 val BalticTint = Color(0xFFC5D8E6)
 
 // ---------------------------------------------------------------------------
+// Dark neutrals.
+//
+// Not the light ones inverted. Cards still sit *above* the background, so on a
+// dark surface that means lighter rather than darker -- the same relationship,
+// read the other way up. The background is a desaturated blue-black rather than
+// a true black, which keeps the brand's cool cast and stops the elevation steps
+// between surfaces from banding.
+// ---------------------------------------------------------------------------
+
+val BackgroundDark = Color(0xFF12161A)
+val SurfaceDarkTone = Color(0xFF1A1F24)
+val SurfaceVariantDark = Color(0xFF2A3138)
+val OutlineDark = Color(0xFF5A646D)
+val OnSurfaceDark = Color(0xFFE3E8EC)
+val OnSurfaceVariantDark = Color(0xFFB4BDC5)
+
+val SurfaceContainerLowestDark = Color(0xFF0D1114)
+val SurfaceContainerLowDark = Color(0xFF161B20)
+val SurfaceContainerDark = Color(0xFF1A1F24)
+val SurfaceContainerHighDark = Color(0xFF242A31)
+val SurfaceContainerHighestDark = Color(0xFF2E353D)
+val SurfaceDimDark = Color(0xFF0D1114)
+val SurfaceBrightDark = Color(0xFF343C44)
+
+/** Light enough to carry dark text, for a filled button on a dark surface. */
+val BalticLight = Color(0xFF9FC6DF)
+
+/** The tonal fill's dark counterpart: a shade *of* the primary, not a grey. */
+val BalticTintDark = Color(0xFF2C4A5E)
+
+// ---------------------------------------------------------------------------
 // Chart series colors. Kept here so the dashboard and trends screens cannot
 // drift apart on what "glucose" or "ketones" look like.
+//
+// These are the *light* values. A series colour depends on what it is drawn on,
+// so the pair of sets lives in `ChartColors` and the theme picks one; these
+// remain the source for the light half of that pair.
 // ---------------------------------------------------------------------------
 
 val GlucoseSeries = BalticBlue
