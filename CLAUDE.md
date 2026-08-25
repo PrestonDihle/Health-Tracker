@@ -21,14 +21,40 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 The APK lands at `app\build\outputs\apk\debug\app-debug.apk`. Test names are backticked and contain
 spaces, so the `--tests` filter must be quoted as shown.
 
-Deploying to a connected device (`adb` is at `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`):
+Deploying to the author's phone — a Galaxy S25, serial `RZCY520GH8F` — where `adb` is at
+`%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`. `-r` keeps the data, which matters: that phone
+holds the only copy of it.
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Then launch `com.prestondihle.healthtracker/.MainActivity`. `adb shell screencap` plus `adb pull`
-is the way to see a UI change against real data.
+Then launch `com.prestondihle.healthtracker/.MainActivity`. `adb exec-out screencap -p > file.png`
+is the way to see a UI change against real data, and there is no substitute for it — the last four
+rounds of work each shipped a bug that every test passed and the phone caught in one screenshot.
+
+**Back up the database before installing any build that bumps the schema.** The author's phone is the
+only copy of this data. `HealthTracker-db-backup/` holds one directory per bump, named
+`<yyyymmdd-hhmmss>-pre-v<n>`, and the practice predates these sessions:
+
+```bash
+adb exec-out run-as com.prestondihle.healthtracker cat databases/tracker_database > tracker_database
+```
+
+The `-wal` and `-shm` files go with it; a backup of the main file alone can be missing the most
+recent writes. There is no `sqlite3` on the device, so reading the data back means pulling the file
+or using the app's own CSV export.
+
+Driving the UI over adb has three traps, all of which cost an hour between them:
+
+- **A tap sent before the screen has settled lands on whatever was there before.** Reinstalling
+  resets navigation to Today, and a `LazyColumn` scrolls to the top when it recomposes. Put the tap
+  in its own call after the scroll, and screenshot to confirm the target's position first.
+- **Samsung's Freecess freezes the app when it loses focus**, and a frozen app silently ignores
+  input. If a tap appears to do nothing, check `logcat` for `freeze com.prestondihle.healthtracker`
+  and bring the activity back to the front.
+- **A picture-in-picture window swallows taps** in the bottom-right corner, which is where the
+  Settings tab is. Drag it away rather than tapping through it.
 
 `assembleRelease` is not usable out of the box — it reads `KEYSTORE_PATH`, `STORE_PASSWORD` and
 `KEY_PASSWORD` from the environment and needs a real upload key. No signing material is in the repo.
@@ -37,6 +63,11 @@ is the way to see a UI change against real data.
 
 Compose UI → ViewModel → `TrackerRepository` → (`TrackerDao` + `HealthDataSource`). One Gradle
 module, `:app`.
+
+Two packages sit outside that chain and reach the repository directly, because neither has a screen
+to hang a ViewModel off: `work/` is the hourly caffeine check, and `widget/` is the Glance home-screen
+widget. Both pull the repository off `TrackerApp.container` themselves. A ViewModel there would be a
+ViewModel with no lifecycle to be scoped to.
 
 **Manual DI, no framework.** `TrackerApp` holds a `DefaultAppContainer`, which lazily builds the
 Room database, the `HealthConnectDataSource`, and the single `TrackerRepository`. `MainActivity`
@@ -691,6 +722,18 @@ has to be asserted on a screen that does not tick, which is why the glucose smoo
 are covered in `MasterGraphRenderTest` even though they also appear on the dashboard. The drawing
 code is shared, so covering it once covers both.
 
+**`MasterGraphRenderTest` times out under load, and it is not a real failure.** Compose's idling
+strategy gives up after 60 seconds with `AppNotIdleException` and a message suggesting an infinite
+composition loop. On a busy machine this suite has taken anything from 40 seconds to four minutes for
+identical code, and the timeout has hit a *different* test each time while the class passed in
+isolation immediately after. **An infinite loop fails the same test every run** — that is the
+distinction worth checking before going looking for one. Re-run the class alone before believing it.
+
+**A click on an off-screen node is clamped into view and lands on nothing, silently.** It does not
+throw. Eight series switches wrap onto three rows and the chart card no longer fits the screen, so
+the suite that switches every series off was leaving two of them drawn and asserting nothing about
+it. `performScrollTo()` before each `performClick()` is what makes it deterministic.
+
 **Waiting on `waitForIdle` alone is not enough for anything a query drives.** Both render suites
 select a window by clicking its chip and then `waitUntil` that chip comes up `isSelected` — without
 it the assertions run against the *previous* range and a capture silently records the old window
@@ -714,3 +757,25 @@ interpreter error on macOS and Linux. Don't let an editor normalise those.
 
 Comments in this codebase explain *why* a non-obvious choice was made, not what the code does. Match
 that when adding code — a comment restating the line above it is out of place here.
+
+**`master-graph` is a fast-forward mirror of `main`.** After pushing `main`, bring it along:
+
+```bash
+git fetch . main:master-graph && git push origin master-graph
+```
+
+It carries no work of its own and is never merged into. Forgetting it leaves the two remotes silently
+disagreeing, which is invisible until something reads the wrong one.
+
+Commit messages are **long-form prose explaining why**, in the shape the existing history uses:
+wrapped near 72 columns, several paragraphs, each one naming a decision and the failure it avoids
+rather than the files it touched. They end with the test count and
+
+```
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+```
+
+`CLAUDE.md` and `README.md` are **part of a behaviour change, not a follow-up to one** — a commit
+that changes what the app does and leaves the docs describing the old behaviour is an incomplete
+commit. That includes deleting claims that have stopped being true, which is the half most easily
+missed: this file said the theme was light-only for one commit after it stopped being.

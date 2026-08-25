@@ -431,9 +431,10 @@ crossing on a real phone, where nothing but the dash pattern separated them.
 Roast brown is the obvious colour for coffee and is the one that could not be
 used: it lands on heart rate.
 
-The scheme is light-only and dynamic color is disabled — leaving it on would let
-Android 12+ derive the palette from the user's wallpaper and discard these
-entirely.
+Every one of them has a dark counterpart that keeps its hue and gains lightness,
+so a line is recognisably itself in either theme and these separations survive
+the switch. Dynamic color is disabled in both — leaving it on would let Android
+12+ derive the palette from the user's wallpaper and discard these entirely.
 
 ## Building
 
