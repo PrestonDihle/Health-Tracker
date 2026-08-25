@@ -13,6 +13,7 @@ import com.prestondihle.healthtracker.data.FastingSession
 import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
+import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
@@ -27,6 +28,7 @@ import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.FastingAdherence
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
+import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import kotlinx.coroutines.flow.Flow
@@ -98,6 +100,16 @@ private const val CAFFEINE_FORECAST_HOURS = 6L
 /** Bedtime reference for the evening estimate. */
 private val CAFFEINE_EVENING_HOUR = java.time.LocalTime.of(21, 0)
 
+/**
+ * How far back the heart rate under the hypnogram is fetched.
+ *
+ * Thirty-six hours covers the whole of last night whether the card is read at
+ * seven in the morning or eleven at night, without pulling a week of five-minute
+ * buckets to draw eight hours of them. The chart clips to the night's own bounds,
+ * so the surplus is never seen.
+ */
+private val SLEEP_HEART_RATE_HISTORY: Duration = Duration.ofHours(36)
+
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
 
@@ -111,6 +123,17 @@ data class DashboardUiState(
     val hasPlan: Boolean = false,
     val snapshot: HealthDaySnapshot? = null,
     val bestMileSeconds: Int? = null,
+    /**
+     * The most recent night, or null before anything has synced.
+     *
+     * The latest rather than one belonging to [today], because a night is not a
+     * day: last night began yesterday and the card is read this morning. Keying
+     * it to a date would leave the card blank until the small hours of the next
+     * one.
+     */
+    val sleep: SleepNight? = null,
+    /** Buckets spanning the night, for the trace drawn under the hypnogram. */
+    val sleepHeartRate: List<HeartRateBucket> = emptyList(),
     val hydrationMl: Int = 0,
     val dailyLog: DailyLog = DailyLog(LocalDate.now()),
     val waistCm: Float = DEFAULT_WAIST_CM,
@@ -341,6 +364,20 @@ private data class SettingsBundle(
     val glucoseRecovered: Int,
 )
 
+/**
+ * Everything read from Health Connect's cache, including last night.
+ *
+ * The heart rate buckets ride along here rather than in [MetabolicBundle]
+ * because on this screen they exist for one purpose: to be drawn under the
+ * hypnogram. Nothing else on Today plots a heart rate.
+ */
+private data class HealthBundle(
+    val snapshot: HealthDaySnapshot?,
+    val bestMileSeconds: Int?,
+    val sleep: SleepNight?,
+    val heartRate: List<HeartRateBucket>,
+)
+
 private data class MetabolicBundle(
     val glucose: List<BloodSugarReading>,
     val ketones: List<KetoneReading>,
@@ -456,13 +493,22 @@ class DashboardViewModel(
             }
         }
 
-    private val healthData: Flow<Pair<HealthDaySnapshot?, Int?>>
-        get() =
-            combine(repository.getHealthSnapshot(today), repository.getBestMileSecondsAllTime()) {
-                snapshot,
-                bestMile ->
-                snapshot to bestMile
+    private val healthData: Flow<HealthBundle>
+        get() {
+            // Wide enough to hold the whole of last night however late this
+            // morning it is read, and no wider: these buckets exist only to be
+            // clipped to the night's own bounds by the chart, and a week of them
+            // would be fetched to draw eight hours.
+            val heartRateSince = Instant.now().minus(SLEEP_HEART_RATE_HISTORY)
+            return combine(
+                repository.getHealthSnapshot(today),
+                repository.getBestMileSecondsAllTime(),
+                repository.getLatestSleepNight(),
+                repository.getHeartRateSince(heartRateSince),
+            ) { snapshot, bestMile, sleep, heartRate ->
+                HealthBundle(snapshot, bestMile, sleep, heartRate)
             }
+        }
 
     val uiState: StateFlow<DashboardUiState> =
         combine(
@@ -501,8 +547,10 @@ class DashboardViewModel(
                             zoneId = zoneId,
                         ),
                     hasPlan = fastingBundle.plan.isNotEmpty(),
-                    snapshot = health.first,
-                    bestMileSeconds = health.second,
+                    snapshot = health.snapshot,
+                    bestMileSeconds = health.bestMileSeconds,
+                    sleep = health.sleep,
+                    sleepHeartRate = health.heartRate,
                     hydrationMl = todayBundle.hydrationMl,
                     dailyLog = todayBundle.log ?: DailyLog(date),
                     waistCm = todayBundle.waist?.waistCm ?: DEFAULT_WAIST_CM,
@@ -561,6 +609,23 @@ class DashboardViewModel(
             if (healthState.value == HealthPermissionState.GRANTED) {
                 syncing.value = true
                 repository.syncHealthData(today)
+                // The sleep card needs this and the day sync cannot give it to
+                // it. `syncHealthData` fills the snapshot's `sleepMinutes` --
+                // one number, which is what Activity shows -- while the stages
+                // and the heart rate drawn under them live in the time-series
+                // caches, and those are only ever written by `syncTimeSeries`.
+                // Without this the card sits on "No sleep recorded yet" until
+                // the reader happens to open the Master screen, on a phone whose
+                // Activity card is displaying the very night it says it has not
+                // got.
+                //
+                // Over the same span the card queries. Syncing a narrower window
+                // than the chart reads would leave the earlier hours of a night
+                // permanently blank rather than merely late.
+                repository.syncTimeSeries(
+                    Instant.now().minus(SLEEP_HEART_RATE_HISTORY),
+                    Instant.now(),
+                )
                 // After the day sync rather than before it: today's hole is the
                 // one the ordinary sync is most likely to have just filled, and
                 // going first would spend a query rediscovering that.

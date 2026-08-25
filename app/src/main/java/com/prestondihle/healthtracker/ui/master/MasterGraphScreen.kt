@@ -55,6 +55,7 @@ import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
+import com.prestondihle.healthtracker.ui.components.ChartShade
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.MealDraft
 import com.prestondihle.healthtracker.ui.components.MealEntryDialog
@@ -284,12 +285,21 @@ internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric, colors: ChartCo
  */
 private fun MasterGraphUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisSpec =
     when (metric) {
+        // No target band here, unlike the Today chart, which keeps one.
+        //
+        // The band is a backdrop for *one* series and this plot carries eight.
+        // Shaded across the full width behind carbohydrate curves, step columns
+        // and a heart rate trace, it stopped reading as "the glucose target" and
+        // started reading as a region of the chart -- and with the sleep shade
+        // now laid down underneath, two overlapping washes left the ground
+        // saying two things at once. The reference rule stays: a single line at
+        // one value cannot be mistaken for a region, and it is the part that
+        // answers "above or below" on a plot this busy.
         AxisMetric.GLUCOSE ->
             AxisSpec(
                 min = glucosePlotRange.start,
                 max = glucosePlotRange.endInclusive,
                 label = Glucose.UNIT,
-                band = glucoseTarget,
                 // Solid: the reader put this one wherever they wanted it. The
                 // same rule the Today chart draws, so the two agree.
                 rules = listOfNotNull(glucoseReference?.let { AxisRule(it, dashed = false) }),
@@ -511,6 +521,21 @@ private fun CombinedChartCard(
                         time = meal.timestamp,
                         label = meal.markerLabel(),
                         subdued = true,
+                    )
+                },
+            // The hours asleep, shaded rather than drawn as a ninth line. Sleep
+            // is not a quantity to read off an axis here; it is the answer to
+            // "why" for most of what the other lines do overnight -- the heart
+            // rate floor, the flat glucose, the steps that stop. A line would
+            // need a scale and a legend row to say something a change of ground
+            // says at a glance.
+            shades =
+                state.sleepInWindow.map {
+                    ChartShade(
+                        start = it.start,
+                        end = it.end,
+                        color = chartColors.sleep,
+                        label = "Asleep",
                     )
                 },
             // This is the plot whose whole purpose is reading one series against

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.isOff
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -504,6 +505,42 @@ class MasterGraphRenderTest {
         composeRule.waitForIdle()
 
         composeRule.onAllNodesWithText("Glucose 111", substring = true).assertCountEquals(0)
+    }
+
+    /**
+     * The asleep hours are shaded, and only where somebody was asleep.
+     *
+     * Asserted through the plot's spoken description rather than by looking at
+     * pixels, which is the only handle there is: the shade is a wash on a canvas
+     * with no text in it, and at a tenth opacity it is not something a screenshot
+     * comparison would reliably catch either.
+     *
+     * Both directions matter. A shade that never appears is a feature quietly
+     * missing, and one that appears on a window nobody slept through is worse --
+     * it would have the reader explaining an evening heart rate by sleep that did
+     * not happen. The 3h window ends at now, in the evening of the seeded day, so
+     * it is the case that must come up empty.
+     */
+    @Test
+    fun `the night is shaded on a window that covers it and left alone on one that does not`() {
+        renderScreen()
+
+        chooseRange(MasterRange.DAY)
+        // Waited for rather than asserted outright. The night arrives through the
+        // screen's own sync, which runs off the composition and lands well after
+        // the not-connected prompt has gone -- the same race the range chips are
+        // waited on for.
+        composeRule.waitUntil(SETTLE_TIMEOUT_MS) {
+            composeRule
+                .onAllNodesWithContentDescription("Asleep from", substring = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+
+        chooseRange(MasterRange.THREE)
+        composeRule
+            .onAllNodesWithContentDescription("Asleep from", substring = true)
+            .assertCountEquals(0)
     }
 
     /**

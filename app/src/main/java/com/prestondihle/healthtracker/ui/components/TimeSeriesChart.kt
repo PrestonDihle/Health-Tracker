@@ -162,6 +162,23 @@ data class AxisSpec(
      * edge.
      */
     val band: ClosedFloatingPointRange<Float>? = null,
+    /**
+     * Exactly how many gaps to divide this axis into, or null to fit the height.
+     *
+     * For a **categorical** axis, whose values are names rather than a
+     * continuum. The fitted count subdivides wherever the plot is tall enough,
+     * which is right for a scale of numbers -- another gridline at 87 mg/dL is
+     * still a true statement -- and wrong for one whose only meaningful
+     * positions are the levels themselves. The hypnogram is the case: fitted to
+     * a 300dp card it lands rules at 0.75, 1.5 and 2.25, none of which is a
+     * sleep stage, so `format` returns nothing for them and the two middle
+     * stages go unlabelled on a chart whose whole subject is which stage it was.
+     *
+     * The gridlines are shared with the other axis, so the left one wins where
+     * both ask. Setting it is a promise that the axis has room for that many
+     * labels -- nothing here shrinks them to fit.
+     */
+    val rows: Int? = null,
 )
 
 /**
@@ -189,6 +206,29 @@ data class ChartMarker(
     val subdued: Boolean = false,
 )
 
+/**
+ * A stretch of *time* shaded behind the plot, for a state the data is read
+ * against rather than a measurement of its own.
+ *
+ * The horizontal counterpart of [AxisSpec.band], and the distinction is worth
+ * keeping: a band shades a range of *values* and asks "was it in range"; this
+ * shades a range of *moments* and asks "what was happening then". Sleep is the
+ * case it was built for -- a heart rate that falls to fifty says one thing at
+ * four in the morning and quite another at four in the afternoon, and the chart
+ * cannot show the difference by drawing another line.
+ *
+ * Deliberately not a [ChartSeries]. It has no values, no axis and nothing to
+ * read off it, so it takes no legend row and no gutter; it is furniture, and
+ * furniture that competes with the data is the mistake the meal markers made.
+ */
+data class ChartShade(
+    val start: Instant,
+    val end: Instant,
+    val color: Color,
+    /** Named for the screen reader, which cannot see that the ground changed. */
+    val label: String? = null,
+)
+
 private const val MAX_RENDERED_POINTS = 240
 private val AXIS_LABEL_SIZE = 10.sp
 
@@ -197,6 +237,18 @@ private const val BAR_ALPHA = 0.45f
 
 /** Light enough that a gridline still shows through the target band. */
 private const val BAND_ALPHA = 0.16f
+
+/**
+ * How heavily a [ChartShade] is laid down.
+ *
+ * Lighter than a target band, and for a stronger reason than taste: a band backs
+ * one axis and is bounded by the reader's own numbers, while a shade runs the
+ * full height of the plot underneath every series at once. At band weight the
+ * asleep hours read as a block the lines were drawn *on top of* rather than a
+ * ground they pass through, and the heart rate trace inside it looked like a
+ * different colour from the same trace outside it.
+ */
+private const val SHADE_ALPHA = 0.10f
 
 /** Room above the plot for marker captions; without it they would clip. */
 private val MARKER_LABEL_HEIGHT = 16.dp
@@ -341,6 +393,11 @@ fun DualAxisTimeChart(
     zoneId: ZoneId = ZoneId.systemDefault(),
     /** Vertical rules, used to separate measured past from projected future. */
     markers: List<ChartMarker> = emptyList(),
+    /**
+     * Stretches of time shaded behind everything, for a state rather than a
+     * measurement. See [ChartShade].
+     */
+    shades: List<ChartShade> = emptyList(),
     /**
      * Rules on the clock, at whole hours.
      *
@@ -488,6 +545,7 @@ fun DualAxisTimeChart(
                                         leftAxis,
                                         rightAxis,
                                         zoneId,
+                                        shades,
                                     ),
                                 )
                                 .joinToString(" ")
@@ -534,6 +592,7 @@ fun DualAxisTimeChart(
                         axisTextColor = axisTextColor,
                         zoneId = zoneId,
                         markers = markers,
+                        shades = shades,
                         verticalGridlines = verticalGridlines,
                         inspected = inspected,
                         ruleColor = ruleColor,
@@ -587,6 +646,7 @@ private fun spokenSummary(
     leftAxis: AxisSpec,
     rightAxis: AxisSpec?,
     zoneId: ZoneId,
+    shades: List<ChartShade> = emptyList(),
 ): String {
     val window = Duration.between(windowStart, windowEnd)
     val span =
@@ -596,8 +656,25 @@ private fun spokenSummary(
             else -> "${window.toDays()} days"
         }
     val ending = INSPECT_TIME_FORMAT.format(windowEnd.atZone(zoneId))
+
+    // Named, not just counted. A shade is the one thing on the plot that changes
+    // how every line under it should be read, and it is invisible to a reader who
+    // cannot see that the ground went darker -- so its hours are spoken even
+    // where there is no series left to describe.
+    val grounds =
+        shades
+            .filter { it.label != null && it.end.isAfter(windowStart) && it.start.isBefore(windowEnd) }
+            .joinToString(" ") {
+                val from = INSPECT_TIME_FORMAT.format(maxOf(it.start, windowStart).atZone(zoneId))
+                val to = INSPECT_TIME_FORMAT.format(minOf(it.end, windowEnd).atZone(zoneId))
+                "${it.label} from $from to $to."
+            }
+            .takeIf { it.isNotBlank() }
+            ?.let { " $it" }
+            .orEmpty()
+
     val drawn = series.filter { it.points.isNotEmpty() }
-    if (drawn.isEmpty()) return "$span to $ending. No readings in this window."
+    if (drawn.isEmpty()) return "$span to $ending.$grounds No readings in this window."
 
     val lines =
         drawn.joinToString(" ") { entry ->
@@ -613,7 +690,7 @@ private fun spokenSummary(
             "${item.label}, ${axis.format(values.min())} to ${axis.format(values.max())}$unit," +
                 " latest $latest$unit."
         }
-    return "$span to $ending. $lines"
+    return "$span to $ending.$grounds $lines"
 }
 
 /**
@@ -950,6 +1027,7 @@ private fun DrawScope.drawChart(
     axisTextColor: Color,
     zoneId: ZoneId,
     markers: List<ChartMarker> = emptyList(),
+    shades: List<ChartShade> = emptyList(),
     verticalGridlines: Boolean = false,
     inspected: Instant? = null,
     /**
@@ -988,8 +1066,24 @@ private fun DrawScope.drawChart(
         return plotBottom - ((value - axis.min) / range) * plotHeight
     }
 
-    // Target bands, underneath everything: they are the backdrop a trace is read
-    // against, and drawn over the gridlines they would hide them.
+    // Time shades go down before anything else, target bands included: a band is
+    // a statement about one axis and a shade is a statement about the whole plot
+    // at that moment, so the shade is the deeper of the two grounds. Clamped to
+    // the plot rather than skipped when it runs past an edge, since a night that
+    // began before the window still has its later half inside it.
+    for (shade in shades) {
+        val left = xFor(shade.start).coerceIn(plotLeft, plotRight)
+        val right = xFor(shade.end).coerceIn(plotLeft, plotRight)
+        if (right <= left) continue
+        drawRect(
+            color = shade.color.copy(alpha = SHADE_ALPHA),
+            topLeft = androidx.compose.ui.geometry.Offset(left, plotTop),
+            size = androidx.compose.ui.geometry.Size(right - left, plotHeight),
+        )
+    }
+
+    // Target bands, underneath everything else: they are the backdrop a trace is
+    // read against, and drawn over the gridlines they would hide them.
     leftAxis.band?.let {
         drawBand(it, axisTextColor, plotLeft, plotRight, plotTop, plotBottom) { v ->
             yFor(v, leftAxis)
@@ -1007,7 +1101,11 @@ private fun DrawScope.drawChart(
     // dashboard drops its charts to a stub when there is nothing logged, and five
     // rows of labels in 72dp overprint into an unreadable stack. Two gaps is the
     // floor, which still gives a min, a max and a midpoint.
-    val rows = (plotHeight / MIN_ROW_SPACING.toPx()).toInt().coerceIn(2, 4)
+    // An axis that names its rows overrides the fit: see [AxisSpec.rows].
+    val rows =
+        leftAxis.rows
+            ?: rightAxis?.rows
+            ?: (plotHeight / MIN_ROW_SPACING.toPx()).toInt().coerceIn(2, 4)
     // Tinted per axis where the axis names a colour, so the numbers down the
     // side say which line they belong to. The gutter is the one place a reader
     // has to work out what a figure measures, and on a plot carrying five units

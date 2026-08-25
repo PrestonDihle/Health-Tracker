@@ -177,6 +177,32 @@ class MigrationSchemaTest {
     }
 
     /**
+     * The two sleep tables added at v13.
+     *
+     * `SleepStageEntry`'s primary key is the **pair** of session and start, and
+     * that is the half worth pinning: keyed on the start alone, two overlapping
+     * nights -- a watch and a phone both recording the same hours -- would
+     * silently overwrite each other's stretches, and the hypnogram would come out
+     * as a single mangled night that looked entirely plausible.
+     *
+     * Both tables are new, so the DDL is diffed directly. There is no
+     * `ALTER TABLE`-added column here carrying a SQLite default that Room's
+     * `CREATE TABLE` would omit, which is the case that forces the
+     * `PRAGMA table_info` comparison further down.
+     */
+    @Test
+    fun `migration builds the sleep tables exactly as Room expects`() {
+        assertEquals(
+            roomSchema("SleepSessionEntry"),
+            migrationSchema("SleepSessionEntry", AppDatabase.migration12To13Statements),
+        )
+        assertEquals(
+            roomSchema("SleepStageEntry"),
+            migrationSchema("SleepStageEntry", AppDatabase.migration12To13Statements),
+        )
+    }
+
+    /**
      * The v4 KetoneReading table, as Room built it before the rename.
      *
      * Spelled out here rather than derived, because the point of the test is to

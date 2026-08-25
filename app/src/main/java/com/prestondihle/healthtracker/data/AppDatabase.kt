@@ -35,8 +35,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserSettings::class,
         Supplement::class,
         SupplementDose::class,
+        SleepSessionEntry::class,
+        SleepStageEntry::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -351,6 +353,55 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Sleep sessions and the stages inside them.
+         *
+         * Two new tables rather than columns on `HealthDaySnapshot`, for the same
+         * reason `StepBucket` is not a column on it: the snapshot holds a day's
+         * total and a total cannot say *when*. `sleepMinutes` stays exactly where
+         * it is and goes on driving the trend chart and the sleep goal, so this
+         * migration adds and changes nothing already on screen.
+         *
+         * Both tables are new, so the DDL is diffed directly against Room's own
+         * `CREATE TABLE` -- there is no `ALTER TABLE`-added column here carrying a
+         * SQLite default that Room's generated schema would omit.
+         *
+         * `SleepStageEntry`'s primary key is the **pair** of session and start.
+         * Keyed on the start alone, two overlapping nights -- a watch and a phone
+         * both recording the same hours -- would silently overwrite each other's
+         * stretches.
+         */
+        internal val migration12To13Statements =
+            listOf(
+                // `PRIMARY KEY(...)` as a table constraint rather than inline on
+                // the column: Room generates the constraint form even for a
+                // single-column key, and Room compares the two schemas by text.
+                "CREATE TABLE IF NOT EXISTS `SleepSessionEntry` (" +
+                    "`startMillis` INTEGER NOT NULL, " +
+                    "`endMillis` INTEGER NOT NULL, " +
+                    "`externalId` TEXT, " +
+                    "PRIMARY KEY(`startMillis`))",
+                "CREATE INDEX IF NOT EXISTS `index_SleepSessionEntry_startMillis` " +
+                    "ON `SleepSessionEntry` (`startMillis`)",
+                "CREATE TABLE IF NOT EXISTS `SleepStageEntry` (" +
+                    "`sessionStartMillis` INTEGER NOT NULL, " +
+                    "`startMillis` INTEGER NOT NULL, " +
+                    "`endMillis` INTEGER NOT NULL, " +
+                    "`stage` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`sessionStartMillis`, `startMillis`))",
+                "CREATE INDEX IF NOT EXISTS `index_SleepStageEntry_startMillis` " +
+                    "ON `SleepStageEntry` (`startMillis`)",
+                "CREATE INDEX IF NOT EXISTS `index_SleepStageEntry_sessionStartMillis` " +
+                    "ON `SleepStageEntry` (`sessionStartMillis`)",
+            )
+
+        private val MIGRATION_12_13 =
+            object : Migration(12, 13) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration12To13Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -376,6 +427,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_9_10,
                                 MIGRATION_10_11,
                                 MIGRATION_11_12,
+                                MIGRATION_12_13,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

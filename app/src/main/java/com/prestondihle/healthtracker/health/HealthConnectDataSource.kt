@@ -24,6 +24,8 @@ import androidx.health.connect.client.request.AggregateGroupByDurationRequest
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import com.prestondihle.healthtracker.domain.SleepStage
+import com.prestondihle.healthtracker.domain.SleepStageInterval
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -45,6 +47,45 @@ private const val HEALTH_CONNECT_PHONE_PREFIX = "com.android.healthconnect.phone
 /** Package segments that identify no vendor, skipped when deriving a name. */
 private val GENERIC_PACKAGE_SEGMENTS =
     setOf("com", "org", "net", "io", "android", "apps", "app", "mobile", "google")
+
+/**
+ * How far before a sleep window to start looking for the session it belongs to.
+ *
+ * Health Connect matches a session against the filter by its own span, so a
+ * night that began at 22:30 is not found by a window opening at midnight. Long
+ * enough to catch the start of any ordinary night from a window opening at the
+ * following midday, and short enough that it never reaches back into the night
+ * before that.
+ */
+private val SLEEP_SESSION_OVERLAP: Duration = Duration.ofHours(18)
+
+/**
+ * Health Connect's stage constants, in this app's vocabulary, or null for a
+ * stretch that says nothing.
+ *
+ * The three awake constants collapse to one. Health Connect distinguishes awake,
+ * awake in bed and out of bed, which is a statement about where the body was
+ * rather than whether it was asleep, and nothing here asks that.
+ * `STAGE_TYPE_SLEEPING` is asleep with no stage named and stays its own value;
+ * folding it into light sleep would invent a measurement.
+ *
+ * `STAGE_TYPE_UNKNOWN` -- and any constant a later version of the client adds --
+ * returns null and is dropped. Calling it awake would deflate the night's sleep
+ * with time nobody said was spent awake, and calling it asleep would inflate it
+ * the same way; dropped, it belongs to neither total and still sits inside time
+ * in bed, which is the only figure that can honestly account for it.
+ */
+private fun Int.toSleepStage(): SleepStage? =
+    when (this) {
+        SleepSessionRecord.STAGE_TYPE_DEEP -> SleepStage.DEEP
+        SleepSessionRecord.STAGE_TYPE_LIGHT -> SleepStage.LIGHT
+        SleepSessionRecord.STAGE_TYPE_REM -> SleepStage.REM
+        SleepSessionRecord.STAGE_TYPE_SLEEPING -> SleepStage.ASLEEP
+        SleepSessionRecord.STAGE_TYPE_AWAKE,
+        SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
+        SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> SleepStage.AWAKE
+        else -> null
+    }
 
 /**
  * Reads from Health Connect. This app never writes.
@@ -266,6 +307,55 @@ class HealthConnectDataSource(
             // individually rather than trusting the record's own bounds.
             .filter { !it.time.isBefore(from) && it.time.isBefore(to) }
             .sortedBy { it.time }
+    }
+
+    /**
+     * Sleep sessions overlapping a window, with their stages.
+     *
+     * Read raw rather than aggregated because there is no choice:
+     * `SLEEP_DURATION_TOTAL` is the only aggregate the record type offers, and it
+     * answers how long, never when or in which stage.
+     *
+     * The window is widened by [SLEEP_SESSION_OVERLAP] at the start. Health
+     * Connect returns a session only where it falls inside the filter, and a
+     * night beginning at 23:00 does not begin inside a window that starts at
+     * midnight -- asking for today alone would return the second half of last
+     * night as a session that apparently started at 00:00. Sessions are then
+     * filtered on overlapping the real window, so the widening costs at most one
+     * extra night and never loses the near half of one.
+     */
+    override suspend fun readSleepSessions(from: Instant, to: Instant): List<SleepSessionSample> {
+        val active = client ?: return emptyList()
+        return active
+            .readAllRecords(
+                SleepSessionRecord::class,
+                TimeRangeFilter.between(from.minus(SLEEP_SESSION_OVERLAP), to),
+            )
+            .filter { it.endTime.isAfter(from) && it.startTime.isBefore(to) }
+            .map { record ->
+                SleepSessionSample(
+                    start = record.startTime,
+                    end = record.endTime,
+                    stages =
+                        record.stages
+                            // A zero-length stage carries no time and would draw a
+                            // riser with no tread, which reads as a stage change
+                            // that never happened.
+                            .filter { it.endTime.isAfter(it.startTime) }
+                            .mapNotNull { stage ->
+                                stage.stage.toSleepStage()?.let {
+                                    SleepStageInterval(
+                                        start = stage.startTime,
+                                        end = stage.endTime,
+                                        stage = it,
+                                    )
+                                }
+                            }
+                            .sortedBy { it.start },
+                    externalId = record.metadata.id.takeIf { it.isNotBlank() },
+                )
+            }
+            .sortedBy { it.start }
     }
 
     /**

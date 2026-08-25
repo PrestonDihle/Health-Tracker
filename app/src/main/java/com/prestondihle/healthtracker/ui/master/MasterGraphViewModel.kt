@@ -18,6 +18,7 @@ import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.domain.MacroServing
 import com.prestondihle.healthtracker.domain.MealDuplicates
+import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.components.ChartAxis
@@ -131,6 +132,17 @@ private const val CURVE_SAMPLES = 180L
 private const val CURVE_STEP_MIN_SECONDS = 60L
 private const val CURVE_STEP_MAX_SECONDS = 600L
 
+/**
+ * How far before the window's start to look for a night that reaches into it.
+ *
+ * Long enough to catch the beginning of any ordinary night from a window opening
+ * at the following midday. Without it a 3h window over breakfast would find no
+ * night at all -- the sleep that ended an hour before it began started long
+ * outside it -- and the shade would vanish on exactly the zoom where it explains
+ * most.
+ */
+private val SLEEP_HISTORY: Duration = Duration.ofHours(18)
+
 data class MasterGraphUiState(
     val range: MasterRange = MasterRange.DAY,
     val now: Instant = Instant.now(),
@@ -147,6 +159,15 @@ data class MasterGraphUiState(
      * happened.
      */
     val caffeine: List<CaffeineIntake> = emptyList(),
+    /**
+     * Nights overlapping the window, for the shaded ground rather than a line.
+     *
+     * Whole nights, including the part before the left edge: a night is clipped
+     * when it is drawn, and trimming it here would lose the fact that the sleep
+     * on screen began earlier -- which is what the shade running to the edge
+     * rather than starting inside it says.
+     */
+    val sleep: List<SleepNight> = emptyList(),
     val goals: UserGoals = UserGoals(),
     /** Drawn smoothed only when the user has asked for it in settings. */
     val smoothGlucose: Boolean = false,
@@ -213,13 +234,17 @@ data class MasterGraphUiState(
             return if (smoothGlucose) GlucoseSmoothing.smooth(raw) else raw
         }
 
-    /** The shaded target, or null while either edge is unset or inverted. */
-    val glucoseTarget: ClosedFloatingPointRange<Float>?
-        get() {
-            val low = goals.glucoseTargetLowMgDl ?: return null
-            val high = goals.glucoseTargetHighMgDl ?: return null
-            return if (high > low) low.toFloat()..high.toFloat() else null
-        }
+    /**
+     * No `glucoseTarget` here, deliberately, though `UserGoals` still holds one
+     * and the Today chart still shades it.
+     *
+     * This plot carries eight series and the band is a backdrop for one of them.
+     * Behind carbohydrate curves, step columns and a heart rate trace it stopped
+     * reading as the glucose target and started reading as a region of the
+     * chart -- and it now has the sleep shade underneath it, which is a second
+     * wash saying something else entirely. The reference rule carries the same
+     * information here at a weight that cannot be misread.
+     */
 
     /** Floor and ceiling of the glucose axis, from settings. */
     val glucosePlotRange: ClosedFloatingPointRange<Float>
@@ -280,6 +305,21 @@ data class MasterGraphUiState(
             distinctMeals
                 .filter { it.timestamp in windowStart..windowEnd }
                 .sortedByDescending { it.timestamp }
+
+    /**
+     * Nights any part of which is on the plot.
+     *
+     * Overlap rather than containment, which is the same rule the DAO query
+     * uses and matters twice as much here: at 3h zoom no night is ever wholly
+     * inside the window, so a containment test would shade nothing at all on
+     * exactly the zoom level where knowing you were asleep matters most.
+     *
+     * Bounded by [windowEnd] rather than by `now`, like everything else drawn --
+     * a night still running past a panned right edge is clipped there rather
+     * than shading past it.
+     */
+    val sleepInWindow: List<SleepNight>
+        get() = sleep.filter { it.end > windowStart && it.start < windowEnd }
 
     /**
      * Times of day that are a stamp rather than a measurement.
@@ -401,6 +441,7 @@ private data class SeriesBundle(
     val heartRate: List<HeartRateBucket>,
     val steps: List<StepBucket>,
     val caffeine: List<CaffeineIntake>,
+    val sleep: List<SleepNight> = emptyList(),
 )
 
 /** Everything that shapes how the series are drawn rather than what is in them. */
@@ -499,8 +540,13 @@ class MasterGraphViewModel(
             // was drunk and cannot move the line it would be loaded to draw.
             val caffeineSince =
                 windowStart.minus(Duration.ofHours(Caffeine.RELEVANT_HISTORY_HOURS))
+            // Sleep reaches back a night, for the reason the meals reach back an
+            // absorption window: a night beginning before the left edge is still
+            // being slept through inside it, and one anchored at the window start
+            // would shade only the hours after midnight on a morning window.
+            val sleepSince = windowStart.minus(SLEEP_HISTORY)
             // Nested rather than one call: combine's typed overloads stop at five
-            // sources, and this is the sixth.
+            // sources, and this is the seventh.
             combine(
                 combine(
                     repository.getMealsSince(mealsSince),
@@ -512,8 +558,9 @@ class MasterGraphViewModel(
                     SeriesBundle(meals, glucose, ketones, heartRate, steps, emptyList())
                 },
                 repository.getCaffeineSince(caffeineSince),
-            ) { bundle, caffeine ->
-                bundle.copy(caffeine = caffeine)
+                repository.getSleepNightsSince(sleepSince),
+            ) { bundle, caffeine, sleep ->
+                bundle.copy(caffeine = caffeine, sleep = sleep)
             }
         }
 
@@ -552,6 +599,7 @@ class MasterGraphViewModel(
                 heartRate = series.heartRate,
                 steps = series.steps,
                 caffeine = series.caffeine,
+                sleep = series.sleep,
                 goals = prefs.goals,
                 smoothGlucose = prefs.smoothGlucose,
                 healthState = permission,

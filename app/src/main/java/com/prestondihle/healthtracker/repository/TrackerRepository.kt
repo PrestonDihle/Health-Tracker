@@ -20,6 +20,8 @@ import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.RestingHeartRate
+import com.prestondihle.healthtracker.data.SleepSessionEntry
+import com.prestondihle.healthtracker.data.SleepStageEntry
 import com.prestondihle.healthtracker.data.StepBucket
 import com.prestondihle.healthtracker.data.TrackerDao
 import com.prestondihle.healthtracker.data.UserGoals
@@ -33,13 +35,19 @@ import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.GlucoseGaps
 import com.prestondihle.healthtracker.domain.MealDuplicates
+import com.prestondihle.healthtracker.domain.SleepNight
+import com.prestondihle.healthtracker.domain.SleepStageInterval
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.health.HeartRateSample
 import com.prestondihle.healthtracker.health.StepSource
 import java.io.File
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.Duration
 import java.time.Instant
@@ -362,6 +370,56 @@ class TrackerRepository(
     fun getStepBucketsSince(since: Instant): Flow<List<StepBucket>> =
         dao.getStepBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
 
+    // ----- Sleep -------------------------------------------------------------
+
+    /**
+     * Nights overlapping the window, assembled with their stages.
+     *
+     * The stages are fetched over the same span and grouped in memory rather than
+     * joined, because there are no foreign keys in this schema and a night is at
+     * most a few dozen stretches. A stage whose session is not in the window is
+     * dropped: it belongs to a night that is not being drawn.
+     */
+    fun getSleepNightsSince(since: Instant): Flow<List<SleepNight>> =
+        combine(
+            dao.getSleepSessionsBetween(since.toEpochMilli(), Long.MAX_VALUE),
+            dao.getSleepStagesBetween(since.toEpochMilli(), Long.MAX_VALUE),
+        ) { sessions, stages ->
+            val bySession = stages.groupBy { it.sessionStartMillis }
+            sessions.map { session ->
+                SleepNight(
+                    start = session.start,
+                    end = session.end,
+                    stages =
+                        bySession[session.startMillis]
+                            .orEmpty()
+                            .map { SleepStageInterval(it.start, it.end, it.stage) },
+                )
+            }
+        }
+
+    /**
+     * The most recent night, for the Today card.
+     *
+     * Its own query rather than the first of [getSleepNightsSince], so the card
+     * still has something to show on a morning when the window it would have been
+     * found in holds nothing -- a phone that did not sync for a day still knows
+     * what the last night it saw was.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun getLatestSleepNight(): Flow<SleepNight?> =
+        dao.getLatestSleepSession().flatMapLatest { session ->
+            if (session == null) flowOf(null)
+            else
+                dao.getSleepStagesFor(session.startMillis).map { stages ->
+                    SleepNight(
+                        start = session.start,
+                        end = session.end,
+                        stages = stages.map { SleepStageInterval(it.start, it.end, it.stage) },
+                    )
+                }
+        }
+
     /**
      * Moves a meal to when it was actually eaten.
      *
@@ -486,6 +544,42 @@ class TrackerRepository(
             dao.upsertStepBuckets(
                 hours.map { StepBucket(hourStartMillis = it.hourStart.toEpochMilli(), steps = it.steps) }
             )
+        }
+
+        val nights =
+            runCatching { healthDataSource.readSleepSessions(from, to) }
+                .getOrDefault(emptyList())
+        for (night in nights) {
+            dao.upsertSleepSessions(
+                listOf(
+                    SleepSessionEntry(
+                        startMillis = night.start.toEpochMilli(),
+                        endMillis = night.end.toEpochMilli(),
+                        externalId = night.externalId,
+                    )
+                )
+            )
+            // Cleared per night before rewriting, which is the [StepBucket]
+            // argument in a case where it bites harder: a tracker scores a night
+            // when it ends and re-scores it after the morning's processing, and
+            // the second scoring routinely has fewer stretches than the first.
+            // Upsert alone would leave the stretches that no longer exist in
+            // place, drawing a hypnogram that flicks between two readings of the
+            // same hour. Scoped to the night rather than to the window so a
+            // failed read of one night cannot empty another.
+            dao.deleteSleepStagesFor(night.start.toEpochMilli())
+            if (night.stages.isNotEmpty()) {
+                dao.upsertSleepStages(
+                    night.stages.map {
+                        SleepStageEntry(
+                            sessionStartMillis = night.start.toEpochMilli(),
+                            startMillis = it.start.toEpochMilli(),
+                            endMillis = it.end.toEpochMilli(),
+                            stage = it.stage,
+                        )
+                    }
+                )
+            }
         }
     }
 

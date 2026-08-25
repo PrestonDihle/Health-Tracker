@@ -9,9 +9,9 @@ reps and reading.
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | The landing page: current fast duration, weekly fast adherence, steps, hydration, caffeine, creatine, supplements, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
+| **Today** | The landing page: current fast duration, weekly fast adherence, steps, last night's sleep stages, hydration, caffeine, creatine, supplements, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
 | **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
-| **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour |
+| **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it |
 | **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading — each against its own reference line |
 | **History** | Backfill or correct any past day |
 | **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
@@ -59,7 +59,7 @@ The app is **read-only** against Health Connect. It never writes, so no
 
 - Steps
 - Heart rate and resting heart rate
-- Sleep sessions
+- Sleep sessions, and the stages within them
 - Total and active calories burned
 - Nutrition: energy eaten, protein, carbohydrate, fat
 - Weight
@@ -96,6 +96,43 @@ The Trends macro chart stacks protein, carbohydrate and fat **by calories**
 (4/4/9 kcal per gram) rather than by grams, so bar height is total energy and
 each band is its true share. Fat is a small share of the grams and often half
 the calories.
+
+### Sleep
+
+Health Connect offers exactly one aggregate for a sleep session — its duration —
+and Garmin, like most trackers, also publishes the stages underneath it. Today
+shows both: when the night started and ended, how much of it was actually spent
+asleep, and how that split between REM, light and deep.
+
+**Time asleep is not time in bed**, and the card leads with the former. A night
+bounded 23:00 to 07:30 with forty minutes of waking in it is a seven-fifty night.
+Reporting the eight and a half would be flattering rather than accurate, which is
+the whole reason the stages are worth having — time in bed is quoted underneath,
+so the difference between the two is visible rather than hidden.
+
+The chart is a hypnogram with the night's heart rate drawn over it. The two are
+on one plot rather than two because the reason to look at either is the other: a
+heart rate that stays high through the first two cycles is what a night of little
+deep sleep looks like from the other side, and on separate charts that has to be
+held in the head across a scroll. Deep sits at the bottom and awake at the top,
+the way every published hypnogram is drawn, so the trace falling means sleep
+deepening.
+
+A source is allowed to record a stretch as *asleep* without saying which stage.
+That is counted in the total and deliberately not drawn — there is no height on
+the chart that means "asleep, stage unknown" without also meaning one of the
+three named stages. Where a night contains any, the card says how much, so the
+drawn trace and the printed totals can never quietly disagree.
+
+On the Master screen the same nights appear as a shaded band behind everything
+else rather than as a ninth line. Sleep is not a quantity to read off an axis
+there; it is the answer to *why* for most of what the other lines do overnight —
+the heart rate floor, the flat blood sugar, the steps that stop. A change of
+ground says that at a glance where a line would need a scale and a legend row.
+The **blood sugar target band has been removed from that screen** as a result: two
+overlapping washes left the ground saying two things at once, and a band that
+backs one series was already being read as a region of a plot carrying eight. The
+reference line stays, and Today keeps its band.
 
 ### Best mile time
 
@@ -249,7 +286,9 @@ cut off, so a 210 reading still plots; it is simply not budgeted for.
 Three things can be drawn on it, and they are deliberately distinct:
 
 - A **grey band** for the target range, set in Settings. A filled region answers
-  "was it in range" at a glance.
+  "was it in range" at a glance. **On the Today chart only** — the Master screen
+  drew it behind eight other series, where it stopped reading as the blood sugar
+  target and started reading as a region of the plot.
 - A **solid rule** at a single reference value, also set in Settings and
   defaulting to 100 mg/dL. This answers "above or below". It is solid where the
   blood pressure chart's 120 rule is dashed: that one is a published clinical

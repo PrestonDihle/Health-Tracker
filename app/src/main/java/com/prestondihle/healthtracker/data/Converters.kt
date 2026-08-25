@@ -1,6 +1,7 @@
 ﻿package com.prestondihle.healthtracker.data
 
 import androidx.room.TypeConverter
+import com.prestondihle.healthtracker.domain.SleepStage
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -61,4 +62,10 @@ class Converters {
 
     @TypeConverter
     fun toMovementType(name: String?): MovementType? = name?.let { MovementType.valueOf(it) }
+
+    @TypeConverter
+    fun fromSleepStage(stage: SleepStage?): String? = stage?.name
+
+    @TypeConverter
+    fun toSleepStage(name: String?): SleepStage? = name?.let { SleepStage.valueOf(it) }
 }

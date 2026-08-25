@@ -187,6 +187,23 @@ val HeartRateSeries = Color(0xFF8C4A3C)
  */
 val StepsSeries = Color(0xFF5F7A6B)
 
+/**
+ * Sleep: the hypnogram's trace, and the ground the asleep hours are shaded in.
+ *
+ * Yale Blue, which is the one brand tone no series on the master graph uses --
+ * the fat *stack* takes it on Trends, and that is a different chart. Reusing a
+ * brand colour is right here where it was wrong for heart rate: sleep is not
+ * competing with the macro curves for a reading, it is the backdrop they are
+ * read against, and a shade wants a tone that recedes rather than one picked to
+ * stand out.
+ *
+ * The master graph draws it at [SLEEP_SHADE_ALPHA] rather than in a lighter
+ * colour, so the shade is the same blue as the Today card's trace at a weight
+ * that cannot be mistaken for a measurement. Anything marking context has to be
+ * lighter than the data or it becomes data -- the lesson the meal markers taught.
+ */
+val SleepSeries = YaleBlue
+
 // ---------------------------------------------------------------------------
 // Grip strength. Two lines on one chart that track each other closely, so they
 // need the same separation the blood pressure pair does.

@@ -1,5 +1,7 @@
 package com.prestondihle.healthtracker.health
 
+import com.prestondihle.healthtracker.domain.SleepStage
+import com.prestondihle.healthtracker.domain.SleepStageInterval
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -155,6 +157,66 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
                     }
                 HourlySteps(hourStart, steps)
             }
+            .toList()
+    }
+
+    /**
+     * One staged night per date, running 23:00 the evening before to about 07:00.
+     *
+     * Cycled rather than random: real sleep runs roughly ninety-minute cycles
+     * that are deep-heavy early and REM-heavy towards morning, and a hypnogram
+     * drawn from uniform noise would exercise the chart without ever looking like
+     * the thing it is supposed to draw. A couple of brief wakings are included
+     * because they are what makes time asleep differ from time in bed, which is
+     * the distinction the card exists to show.
+     *
+     * The night is keyed to the date it *ends* on, which is the night a reader
+     * means by "last night" on that morning.
+     */
+    private fun sleepFor(date: LocalDate): SleepSessionSample {
+        val start = date.minusDays(1).atTime(23, 0).atZone(zoneId).toInstant()
+        val random = Random(date.toEpochDay())
+        val stages = mutableListOf<SleepStageInterval>()
+        var cursor = start
+
+        fun add(stage: SleepStage, minutes: Long) {
+            val end = cursor.plusSeconds(minutes * 60)
+            stages += SleepStageInterval(cursor, end, stage)
+            cursor = end
+        }
+
+        // Five cycles of roughly ninety minutes. Deep dominates the first two and
+        // fades; REM is the reverse, which is the shape of an ordinary night.
+        repeat(5) { cycle ->
+            val deep = (35 - cycle * 7).coerceAtLeast(5).toLong()
+            val rem = (10 + cycle * 8).toLong()
+            add(SleepStage.LIGHT, 25L + random.nextInt(0, 10))
+            add(SleepStage.DEEP, deep)
+            add(SleepStage.LIGHT, 20L + random.nextInt(0, 10))
+            add(SleepStage.REM, rem)
+            if (cycle == 1 || cycle == 3) add(SleepStage.AWAKE, 4L + random.nextInt(0, 6))
+        }
+        add(SleepStage.LIGHT, 12)
+
+        return SleepSessionSample(
+            start = start,
+            end = cursor,
+            stages = stages,
+            externalId = "mock-sleep-$date",
+        )
+    }
+
+    override suspend fun readSleepSessions(from: Instant, to: Instant): List<SleepSessionSample> {
+        // Widened by a day at each end for the same reason the real source widens
+        // its filter: a night is looked up by the date it ends on, and the one
+        // overlapping the start of the window began on the date before it.
+        val firstDay = from.atZone(zoneId).toLocalDate().minusDays(1)
+        val lastDay = to.atZone(zoneId).toLocalDate().plusDays(1)
+
+        return generateSequence(firstDay) { it.plusDays(1) }
+            .takeWhile { !it.isAfter(lastDay) }
+            .map { sleepFor(it) }
+            .filter { it.end.isAfter(from) && it.start.isBefore(to) }
             .toList()
     }
 

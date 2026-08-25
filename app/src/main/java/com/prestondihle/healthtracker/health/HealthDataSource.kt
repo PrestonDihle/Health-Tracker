@@ -1,5 +1,6 @@
 package com.prestondihle.healthtracker.health
 
+import com.prestondihle.healthtracker.domain.SleepStageInterval
 import java.time.Instant
 import java.time.LocalDate
 
@@ -40,6 +41,24 @@ data class MealSample(
 
 /** One heart rate reading at one instant, before bucketing. */
 data class HeartRateSample(val time: Instant, val bpm: Int)
+
+/**
+ * One night as recorded, with the stages it was broken into.
+ *
+ * [start] and [end] are the session's own bounds, kept even though the stages
+ * usually span the same time: a writer may bound a night more widely than the
+ * part of it it managed to classify, and shrinking the night to fit its stages
+ * would quietly redefine what time in bed means.
+ *
+ * [stages] is empty for a writer that records a session and nothing finer, which
+ * is allowed and is not an error -- it simply leaves nothing to draw.
+ */
+data class SleepSessionSample(
+    val start: Instant,
+    val end: Instant,
+    val stages: List<SleepStageInterval> = emptyList(),
+    val externalId: String? = null,
+)
 
 /** Steps counted inside one wall-clock hour, keyed by the hour's start. */
 data class HourlySteps(val hourStart: Instant, val steps: Int)
@@ -149,4 +168,19 @@ interface HealthDataSource {
         to: Instant,
         preferredStepsPackage: String? = null,
     ): List<HourlySteps>
+
+    /**
+     * Sleep sessions overlapping a window, with their stages.
+     *
+     * Separate from [readDay]'s `sleepMinutes`, which is the one aggregate
+     * Health Connect offers on a sleep session and stays where it is: a daily
+     * total is what the trend chart and the goal are read against. This is the
+     * other question -- when, and in which stage -- and there is no aggregate for
+     * it, so the raw sessions have to be read.
+     *
+     * The filter is on the session's own span, so a night crossing midnight is
+     * returned whole against either day it touches rather than split at the
+     * boundary the way an aggregate splits it.
+     */
+    suspend fun readSleepSessions(from: Instant, to: Instant): List<SleepSessionSample>
 }

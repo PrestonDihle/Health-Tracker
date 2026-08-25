@@ -42,6 +42,8 @@ data class ChartColors(
     val steps: Color,
     val gripDominant: Color,
     val gripNonDominant: Color,
+    /** The hypnogram trace, and the ground the master graph shades asleep hours in. */
+    val sleep: Color,
 )
 
 /** The palette as it has always been: mid-toned, for the alabaster background. */
@@ -66,6 +68,7 @@ val LightChartColors =
         steps = StepsSeries,
         gripDominant = GripDominantSeries,
         gripNonDominant = GripNonDominantSeries,
+        sleep = SleepSeries,
     )
 
 /**
@@ -105,6 +108,11 @@ val DarkChartColors =
         steps = Color(0xFF8FB3A0),
         gripDominant = Color(0xFF6FA8D0),
         gripNonDominant = Color(0xFFB9A96A),
+        // Yale Blue is one of the two tones that vanish outright on a near-black
+        // ground, and this one has to work twice over: as a 2dp trace and as a
+        // wash at a sixth of its opacity. Lifted far enough that the wash still
+        // reads as blue rather than as a slightly paler patch of background.
+        sleep = Color(0xFF7FA9C9),
     )
 
 /**

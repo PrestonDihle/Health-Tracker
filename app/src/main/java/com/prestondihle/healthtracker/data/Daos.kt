@@ -382,6 +382,55 @@ interface TrackerDao {
     @Query("DELETE FROM StepBucket WHERE hourStartMillis >= :start AND hourStartMillis < :end")
     suspend fun deleteStepBucketsBetween(start: Long, end: Long)
 
+    // ----- Sleep -------------------------------------------------------------
+
+    /**
+     * Nights overlapping a span, rather than starting inside it.
+     *
+     * A night beginning at 23:00 belongs to a window opening at midnight, and
+     * anchoring on the start alone would drop it -- which is exactly the half of
+     * the night a morning reader is asking about.
+     */
+    @Query(
+        "SELECT * FROM SleepSessionEntry " +
+            "WHERE endMillis > :start AND startMillis < :end " +
+            "ORDER BY startMillis ASC"
+    )
+    fun getSleepSessionsBetween(start: Long, end: Long): Flow<List<SleepSessionEntry>>
+
+    /** The most recently finished night, for the card that says "last night". */
+    @Query("SELECT * FROM SleepSessionEntry ORDER BY endMillis DESC LIMIT 1")
+    fun getLatestSleepSession(): Flow<SleepSessionEntry?>
+
+    @Query(
+        "SELECT * FROM SleepStageEntry " +
+            "WHERE endMillis > :start AND startMillis < :end " +
+            "ORDER BY startMillis ASC"
+    )
+    fun getSleepStagesBetween(start: Long, end: Long): Flow<List<SleepStageEntry>>
+
+    @Query(
+        "SELECT * FROM SleepStageEntry " +
+            "WHERE sessionStartMillis = :sessionStart ORDER BY startMillis ASC"
+    )
+    fun getSleepStagesFor(sessionStart: Long): Flow<List<SleepStageEntry>>
+
+    @Upsert suspend fun upsertSleepSessions(sessions: List<SleepSessionEntry>)
+
+    @Upsert suspend fun upsertSleepStages(stages: List<SleepStageEntry>)
+
+    /**
+     * Clears a night's stages before they are rewritten.
+     *
+     * Sleep is the one cache whose upstream *revises* itself: a tracker scores a
+     * night once when it ends and again after the morning's processing, and the
+     * second scoring routinely has fewer stretches than the first. Upsert alone
+     * would leave the stretches that no longer exist lying in the table, which
+     * draws as a hypnogram flicking between two readings of the same hour.
+     */
+    @Query("DELETE FROM SleepStageEntry WHERE sessionStartMillis = :sessionStart")
+    suspend fun deleteSleepStagesFor(sessionStart: Long)
+
     // ----- Resting heart rate ------------------------------------------------
 
     @Query("SELECT * FROM RestingHeartRate WHERE date = :date")

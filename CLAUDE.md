@@ -208,6 +208,70 @@ prefers the manual entry on any day that has both. A sync must never overwrite a
 substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
 Grouping burn figures next to protein/carbs/fat is what originally made the dashboard read as intake.
 
+### Sleep
+
+`HealthDaySnapshot.sleepMinutes` stays exactly where it is and goes on driving the Trends chart and
+the sleep goal. `SleepSessionEntry` and `SleepStageEntry` are the *other* question — when, and in
+which stage — and they exist for the same reason `StepBucket` sits beside the snapshot's daily step
+total: **a daily figure cannot say when.** Adding stage columns to the snapshot would have been the
+wrong shape twice over, since a night is not a day and does not belong to one.
+
+**`SLEEP_DURATION_TOTAL` is the only aggregate `SleepSessionRecord` offers.** There is no per-stage
+aggregate, so stage detail can only come from a raw `readRecords`. That is the whole reason this is
+a cache of sessions rather than four more numbers on the snapshot.
+
+**Health Connect matches a session against the filter by its own span**, so a night beginning at
+23:00 is not found by a window opening at midnight — asking for today alone returns the second half
+of last night as a session that apparently started at 00:00. `readSleepSessions` widens its filter
+back by `SLEEP_SESSION_OVERLAP` (18 h) and then filters on genuine overlap, so the widening costs at
+most one extra night and never loses the near half of one. `MasterGraphViewModel` widens its query
+the same way and for the same reason: at 3h zoom no night is ever *wholly* inside the window, and a
+containment test would shade nothing at all on exactly the zoom where knowing you were asleep
+explains most of what the other lines are doing.
+
+**Both screens that show sleep have to sync it themselves.** `syncHealthData` fills the snapshot's
+`sleepMinutes` and nothing else; the sessions, the stages and the heart rate drawn under them are
+written only by `syncTimeSeries`. The Today card was built without that and shipped to the phone
+reading "No sleep recorded yet" while the Activity card directly above it displayed 5h 34m for the
+very night it claimed not to have — every test passed, because every test seeded `syncTimeSeries` by
+hand. `DashboardViewModel.refreshHealth` now calls it over `SLEEP_HEART_RATE_HISTORY`, **the same
+span the card queries**: syncing a narrower window than the chart reads leaves the early hours of a
+night permanently blank rather than merely late.
+
+**Sleep is the one cache whose upstream revises itself.** A tracker scores a night when it ends and
+re-scores it after the morning's processing, and the second scoring routinely has *fewer* stretches
+than the first. So stages are deleted per night before being rewritten — the `StepBucket` argument,
+biting harder. Scoped to the night rather than to the window, so a failed read of one night cannot
+empty another. The session row itself is upserted on its start, which is what makes a re-sync
+idempotent.
+
+`SleepStageEntry`'s primary key is the **pair** of session start and stage start. Keyed on the stage
+start alone, two overlapping nights — a watch and a phone both recording the same hours — would
+silently overwrite each other's stretches and produce one mangled night that looked entirely
+plausible.
+
+**Five stages, not four.** `STAGE_TYPE_SLEEPING` is asleep with *no stage named*, which is a
+different statement from light sleep; it maps to `SleepStage.ASLEEP`, counts toward total sleep, and
+has **no `level`**, so it is never drawn. There is no height on a hypnogram that means "asleep, stage
+unknown" without also meaning one of the three named stages. The card reports it as a separate figure
+whenever it is non-zero, so the drawn trace and the printed totals can never silently disagree.
+`STAGE_TYPE_UNKNOWN` maps to null and is dropped outright: calling it awake would deflate the night
+with time nobody said was spent awake, and calling it asleep would inflate it the same way. Dropped,
+it belongs to neither total and still sits inside time in bed, which is the only figure that can
+honestly account for it. The three awake constants (awake, awake in bed, out of bed) collapse to one,
+since the difference between them is about where the body was and nothing here asks that.
+
+**Time asleep is not time in bed**, and the card leads with the former. A night bounded 23:00 to
+07:30 with forty minutes of waking in it is a seven-fifty night; reporting the eight and a half would
+be flattering rather than accurate, which is the whole reason the stages are worth reading.
+
+**The hypnogram needs no step primitive.** `Sleep.hypnogram` emits *two* points per stretch, one at
+each end at that stretch's level, so consecutive stretches share an x and the ordinary line renderer
+draws the riser between them. Deep sits at the floor and awake at the ceiling, the way every
+published hypnogram is drawn — the trace falling means sleep deepening, and a reader who has seen one
+before should not have to check the axis to know which way is down. `SleepTest` pins that ordering,
+because nothing else in the app would notice it being reversed.
+
 ### Notifications and the widget
 
 `work/CaffeineLastCall.kt` warns when *one more* ordinary cup would leave the reader over their
@@ -370,7 +434,7 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 12, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 13, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -396,6 +460,13 @@ change an existing user's charts. This one drives a *notification*: a default wo
 and then being interrupted by something never asked for. NULL means "say nothing", and the reader
 turns it on. It joins the UserGoals replay in `MigrationSchemaTest` rather than taking a test of its
 own, since that table is now altered four separate times and only the full replay catches a gap.
+
+`MIGRATION_12_13` adds the two sleep tables, and is the worked example of the trap the schema test
+exists for: the first draft wrote `` `startMillis` INTEGER PRIMARY KEY NOT NULL `` inline, and Room
+generates the constraint form `PRIMARY KEY(`startMillis`)` even for a single-column key. Room
+compares the two schemas as *text*, so that would not have failed a test — it would have thrown on
+the next launch for anyone upgrading. **Write the table-constraint form for every primary key**,
+single-column ones included.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
@@ -529,9 +600,27 @@ The same rule sorts out the other three chart primitives:
   day, and both arrive as "blood sugar". Splitting happens *before* downsampling, or thinning would
   widen every spacing equally and leave a real dropout looking ordinary. Modelled curves must leave
   this off: they are continuous functions sampled evenly, so there is nothing to find.
+- **Time shades** (`ChartShade`) are the horizontal counterpart of a target band, and the distinction
+  is worth keeping: a band shades a range of *values* and asks "was it in range"; a shade covers a
+  range of *moments* and asks "what was happening then". Sleep is the case it was built for — a heart
+  rate of fifty says one thing at four in the morning and quite another at four in the afternoon, and
+  the chart cannot show that difference by drawing another line. Deliberately **not** a
+  `ChartSeries`: it has no values, no axis and nothing to read off it, so it takes no legend row and
+  no gutter. Drawn before everything, target bands included, at `SHADE_ALPHA` (0.10) — lighter than a
+  band because a band backs one axis while a shade runs full height under every series at once, and
+  at band weight the asleep hours read as a block the lines were drawn *on top of* rather than a
+  ground they pass through. It carries a `label` purely for `spokenSummary`: a shade is the one thing
+  on a plot that changes how every line under it should be read, and it is completely invisible to a
+  reader who cannot see that the ground went darker, so its hours are spoken even when no series is
+  left to describe.
 - **Target bands** (`AxisSpec.band`) shade a range behind the data. A filled area answers "was it in
   range" at a glance where two threshold rules leave the reader working out which side of each the
-  trace is on.
+  trace is on. **The master graph no longer draws one**, though the Today chart still does and
+  `UserGoals` still holds the figures. A band backs *one* series and that plot carries eight: behind
+  carbohydrate curves, step columns and a heart rate trace it stopped reading as the glucose target
+  and started reading as a region of the chart — and with the sleep shade underneath it, two
+  overlapping washes left the ground saying two things at once. The glucose reference rule stays
+  there: a single line at one value cannot be mistaken for a region.
   Single values get `AxisSpec.rules` instead, which answer "above or below" rather than "in
   range". `AxisRule.dashed` keeps the two kinds apart: dashed for a published clinical figure
   (the blood pressure chart), solid for one the reader chose in Settings (the glucose reference).
@@ -656,8 +745,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
-`GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest` and `PanWindowTest`
-`CsvTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest` and `SupplementsTest` are Robolectric
+`GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
+`SleepTest`, `CsvTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest` and `SleepSyncTest` are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
 thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,
@@ -681,6 +770,12 @@ divides a day evenly (otherwise the rules drift through the day), that the densi
 screen and not the clock, and that a spring-forward day keeps every rule on the hour.
 `ChartBoundsTest` pins the silent failure: a goal outside the readings is clipped rather than drawn
 small, so a chart missing its goal looks exactly like a chart that has none.
+`SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
+card: counting waking time as sleep, which flatters every night by however long was spent staring at
+the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement
+the source never made. It also pins the stage *ordering* on the plot and the two-points-per-stretch
+pairing the step shape depends on — a hypnogram drawn upside down says the opposite of what happened,
+and neither that nor a collapsed riser is behaviour any other test would notice.
 `WaypointSeedTest` pins where a control *opens*, which is not behaviour any other test would notice
 and is the difference between one tap and a hundred. `PanWindowTest` pins the quiet half of panning:
 that the curves stop at `windowEnd` rather than running past it, that a meal beyond the right edge is
@@ -702,6 +797,24 @@ each other, and which of them wins is the input's shape rather than the filter's
 `MealDeletionTest` is a Robolectric test with no UI in it, exercising the repository against an
 in-memory database and a stubborn data source that keeps re-offering the meal that was deleted. Any
 behaviour that only shows up *across* a sync belongs there rather than in a render test.
+
+`SleepSyncTest` is the same shape for the other cache that changes under you: a source whose night
+the test re-scores between syncs. It pins that a re-scored night *replaces* its stages rather than
+accumulating them — the case the per-night delete exists for, where the second scoring has fewer
+stretches than the first and an upsert alone leaves the vanished ones on disk to be counted twice.
+
+**The sleep card is composed directly, not through the dashboard.** A `LazyColumn` builds only what
+is on screen and this screen cannot be scrolled in a test, so the third card down is never
+constructed at all — the hypnogram's canvas arithmetic would go entirely unexercised while the
+dashboard screenshot still looked fine. `SleepCard` is `internal` for exactly this, and
+`ScreenRenderTest` renders it on its own with a night seeded through the real sync.
+
+`MasterGraphRenderTest` checks the sleep shade through the plot's **spoken description** rather than
+by looking at pixels, which is the only handle available: a wash at a tenth opacity on a canvas with
+no text in it is not something a screenshot comparison reliably catches. It asserts both directions —
+present on a window covering the night, absent on a 3h evening window — because a shade appearing
+where nobody slept is worse than one missing, since it would have the reader explaining an evening
+heart rate by sleep that never happened.
 
 `MigrationSchemaTest` diffs the hand-written migration SQL against the schema Room generates from the
 entities. This matters more than it looks: `exportSchema = false` rules out Room's own
@@ -748,7 +861,9 @@ They land in `app/build/screenshots/`. Nothing is compared against a golden — 
 at. Seeding matters: the subjective 1-10 scores and grip strength are hand-logged, so
 `syncHealthData` alone leaves the combined mood chart empty and its three line styles unexercised,
 and the grip trend blank. Glucose is a third case on the master graph: that screen syncs only meals,
-heart rate and steps, so a test that wants a blood sugar line has to insert the readings itself.
+heart rate, steps and sleep, so a test that wants a blood sugar line has to insert the readings
+itself. Sleep is a fourth: it arrives through `syncTimeSeries` rather than `syncHealthData`, so a
+screen seeded only by the daily sync renders the sleep card's empty branch and proves nothing.
 
 ## Conventions
 

@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.prestondihle.healthtracker.domain.SleepStage
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -393,6 +394,67 @@ data class StepBucket(@PrimaryKey val hourStartMillis: Long, val steps: Int) {
     companion object {
         const val BUCKET_MINUTES = 60L
     }
+}
+
+/**
+ * One night, cached from Health Connect.
+ *
+ * Kept even though [HealthDaySnapshot.sleepMinutes] already holds a duration,
+ * and for the same reason [StepBucket] is kept beside the daily step total: a
+ * daily figure cannot say *when*. The snapshot's minutes are what the trend
+ * chart and the sleep goal are read against; these are what the hypnogram is
+ * drawn from.
+ *
+ * Keyed on the start rather than on [externalId] so a re-sync overwrites the
+ * night it already holds. The id is carried anyway, because a source that
+ * re-scores a night -- which is what a sleep tracker does the following morning
+ * -- keeps the id and moves the bounds, and that is worth being able to see.
+ *
+ * There is no `hidden` column here, unlike [MealEntry]. A meal is deletable
+ * because a source can record one that was never eaten and nothing else can
+ * correct it; a night is not something the reader is in a position to say did
+ * not happen.
+ */
+@Entity(indices = [Index("startMillis")])
+data class SleepSessionEntry(
+    @PrimaryKey val startMillis: Long,
+    val endMillis: Long,
+    val externalId: String? = null,
+) {
+    val start: Instant
+        get() = Instant.ofEpochMilli(startMillis)
+
+    val end: Instant
+        get() = Instant.ofEpochMilli(endMillis)
+}
+
+/**
+ * One stretch of one stage within a night.
+ *
+ * The primary key is the pair of session and start, not the start alone: two
+ * sessions may legitimately overlap where a watch and a phone both recorded the
+ * same night, and keying on the start alone would silently let one overwrite
+ * stretches of the other.
+ *
+ * [sessionStartMillis] points at [SleepSessionEntry.startMillis] rather than
+ * being a foreign key, because there are no foreign keys anywhere in this schema
+ * -- which is why the repository deletes a night's stages itself.
+ */
+@Entity(
+    primaryKeys = ["sessionStartMillis", "startMillis"],
+    indices = [Index("startMillis"), Index("sessionStartMillis")],
+)
+data class SleepStageEntry(
+    val sessionStartMillis: Long,
+    val startMillis: Long,
+    val endMillis: Long,
+    val stage: SleepStage,
+) {
+    val start: Instant
+        get() = Instant.ofEpochMilli(startMillis)
+
+    val end: Instant
+        get() = Instant.ofEpochMilli(endMillis)
 }
 
 @Entity

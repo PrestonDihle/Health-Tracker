@@ -63,6 +63,8 @@ import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Ketones
+import com.prestondihle.healthtracker.domain.Sleep
+import com.prestondihle.healthtracker.domain.SleepStage
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import androidx.compose.material3.FilterChip
@@ -82,6 +84,7 @@ import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -144,6 +147,12 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
         }
 
         item { ActivityCard(state = state, onRefresh = viewModel::refreshHealth) }
+
+        // Directly under Activity, which is where the night's duration is
+        // already quoted as a single figure. The two are the same subject at two
+        // resolutions, and putting the breakdown anywhere else on this screen
+        // leaves them disagreeing across a scroll.
+        item { SleepCard(state = state) }
 
         item {
             HydrationCard(
@@ -637,6 +646,168 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * Last night, as a hypnogram with the heart rate under it.
+ *
+ * The two are drawn together rather than on separate charts because the reason
+ * to look at either is the other: a heart rate that stays high through the first
+ * two cycles is what a night of little deep sleep looks like from the other
+ * side, and on two charts that has to be held in the head across a scroll.
+ *
+ * Time asleep is given the prominence, not time in bed. They differ by the waking
+ * in between, and the difference is the whole reason the stages are worth having
+ * -- a night bounded eight and a half hours with forty minutes of waking in it is
+ * a seven-fifty night, and reporting the eight and a half would flatter it.
+ */
+// Internal rather than private so a render test can compose it on its own. This
+// screen cannot be scrolled in a test -- the fast timer's ticker means it never
+// reaches idle -- and a LazyColumn composes only what is on screen, so the third
+// card down is never built at all. The chart inside it is canvas arithmetic that
+// only runs under a real layout pass, which is exactly the code no pure-JVM test
+// can reach.
+@Composable
+internal fun SleepCard(state: DashboardUiState) {
+    val chartColors = LocalChartColors.current
+    val night = state.sleep
+
+    DashboardCard(title = "Sleep") {
+        if (night == null) {
+            Text(
+                "No sleep recorded yet. Nights arrive with the next Health Connect sync.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@DashboardCard
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Metric(
+                label = "Asleep",
+                value = Sleep.formatDuration(night.totalAsleep),
+                supporting = "${Sleep.formatDuration(night.timeInBed)} in bed",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Start",
+                value = night.start.asClockTime(state),
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "End",
+                value = night.end.asClockTime(state),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Metric(
+                label = SleepStage.REM.label,
+                value = Sleep.formatDuration(night.rem),
+                supporting = night.rem.shareOf(night.totalAsleep),
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = SleepStage.LIGHT.label,
+                value = Sleep.formatDuration(night.light),
+                supporting = night.light.shareOf(night.totalAsleep),
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = SleepStage.DEEP.label,
+                value = Sleep.formatDuration(night.deep),
+                supporting = night.deep.shareOf(night.totalAsleep),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        DualAxisTimeChart(
+            windowStart = night.start,
+            windowEnd = night.end,
+            zoneId = state.zoneId,
+            series =
+                listOfNotNull(
+                    ChartSeries(
+                        label = "Stage",
+                        points = Sleep.hypnogram(night.stages),
+                        color = chartColors.sleep,
+                        axis = ChartAxis.LEFT,
+                        // A hypnogram is already two points per stretch; dots on
+                        // both ends of every tread doubles the ink and says
+                        // nothing the risers do not.
+                        showPoints = false,
+                    ),
+                    // Omitted rather than drawn empty: an axis labelled bpm down
+                    // the right-hand side of a plot with no heart rate on it is a
+                    // scale for nothing.
+                    state.sleepHeartRate
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { buckets ->
+                            ChartSeries(
+                                label = "Heart rate",
+                                points = buckets.map { TimePoint(it.timestamp, it.bpm.toFloat()) },
+                                color = chartColors.heartRate,
+                                axis = ChartAxis.RIGHT,
+                                showPoints = false,
+                                // A watch taken off mid-night leaves a hole, and
+                                // a straight run across it in the same ink as the
+                                // readings either side is exactly what this chart
+                                // must not draw.
+                                breakOnGaps = true,
+                            )
+                        },
+                ),
+            leftAxis =
+                AxisSpec(
+                    min = Sleep.PLOT_MIN,
+                    max = Sleep.PLOT_MAX,
+                    label = "",
+                    // Named levels rather than numbers. "3" down the side of a
+                    // hypnogram means nothing; "Awake" means the whole of it.
+                    format = Sleep::formatLevel,
+                    // One rule per stage, exactly. Left to fit the height it
+                    // subdivides between them and the middle two go unnamed.
+                    rows = Sleep.PLOT_ROWS,
+                    color = chartColors.sleep,
+                ),
+            rightAxis =
+                state.sleepHeartRate
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { AxisSpec(min = 40f, max = 100f, label = "bpm", color = chartColors.heartRate) },
+            contentDescription =
+                "Last night's sleep stages with heart rate. Tap to read both at one moment.",
+            modifier = Modifier.fillMaxWidth().height(ChartHeight),
+        )
+
+        // Only when there is some. A source that stages every minute of a night
+        // never shows this line, and one that stages none of it shows a chart
+        // with no trace on it -- which needs saying, or the card looks broken.
+        if (!night.unstaged.isZero) {
+            Text(
+                "${Sleep.formatDuration(night.unstaged)} recorded as asleep without a stage, " +
+                    "counted in the total but not drawn",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** `23:40`. The date is carried by the card, which is always about last night. */
+private fun Instant.asClockTime(state: DashboardUiState): String =
+    DateTimeFormatter.ofPattern("h:mm a").format(atZone(state.zoneId))
+
+/** `28%`, or blank where the whole is zero and a share would divide by it. */
+private fun Duration.shareOf(whole: Duration): String? {
+    if (whole.isZero || whole.isNegative) return null
+    return "${(toMillis() * 100 / whole.toMillis())}%"
 }
 
 @Composable

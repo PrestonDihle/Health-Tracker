@@ -24,13 +24,17 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
+import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
+import com.prestondihle.healthtracker.ui.dashboard.SleepCard
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import java.time.ZoneId
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -100,6 +104,16 @@ class ScreenRenderTest {
                     )
                 }
             }
+            // Sleep and heart rate arrive through the time-series sync, not the
+            // daily one, so without this the Today sleep card renders its "no
+            // sleep recorded" branch and the hypnogram is never composed at all.
+            // That is the path worth covering here: the stage trace and the heart
+            // rate over it are canvas arithmetic that only runs under a real
+            // layout pass, which is precisely what no pure-JVM test reaches.
+            repository.syncTimeSeries(
+                java.time.Instant.now().minus(java.time.Duration.ofHours(48)),
+                java.time.Instant.now(),
+            )
         }
         return repository
     }
@@ -185,5 +199,43 @@ class ScreenRenderTest {
         val vm = DashboardViewModel(seededRepository(), zone)
         render { DashboardScreen(vm, SnackbarHostState()) }
         composeRule.onRoot().captureRoboImage("build/screenshots/dashboard.png")
+    }
+
+    /**
+     * The sleep card on its own, because the dashboard cannot reach it.
+     *
+     * A LazyColumn composes only what is on screen and this screen cannot be
+     * scrolled in a test -- the fast timer's ticker means it never reaches the
+     * idle state `performScrollToNode` waits on. The sleep card is the third one
+     * down, so through `DashboardScreen` it is never built at all and the
+     * hypnogram's canvas arithmetic goes unexercised. Composed directly, a
+     * divide-by-zero or an empty-list crash in the plot fails here.
+     *
+     * Seeded through the real sync rather than by hand, so the shape under test
+     * is the shape the app actually stores.
+     */
+    @Test
+    fun `sleep card renders a staged night`() {
+        val repository = seededRepository()
+        val night = runBlocking { repository.getLatestSleepNight().first() }
+        val heartRate = runBlocking {
+            repository.getHeartRateSince(java.time.Instant.now().minus(java.time.Duration.ofHours(36)))
+                .first()
+        }
+        // If the mock ever stops producing sleep this fails here rather than
+        // silently rendering the empty branch and proving nothing.
+        assertNotNull(night)
+
+        render {
+            SleepCard(
+                state =
+                    DashboardUiState(sleep = night, sleepHeartRate = heartRate, zoneId = zone)
+            )
+        }
+
+        composeRule.onNodeWithText("Asleep").assertIsDisplayed()
+        composeRule.onNodeWithText("REM").assertIsDisplayed()
+        composeRule.onNodeWithText("Deep").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/sleep-card.png")
     }
 }
