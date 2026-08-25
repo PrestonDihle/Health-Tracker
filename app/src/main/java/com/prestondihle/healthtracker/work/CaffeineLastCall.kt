@@ -10,6 +10,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -137,6 +138,21 @@ class CaffeineLastCallWorker(context: Context, params: WorkerParameters) :
                 PeriodicWorkRequestBuilder<CaffeineLastCallWorker>(1, TimeUnit.HOURS).build()
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+        }
+
+        /**
+         * Runs the check once, now.
+         *
+         * Periodic work will not run early -- WorkManager answers a forced run
+         * with "executed before schedule" and reschedules -- so the hourly job
+         * cannot cover the moment the limit is first set. That moment is exactly
+         * when the answer is wanted: the limit gets switched on in the afternoon,
+         * which is the only part of the day the warning is about, and waiting up
+         * to an hour to say anything makes the setting look broken.
+         */
+        fun checkNow(context: Context) {
+            WorkManager.getInstance(context)
+                .enqueue(OneTimeWorkRequestBuilder<CaffeineLastCallWorker>().build())
         }
 
         /**

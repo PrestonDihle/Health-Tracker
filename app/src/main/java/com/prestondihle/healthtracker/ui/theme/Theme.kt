@@ -73,8 +73,13 @@ private val BrandDarkColorScheme =
     onPrimaryContainer = BalticLight,
     secondary = Color(0xFFC9B87A),
     onSecondary = Color(0xFF231F0E),
-    secondaryContainer = Color(0xFF3D3720),
-    onSecondaryContainer = Color(0xFFC9B87A),
+    // Baltic, *not* a tint of the olive secondary. Material draws the selected
+    // filter chip and the nav bar's selected pill from secondaryContainer, and
+    // in the light scheme those are Baltic Tint -- the brand's selection colour
+    // is the blue whatever the secondary happens to be. Deriving this from the
+    // olive instead turned every selected chip on the phone a muddy brown.
+    secondaryContainer = BalticTintDark,
+    onSecondaryContainer = BalticLight,
     tertiary = Color(0xFF9FC6DF),
     onTertiary = Color(0xFF10222E),
     tertiaryContainer = BalticTintDark,

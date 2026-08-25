@@ -319,8 +319,10 @@ the fact, there is nothing to be done.
 
 It checks hourly rather than when you log something, since the moment usually
 arrives with nothing logged at all: what is already in you keeps decaying and the
-afternoon crosses the line on its own. Off until you switch it on, and a refused
-notification permission simply means it never appears.
+afternoon crosses the line on its own — plus once immediately whenever you change
+the limit, so setting it answers straight away instead of at the top of the next
+hour. Off until you switch it on, and a refused notification permission simply
+means it never appears.
 
 ## Widget
 

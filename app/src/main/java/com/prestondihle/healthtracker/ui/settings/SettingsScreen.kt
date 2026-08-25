@@ -42,6 +42,7 @@ import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.Stepper
+import com.prestondihle.healthtracker.work.CaffeineLastCallWorker
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -425,6 +426,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             )
         }
         item {
+            val context = LocalContext.current
             SettingsCard(title = "Caffeine last call") {
                 Text(
                     "Warns when one more cup would leave you over this much " +
@@ -447,6 +449,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                                     caffeineBedtimeLimitMg = if (on) DEFAULT_BEDTIME_LIMIT_MG else null
                                 )
                             )
+                            // Answer straight away rather than at the top of the
+                            // next hour. See CaffeineLastCallWorker.checkNow.
+                            if (on) CaffeineLastCallWorker.checkNow(context)
                         },
                     )
                     Text("Warn me", style = MaterialTheme.typography.bodyMedium)
@@ -457,6 +462,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                         value = limit,
                         onValueChange = {
                             viewModel.saveGoals(state.goals.copy(caffeineBedtimeLimitMg = it))
+                            CaffeineLastCallWorker.checkNow(context)
                         },
                         step = 5,
                         range = 5..300,

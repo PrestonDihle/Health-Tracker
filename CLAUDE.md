@@ -192,6 +192,12 @@ with nothing being logged at all: caffeine already drunk keeps decaying and the 
 threshold on its own. Hourly, idempotent, and uniquely named, so a deferred or coalesced run costs
 nothing.
 
+`checkNow` enqueues a one-time run alongside it, fired whenever the limit is set or changed.
+WorkManager **will not run periodic work early** — a forced run answers "executed before schedule"
+and reschedules — so the hourly job cannot cover the moment the setting is switched on, which is
+exactly when the answer is wanted: the limit gets turned on in the afternoon, the only part of the
+day the warning is about. It also makes the feature testable at all, which is how the gap was found.
+
 `POST_NOTIFICATIONS` is the app's **first runtime permission**. It is asked for once at launch and
 never insisted on: the worker checks before posting, so a refusal means the warning never appears and
 nothing else changes. The channel and the work are registered in `MainActivity`, *not*
