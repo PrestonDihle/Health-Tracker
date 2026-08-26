@@ -884,9 +884,19 @@ dashboard screenshot still looked fine. `SleepCard` is `internal` for exactly th
 `MasterGraphRenderTest` checks the sleep shade through the plot's **spoken description** rather than
 by looking at pixels, which is the only handle available: a wash at a tenth opacity on a canvas with
 no text in it is not something a screenshot comparison reliably catches. It asserts both directions —
-present on a window covering the night, absent on a 3h evening window — because a shade appearing
+present on a window covering the night, absent on the last three hours — because a shade appearing
 where nobody slept is worse than one missing, since it would have the reader explaining an evening
 heart rate by sleep that never happened.
+
+**That test seeds its night relative to now, and must go on doing so.** It originally leaned on the
+shared mock, which seeds every night 23:00 to about 07:50 *in its own zone* — and `MockHealthDataSource`
+keeps `systemDefault()` while the repository and view model in this suite are both pinned to UTC.
+West of Greenwich that puts the night at 06:00 to 14:50 UTC, so whether the live 3h window fell
+inside one was decided by the hour the suite ran at: green every evening, red before breakfast, on
+code nobody had touched. Aligning the zone is not the fix on its own — it only moves the broken hours
+onto the evenings this repository is actually worked on. `NightEndedHoursAgo` puts the night a fixed
+distance behind `now` instead, which is inside the day window and outside the last three hours at
+every hour of every day.
 
 `MigrationSchemaTest` diffs the hand-written migration SQL against the schema Room generates from the
 entities. This matters more than it looks: `exportSchema = false` rules out Room's own

@@ -32,9 +32,12 @@ import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.TrackerDao
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.domain.SleepStage
+import com.prestondihle.healthtracker.domain.SleepStageInterval
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.MealSample
 import com.prestondihle.healthtracker.health.MockHealthDataSource
+import com.prestondihle.healthtracker.health.SleepSessionSample
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.master.MasterGraphScreen
 import com.prestondihle.healthtracker.ui.master.MasterGraphViewModel
@@ -136,6 +139,54 @@ class MasterGraphRenderTest {
                     ),
                 )
             }
+        }
+    }
+
+    /**
+     * One night placed relative to now, rather than at a fixed hour of the clock.
+     *
+     * The shared mock seeds every night 23:00 to about 07:50 *in its own zone*,
+     * and it keeps `systemDefault()` while the repository and the view model
+     * here are both pinned to UTC. West of Greenwich that puts the seeded night
+     * at 06:00 to 14:50 UTC, so whether the live 3h window landed inside one was
+     * decided by the hour the suite happened to be run at: the negative half of
+     * the assertion below held all evening and failed before breakfast. Aligning
+     * the zone alone would only move the broken hours onto the evenings this
+     * repository is actually worked on.
+     *
+     * A night that ended [endedHoursAgo] hours ago is inside the day window and
+     * outside the last three hours at every hour of every day, which is what
+     * makes both directions of the test true whenever it runs.
+     */
+    private class NightEndedHoursAgo(
+        private val delegate: MockHealthDataSource,
+        private val endedHoursAgo: Long = 6,
+        private val lengthHours: Long = 8,
+    ) : HealthDataSource by delegate {
+        override suspend fun readSleepSessions(
+            from: Instant,
+            to: Instant,
+        ): List<SleepSessionSample> {
+            val end = Instant.now().minus(Duration.ofHours(endedHoursAgo))
+            val start = end.minus(Duration.ofHours(lengthHours))
+            // The same overlap filter the real source applies, so a window that
+            // genuinely predates the night still comes back empty.
+            if (!end.isAfter(from) || !start.isBefore(to)) return emptyList()
+            val deepFrom = start.plus(Duration.ofHours(3))
+            val remFrom = start.plus(Duration.ofHours(5))
+            return listOf(
+                SleepSessionSample(
+                    start = start,
+                    end = end,
+                    stages =
+                        listOf(
+                            SleepStageInterval(start, deepFrom, SleepStage.LIGHT),
+                            SleepStageInterval(deepFrom, remFrom, SleepStage.DEEP),
+                            SleepStageInterval(remFrom, end, SleepStage.REM),
+                        ),
+                    externalId = "night-ended-${endedHoursAgo}h-ago",
+                )
+            )
         }
     }
 
@@ -518,12 +569,13 @@ class MasterGraphRenderTest {
      * Both directions matter. A shade that never appears is a feature quietly
      * missing, and one that appears on a window nobody slept through is worse --
      * it would have the reader explaining an evening heart rate by sleep that did
-     * not happen. The 3h window ends at now, in the evening of the seeded day, so
-     * it is the case that must come up empty.
+     * not happen. The night is seeded six hours back rather than at an hour of
+     * the clock, so the 3h window is the case that must come up empty however
+     * late in the day the suite is run -- see [NightEndedHoursAgo].
      */
     @Test
     fun `the night is shaded on a window that covers it and left alone on one that does not`() {
-        renderScreen()
+        renderScreen(repository(NightEndedHoursAgo(MockHealthDataSource())))
 
         chooseRange(MasterRange.DAY)
         // Waited for rather than asserted outright. The night arrives through the
