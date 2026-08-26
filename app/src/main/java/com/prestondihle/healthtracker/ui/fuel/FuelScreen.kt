@@ -88,6 +88,8 @@ import com.prestondihle.healthtracker.ui.components.SupplementEntryDialog
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.components.TrackerCard
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
+import com.prestondihle.healthtracker.ui.trends.MacrosTrendCard
+import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
@@ -119,8 +121,15 @@ private enum class FastEdit {
 }
 
 @Composable
-fun FuelScreen(viewModel: FuelViewModel, snackbarHostState: SnackbarHostState) {
+fun FuelScreen(
+    viewModel: FuelViewModel,
+    snackbarHostState: SnackbarHostState,
+    trendsViewModel: TrendsViewModel,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // The macro trend belongs with food: it reads from the same source Activity's
+    // other trends do, so Fuel need not re-derive it.
+    val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var timeEdit by remember { mutableStateOf<TimeEdit?>(null) }
     var addingFast by remember { mutableStateOf(false) }
@@ -258,6 +267,10 @@ fun FuelScreen(viewModel: FuelViewModel, snackbarHostState: SnackbarHostState) {
                 },
             )
         }
+
+        // Calories from protein, carbs and fat over the fortnight -- the trend of
+        // what the day's macros add up to, moved here from Activity.
+        item { MacrosTrendCard(trends) }
     }
 
     timeEdit?.let { edit ->

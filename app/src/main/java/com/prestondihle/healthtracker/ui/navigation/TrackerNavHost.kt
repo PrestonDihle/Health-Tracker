@@ -33,7 +33,7 @@ import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
 import com.prestondihle.healthtracker.ui.fuel.FuelScreen
 import com.prestondihle.healthtracker.ui.fuel.FuelViewModel
-import com.prestondihle.healthtracker.ui.placeholder.PlaceholderScreen
+import com.prestondihle.healthtracker.ui.log.LogScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsViewModel
 import com.prestondihle.healthtracker.ui.today.TodayScreen
@@ -50,11 +50,11 @@ import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
  * characters of "Settings", which has always fitted -- which is why Nutrition
  * became Fuel and Wellbeing became Wellness rather than being left to truncate.
  *
- * Activity and Wellness are still wired to a screen that is not their eventual
- * one. The cards are moved a tab at a time, and unhooking a screen before its
- * replacement exists would leave the reader unable to log anything it carried in
- * the meantime -- on the phone holding the only copy of this data. Each
- * temporary route below says what will replace it.
+ * Log holds the hand-entry controls; Wellness the body and vitals trends;
+ * Activity the movement trends. Log and Wellness share one [DashboardViewModel]
+ * and Activity, Wellness and Fuel share one [TrendsViewModel], both hoisted
+ * below so a tab switch does not spin up a second copy -- and, for the dashboard,
+ * a second Health Connect sync.
  */
 enum class Screen(val route: String, val label: String, val icon: ImageVector) {
     Today("today", "Today", Icons.Filled.QueryStats),
@@ -69,6 +69,14 @@ enum class Screen(val route: String, val label: String, val icon: ImageVector) {
 fun TrackerNavHost(appContainer: AppContainer) {
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Hoisted so the tabs that share them get one instance each, not one per tab.
+    // Scoped to the host, they outlive individual tab visits, which is what lets
+    // Wellness and Log read the same dashboard state without a second sync.
+    val dashboardViewModel: DashboardViewModel =
+        viewModel(factory = DashboardViewModel.provideFactory(appContainer.trackerRepository))
+    val trendsViewModel: TrendsViewModel =
+        viewModel(factory = TrendsViewModel.provideFactory(appContainer.trackerRepository))
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -112,42 +120,25 @@ fun TrackerNavHost(appContainer: AppContainer) {
                 TodayScreen(vm)
             }
             composable(Screen.Log.route) {
-                PlaceholderScreen(
-                    name = "Log",
-                    comingFrom =
-                        "Every logging control in one place. Until it is built, log from the " +
-                            "card on its own tab.",
-                )
+                LogScreen(dashboardViewModel, snackbarHostState)
             }
-            // Fuel's own screen, still filling up: fasting has arrived, and
-            // hydration, caffeine, creatine, supplements, glucose and ketones,
-            // the day's meals and the macro trend follow.
+            // Fuel's own screen: fasting, hydration, caffeine, creatine,
+            // supplements, and the macro trend at the foot.
             composable(Screen.Fuel.route) {
                 val vm: FuelViewModel =
                     viewModel(
                         factory = FuelViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                FuelScreen(vm, snackbarHostState)
+                FuelScreen(vm, snackbarHostState, trendsViewModel)
             }
-            // Temporary: Activity eventually carries grip strength and movement
-            // beside the step, grip, pushup and squat trends. The old Trends
-            // screen holds four of those six today.
-            composable(Screen.Activity.route) {
-                val vm: TrendsViewModel =
-                    viewModel(
-                        factory = TrendsViewModel.provideFactory(appContainer.trackerRepository)
-                    )
-                TrendsScreen(vm)
-            }
-            // Temporary: Wellness eventually carries sleep, body, blood
-            // pressure, mood and reading with their trends. The old Today screen
-            // is where all five of those cards live until they are moved.
+            // Activity: the movement trends -- steps, grip strength, pushups and
+            // air squats.
+            composable(Screen.Activity.route) { TrendsScreen(trendsViewModel) }
+            // Wellness: the display cards (activity summary, last night's sleep,
+            // glucose and ketones) with the body and vitals trends, the mood
+            // trend and the movement log.
             composable(Screen.Wellness.route) {
-                val vm: DashboardViewModel =
-                    viewModel(
-                        factory = DashboardViewModel.provideFactory(appContainer.trackerRepository)
-                    )
-                DashboardScreen(vm, snackbarHostState)
+                DashboardScreen(dashboardViewModel, trendsViewModel, snackbarHostState)
             }
             composable(Screen.Settings.route) {
                 val vm: SettingsViewModel =

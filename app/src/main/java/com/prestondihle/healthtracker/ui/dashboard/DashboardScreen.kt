@@ -71,6 +71,12 @@ import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.components.TrackerCard
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
+import com.prestondihle.healthtracker.ui.trends.BloodPressureTrendCard
+import com.prestondihle.healthtracker.ui.trends.RestingHeartRateTrendCard
+import com.prestondihle.healthtracker.ui.trends.SleepTrendCard
+import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
+import com.prestondihle.healthtracker.ui.trends.WaistTrendCard
+import com.prestondihle.healthtracker.ui.trends.WeightTrendCard
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -78,8 +84,16 @@ import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 @Composable
-fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHostState) {
+fun DashboardScreen(
+    viewModel: DashboardViewModel,
+    trendsViewModel: TrendsViewModel,
+    snackbarHostState: SnackbarHostState,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Wellness draws its longer-run charts (waist, weight, blood pressure, resting
+    // heart rate, sleep) from the same trends source Activity uses, so they read
+    // the same wherever they appear.
+    val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     val permissionLauncher =
@@ -140,41 +154,16 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
             )
         }
 
-        item { BodyCard(state = state, onWaistChange = viewModel::setWaistCm) }
+        // Body and vitals trends. The controls that log these (waist, grip, blood
+        // pressure) now live on the Log tab; what stays here is the read of where
+        // they have gone over the last fortnight.
+        item { WaistTrendCard(trends) }
+        item { WeightTrendCard(trends) }
+        item { BloodPressureTrendCard(trends) }
+        item { RestingHeartRateTrendCard(trends) }
+        item { SleepTrendCard(trends) }
 
-        item {
-            GripStrengthCard(
-                state = state,
-                onLog = { dominant, lbs ->
-                    viewModel.logGripStrengthKg(dominant, Units.lbsToKg(lbs))
-                    val hand = if (dominant) "dominant" else "non-dominant"
-                    toast("Logged ${lbs.toInt()} lb $hand grip")
-                },
-            )
-        }
-
-        item {
-            BloodPressureCard(
-                state = state,
-                onSubmit = { systolic, diastolic ->
-                    viewModel.addBloodPressure(systolic, diastolic)
-                    toast("Logged $systolic/$diastolic")
-                },
-            )
-        }
-
-        item {
-            MoodCard(
-                state = state,
-                onSubmit = { vibe, energy, focus ->
-                    viewModel.submitMood(vibe, energy, focus)
-                    toast("Saved vibe $vibe, energy $energy, focus $focus")
-                },
-            )
-        }
-
-        // The mood trend sits directly under the sliders that feed it, so a score
-        // just submitted can be read against the fortnight it lands in.
+        // The mood trend, still fed by the sliders now on the Log tab.
         item { MoodTrendCard(state = state) }
 
         item {
@@ -188,18 +177,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
             )
         }
 
-        item {
-            ReadingCard(
-                state = state,
-                onLogPages = {
-                    viewModel.logPages(it)
-                    toast("Logged $it pages")
-                },
-                onSetPages = viewModel::setPages,
-            )
-        }
-
-        // Pages read per day, under the control that adds to today's count.
+        // Pages read per day.
         item { ReadingTrendCard(state = state) }
 
         item { Spacer(Modifier.height(8.dp)) }
@@ -668,7 +646,7 @@ private fun MetabolicCard(
 }
 
 @Composable
-private fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
+internal fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
     TrackerCard(title = "Body") {
         // Held locally and written only on Log, so dialling past the target value
         // does not save a string of measurements that were never taken. Re-seeds
@@ -722,7 +700,7 @@ private const val DEFAULT_GRIP_LBS = 90f
  * a couple of presses of the new one.
  */
 @Composable
-private fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) -> Unit) {
+internal fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) -> Unit) {
     TrackerCard(title = "Grip strength") {
         var dominant by
             remember(state.latestGrip?.dominantKg) {
@@ -796,7 +774,7 @@ private fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) ->
 }
 
 @Composable
-private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> Unit) {
+internal fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> Unit) {
     TrackerCard(title = "Blood pressure") {
         var systolic by remember { mutableIntStateOf(120) }
         var diastolic by remember { mutableIntStateOf(80) }
@@ -840,7 +818,7 @@ private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> U
 }
 
 @Composable
-private fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit) {
+internal fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit) {
     TrackerCard(title = "How are you?") {
         var vibe by remember(state.dailyLog.vibe) { mutableIntStateOf(state.dailyLog.vibe ?: 5) }
         var energy by
@@ -936,7 +914,7 @@ private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> 
 }
 
 @Composable
-private fun ReadingCard(
+internal fun ReadingCard(
     state: DashboardUiState,
     onLogPages: (Int) -> Unit,
     onSetPages: (Int) -> Unit,
