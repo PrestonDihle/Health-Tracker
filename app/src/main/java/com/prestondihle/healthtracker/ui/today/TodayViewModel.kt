@@ -37,7 +37,6 @@ import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
@@ -296,10 +295,6 @@ data class TodayUiState(
     private val distinctMeals: List<MealEntry>
         get() = MealDuplicates.collapse(meals.sortedBy { it.id })
 
-    /** How many records the collapse absorbed, so the screen can own up to it. */
-    val duplicatesCollapsed: Int
-        get() = meals.size - distinctMeals.size
-
     /**
      * Meals inside the window, newest first.
      *
@@ -332,46 +327,6 @@ data class TodayUiState(
      */
     val sleepInWindow: List<SleepNight>
         get() = sleep.filter { it.end > windowStart && it.start < windowEnd }
-
-    /**
-     * Times of day that are a stamp rather than a measurement.
-     *
-     * Some nutrition sources record the day and nothing finer, then put every
-     * meal at one fixed time when they hand it to Health Connect. Real data from
-     * the author's phone had every meal at exactly 10:00:00 local -- including
-     * three separate meals on one Tuesday -- and an earlier version of this
-     * checked only for midnight, which that shape sails straight past.
-     *
-     * **A time of day shared to the second by two different meals is the giveaway.**
-     * Genuine timestamps land on a different second every time; a source that
-     * knows only the date lands on the same one for ever. Midnight joins the set
-     * unconditionally, because a lone meal at exactly 00:00:00 is a date too.
-     *
-     * Computed over the meals actually loaded, which reach a little beyond the
-     * plotted window. A narrow window holds too few meals for a repeat to show
-     * up, so the flag is quieter at 3h than at 7d -- which is the right way round:
-     * 7d is where the history worth correcting is.
-     */
-    private val stampedTimesOfDay: Set<LocalTime>
-        get() =
-            distinctMeals
-                .groupBy { it.timestamp.atZone(zoneId).toLocalTime() }
-                .filterValues { it.size > 1 }
-                .keys + LocalTime.MIDNIGHT
-
-    /**
-     * Whether a meal carries a real clock time or only the date it was eaten on.
-     *
-     * An absorption curve anchored to a stamped time describes an hour nobody
-     * ate in, so the screen has to be able to say which meals are placed and
-     * which are merely dated.
-     */
-    fun hasClockTime(meal: MealEntry): Boolean =
-        meal.timestamp.atZone(zoneId).toLocalTime() !in stampedTimesOfDay
-
-    /** Meals in the window carrying a stamped time rather than a measured one. */
-    val undatedMealsInWindow: List<MealEntry>
-        get() = mealsInWindow.filterNot(::hasClockTime)
 
     private val servings: List<MacroServing>
         get() =
@@ -698,55 +653,10 @@ class TodayViewModel(
             }
     }
 
-    /**
-     * Records when a meal was actually eaten.
-     *
-     * The only way to place a meal whose source recorded a date and no time. It
-     * re-anchors that meal's absorption curve, which is the whole reason the
-     * timestamp matters here rather than being a caption.
-     */
-    fun setMealTime(meal: MealEntry, at: Instant) {
-        viewModelScope.launch { repository.setMealTime(meal, at) }
-    }
-
-    /**
-     * Logs a meal by hand.
-     *
-     * A zero is stored as a zero rather than as "not recorded". Everything here
-     * was typed deliberately, so an untouched field genuinely means none of that
-     * macro -- unlike a synced meal, where a missing figure means the app that
-     * wrote it did not break the food down.
-     */
-    fun addMeal(calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) {
-        viewModelScope.launch {
-            repository.addMeal(
-                at = at,
-                calories = calories,
-                proteinGrams = protein.toFloat(),
-                carbGrams = carbs.toFloat(),
-                fatGrams = fat.toFloat(),
-            )
-        }
-    }
-
-    /** Rewrites a meal's macros and time together. */
-    fun updateMeal(meal: MealEntry, calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) {
-        viewModelScope.launch {
-            repository.updateMeal(
-                meal.copy(
-                    timestamp = at,
-                    calories = calories,
-                    proteinGrams = protein.toFloat(),
-                    carbGrams = carbs.toFloat(),
-                    fatGrams = fat.toFloat(),
-                )
-            )
-        }
-    }
-
-    fun deleteMeal(meal: MealEntry) {
-        viewModelScope.launch { repository.deleteMeal(meal) }
-    }
+    // Meals are logged and corrected on the Log tab now, not here: Today only
+    // reads them, to place a marker at each and spread it into an absorption
+    // curve. The add/edit/delete and the stamped-time correction moved with the
+    // meal list to DashboardViewModel.
 
     /**
      * Pulls the window's meals and heart rate from Health Connect.
