@@ -53,6 +53,16 @@ internal val CardSpacing = 6.dp
 internal val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
 /**
+ * Thickness of a progress bar inside a card.
+ *
+ * Shared, unlike ChartHeight: a bar's thickness is a property of the bar and is
+ * the same wherever one is drawn, while how tall a chart should be depends on
+ * whether it is the main subject of its screen or a thumbnail beside other
+ * figures -- which is why that one stays local to each screen.
+ */
+internal val BarHeight = 5.dp
+
+/**
  * One titled panel, stacked down a screen.
  *
  * [subtitle] is for a card whose title cannot carry its own qualification --

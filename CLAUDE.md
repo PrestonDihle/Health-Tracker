@@ -89,11 +89,13 @@ same collision is why the logging tab is **Log** rather than Log Book, the other
 being that two words do not fit a sixth of a phone's width.
 
 **The cards are mid-move between tabs.** Today, Log, Fuel and Settings open the screen they will
-keep — Fuel with its fasting cards so far and the rest still to come; Activity and Wellness are
-wired to the old trends and landing screens until their own cards arrive. A screen unhooked before
-its replacement exists would leave everything it carries unloggable in the meantime, on the phone
+keep — Fuel still wants its glucose, meals and macro cards; Activity and Wellness are wired to the
+old trends and landing screens until their own cards arrive. A screen unhooked before its
+replacement exists would leave everything it carries unloggable in the meantime, on the phone
 holding the only copy of this data — so nothing is unhooked early, and `TrackerNavHost` names the
-eventual owner of every temporary route.
+eventual owner of every temporary route. For the same reason the Activity card is drawn on *both*
+Today and the old landing screen for now: it carries that screen's only refresh control, and the
+cards still sitting there need a way to sync until Wellness has one of its own.
 
 One place where the tab and the code disagree, and it will come up:
 
@@ -928,12 +930,17 @@ database and `MockHealthDataSource`, asserting on the rendered tree and capturin
 Roborazzi. The chart canvas does a lot of arithmetic that only runs under a real layout pass, so
 these catch empty-list and divide-by-zero crashes no pure-JVM test reaches.
 
-**The dashboard cannot be scrolled in a test.** `DashboardViewModel` runs a one-second ticker for the
-live fast timer, so the screen never reaches the idle state `performScrollToNode` waits on — it
-retries, times out after a minute, and throws `AppNotIdleException`. Anything below the fold there
-has to be asserted on a screen that does not tick, which is why the glucose smoothing and target band
-are covered in `MasterGraphRenderTest` even though they also appear on the dashboard. The drawing
-code is shared, so covering it once covers both.
+**A screen carrying the fast timer cannot be scrolled in a test.** The one-second ticker that drives
+it means the screen never reaches the idle state `performScrollToNode` waits on — it retries, times
+out after a minute, and throws `AppNotIdleException`. Anything below the fold there has to be
+asserted on a screen that does not tick, which is why the glucose smoothing and target band are
+covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
+
+**That ticker now belongs to `FuelViewModel`**, which followed the fast card off the dashboard, and
+Fuel is the longest tab in the app at thirteen cards — so it has the problem worse than the
+dashboard ever did. Today is the screen that gained by the swap: its `minuteTicker` looks like a
+ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master
+graph's suite can scroll and wait on idle at all.
 
 **`MasterGraphRenderTest` times out under load, and it is not a real failure.** Compose's idling
 strategy gives up after 60 seconds with `AppNotIdleException` and a message suggesting an infinite
@@ -941,6 +948,24 @@ composition loop. On a busy machine this suite has taken anything from 40 second
 identical code, and the timeout has hit a *different* test each time while the class passed in
 isolation immediately after. **An infinite loop fails the same test every run** — that is the
 distinction worth checking before going looking for one. Re-run the class alone before believing it.
+
+**That rule only holds while the load is intermittent, and it is worth knowing how it fails.** Under
+*sustained* starvation — this machine has 7.8 GB and a session of its own can leave barely 1 GB free
+— the slowest tests cross the 60-second threshold every single run, so the failing set stays stable
+and looks exactly like a real defect. Three runs here gave three, two and three failures with the
+same two always among them, which by the rule above should have meant a composition loop. It did
+not: the class fails the same way on a commit that had passed all 199 an hour earlier, and took
+**42 minutes** where it is documented at 211 seconds.
+
+**The check that actually settles it is running the suspect class at a known-green commit** —
+`git stash push -u`, run, `git stash pop`. Cheap, and it separates "my change did this" from "this
+machine cannot run this suite today" in one go, which neither the failing set nor a re-run can.
+
+When the render suites cannot be trusted, the other **24 classes and 181 tests run in 40 seconds**
+and are unaffected — they render no Compose. Naming them explicitly with repeated `--tests` flags
+gives a real gate for everything except whether a screen draws, which no test here was answering
+anyway. Say plainly in the commit which of the two was verified; a test count that quietly means
+something narrower than usual is worse than no count.
 
 **A click on an off-screen node is clamped into view and lands on nothing, silently.** It does not
 throw. Eight series switches wrap onto three rows and the chart card no longer fits the screen, so

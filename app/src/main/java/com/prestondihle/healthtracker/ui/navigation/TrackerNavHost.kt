@@ -123,7 +123,7 @@ fun TrackerNavHost(appContainer: AppContainer) {
                     viewModel(
                         factory = FuelViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                FuelScreen(vm)
+                FuelScreen(vm, snackbarHostState)
             }
             // Temporary: Activity eventually carries grip strength and movement
             // beside the step, grip, pushup and squat trends. The old Trends
