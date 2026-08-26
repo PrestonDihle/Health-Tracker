@@ -252,50 +252,8 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
             }
         }
 
-        // One chart rather than three. The three scores are submitted together
-        // against the same 1-10 scale, and the question actually asked of them is
-        // whether they move together -- which stacked separately took three
-        // screenfuls of scrolling to answer.
-        item {
-            TrendCard(title = "Vibe, energy and focus", subtitle = "1 to 10") {
-                MultiLineChart(
-                    series =
-                        listOf(
-                            LineSeries(
-                                label = "Vibe",
-                                points = state.logSeries { it.vibe?.toFloat() },
-                                color = chartColors.vibe,
-                                style = LineStyle.SOLID,
-                            ),
-                            LineSeries(
-                                label = "Energy",
-                                points = state.logSeries { it.energy?.toFloat() },
-                                color = chartColors.energy,
-                                style = LineStyle.DASHED,
-                            ),
-                            LineSeries(
-                                label = "Focus",
-                                points = state.logSeries { it.focus?.toFloat() },
-                                color = chartColors.focus,
-                                style = LineStyle.DOTTED,
-                            ),
-                        ),
-                    minY = 1f,
-                    maxY = 10f,
-                    modifier = Modifier.fillMaxWidth().height(170.dp),
-                )
-            }
-        }
-
-        item {
-            TrendCard(title = "Pages read", subtitle = "per day") {
-                BarChart(
-                    days = state.logSeries { it.bookPagesRead?.toFloat() },
-                    goalLine = state.goals.dailyPagesGoal?.toFloat(),
-                    modifier = Modifier.fillMaxWidth().height(140.dp),
-                )
-            }
-        }
+        // Vibe/energy/focus and pages-read trends moved to the Wellness screen,
+        // where they sit under the sliders and page control that feed them.
     }
 }
 

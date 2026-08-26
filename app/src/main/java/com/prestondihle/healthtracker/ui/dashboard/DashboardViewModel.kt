@@ -31,6 +31,7 @@ import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
+import com.prestondihle.healthtracker.ui.components.DayPoint
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,6 +47,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 /** Default waist when nothing has ever been measured: 42 inches. */
@@ -113,6 +115,15 @@ private val SLEEP_HEART_RATE_HISTORY: Duration = Duration.ofHours(36)
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
 
+/**
+ * How many days of daily-log history the Wellness trends read back over.
+ *
+ * Two weeks matches the Trends screen's default window, so the mood and reading
+ * charts shown next to their inputs here read the same as their fuller versions
+ * on Activity.
+ */
+private const val LOG_HISTORY_DAYS = 14L
+
 data class DashboardUiState(
     val today: LocalDate = LocalDate.now(),
     val now: Instant = Instant.now(),
@@ -136,6 +147,10 @@ data class DashboardUiState(
     val sleepHeartRate: List<HeartRateBucket> = emptyList(),
     val hydrationMl: Int = 0,
     val dailyLog: DailyLog = DailyLog(LocalDate.now()),
+    /** Recent daily logs for the mood and reading trends shown next to their inputs. */
+    val logHistory: List<DailyLog> = emptyList(),
+    val historyStart: LocalDate = LocalDate.now().minusDays(LOG_HISTORY_DAYS - 1),
+    val historyEnd: LocalDate = LocalDate.now(),
     val waistCm: Float = DEFAULT_WAIST_CM,
     val hasWaistMeasurement: Boolean = false,
     /** Most recent stored waist measurement, with the date it was taken. */
@@ -178,6 +193,21 @@ data class DashboardUiState(
                             it.goalDurationMinutes)
                         .coerceIn(0f, 1f)
             }
+
+    /** Every date in the trend window, oldest first, including days with nothing logged. */
+    private val historyDays: List<LocalDate>
+        get() = (0..ChronoUnit.DAYS.between(historyStart, historyEnd)).map { historyStart.plusDays(it) }
+
+    /**
+     * One point per day over the trend window, null on days the field is unset.
+     *
+     * The same shape the Trends screen draws from, so the mood and reading charts
+     * here match their fuller counterparts on Activity.
+     */
+    fun logSeries(valueOf: (DailyLog) -> Float?): List<DayPoint> {
+        val byDate = logHistory.associate { it.date to valueOf(it) }
+        return historyDays.map { DayPoint(it, byDate[it]) }
+    }
 
     /**
      * Creatine taken today, in grams.
@@ -344,6 +374,7 @@ private data class TodayBundle(
     val waist: WaistEntry?,
     val bloodPressures: List<BloodPressureReading>,
     val creatine: List<CreatineIntake>,
+    val logHistory: List<DailyLog>,
     val body: BodyBundle,
 )
 
@@ -449,7 +480,8 @@ class DashboardViewModel(
                 combine(
                     repository.getBloodPressureForDate(date),
                     repository.getCreatineForDate(date),
-                ) { bps, creatine -> bps to creatine },
+                    repository.getDailyLogs(date.minusDays(LOG_HISTORY_DAYS - 1), date),
+                ) { bps, creatine, logHistory -> Triple(bps, creatine, logHistory) },
                 combine(
                     repository.getRepTotalForDate(MovementType.PUSHUP, date),
                     repository.getRepTotalForDate(MovementType.AIR_SQUAT, date),
@@ -459,13 +491,14 @@ class DashboardViewModel(
                 ) { pushups, squats, grip, supplements, taken ->
                     BodyBundle(pushups, squats, grip, supplements, taken)
                 },
-            ) { log, hydration, waist, bpAndCreatine, body ->
+            ) { log, hydration, waist, bpCreatineHistory, body ->
                 TodayBundle(
                     log,
                     hydration,
                     waist,
-                    bpAndCreatine.first,
-                    bpAndCreatine.second,
+                    bpCreatineHistory.first,
+                    bpCreatineHistory.second,
+                    bpCreatineHistory.third,
                     body,
                 )
             }
@@ -553,6 +586,9 @@ class DashboardViewModel(
                     sleepHeartRate = health.heartRate,
                     hydrationMl = todayBundle.hydrationMl,
                     dailyLog = todayBundle.log ?: DailyLog(date),
+                    logHistory = todayBundle.logHistory,
+                    historyStart = date.minusDays(LOG_HISTORY_DAYS - 1),
+                    historyEnd = date,
                     waistCm = todayBundle.waist?.waistCm ?: DEFAULT_WAIST_CM,
                     hasWaistMeasurement = todayBundle.waist != null,
                     latestWaist = todayBundle.waist,

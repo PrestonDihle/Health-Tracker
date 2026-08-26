@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -78,7 +79,10 @@ fun TrackerNavHost(appContainer: AppContainer) {
                 Screen.entries.forEach { screen ->
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.label) },
-                        label = { Text(screen.label) },
+                        // Smaller than the bar's default label so six of them fit on
+                        // one line each -- "Wellness" wrapped to a second line at the
+                        // stock size, which stole height from every tab's icon.
+                        label = { Text(screen.label, fontSize = 10.sp, maxLines = 1) },
                         selected =
                             currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                         onClick = {

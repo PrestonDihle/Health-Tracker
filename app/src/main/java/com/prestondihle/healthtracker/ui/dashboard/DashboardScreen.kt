@@ -50,6 +50,7 @@ import com.prestondihle.healthtracker.health.HealthPermissionState
 import androidx.compose.material3.FilterChip
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
+import com.prestondihle.healthtracker.ui.components.BarChart
 import com.prestondihle.healthtracker.ui.components.BarHeight
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.ChartAxis
@@ -59,8 +60,11 @@ import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.InlineLogButton
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.LabeledSlider
+import com.prestondihle.healthtracker.ui.components.LineSeries
+import com.prestondihle.healthtracker.ui.components.LineStyle
 import com.prestondihle.healthtracker.ui.components.LogButton
 import com.prestondihle.healthtracker.ui.components.Metric
+import com.prestondihle.healthtracker.ui.components.MultiLineChart
 import com.prestondihle.healthtracker.ui.components.ScaleDescriptors
 import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.components.TimePoint
@@ -169,6 +173,10 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
             )
         }
 
+        // The mood trend sits directly under the sliders that feed it, so a score
+        // just submitted can be read against the fortnight it lands in.
+        item { MoodTrendCard(state = state) }
+
         item {
             MovementCard(
                 state = state,
@@ -190,6 +198,9 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
                 onSetPages = viewModel::setPages,
             )
         }
+
+        // Pages read per day, under the control that adds to today's count.
+        item { ReadingTrendCard(state = state) }
 
         item { Spacer(Modifier.height(8.dp)) }
     }
@@ -844,6 +855,46 @@ private fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit)
     }
 }
 
+/**
+ * The last fortnight of vibe, energy and focus on one chart.
+ *
+ * One chart rather than three: the scores are submitted together against the
+ * same 1-10 scale, and the question asked of them is whether they move together.
+ * Moved here from the Activity trends so it reads next to the sliders it plots.
+ */
+@Composable
+private fun MoodTrendCard(state: DashboardUiState) {
+    val chartColors = LocalChartColors.current
+    TrackerCard(title = "Vibe, energy and focus", subtitle = "1 to 10") {
+        MultiLineChart(
+            series =
+                listOf(
+                    LineSeries(
+                        label = "Vibe",
+                        points = state.logSeries { it.vibe?.toFloat() },
+                        color = chartColors.vibe,
+                        style = LineStyle.SOLID,
+                    ),
+                    LineSeries(
+                        label = "Energy",
+                        points = state.logSeries { it.energy?.toFloat() },
+                        color = chartColors.energy,
+                        style = LineStyle.DASHED,
+                    ),
+                    LineSeries(
+                        label = "Focus",
+                        points = state.logSeries { it.focus?.toFloat() },
+                        color = chartColors.focus,
+                        style = LineStyle.DOTTED,
+                    ),
+                ),
+            minY = 1f,
+            maxY = 10f,
+            modifier = Modifier.fillMaxWidth().height(170.dp),
+        )
+    }
+}
+
 @Composable
 private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> Unit) {
     TrackerCard(title = "Movement") {
@@ -933,6 +984,24 @@ private fun ReadingCard(
             trailingContent = {
                 InlineLogButton(contentDescription = "Log pages", onClick = { onLogPages(pages) })
             },
+        )
+    }
+}
+
+/**
+ * Pages read per day over the last fortnight, with the daily goal marked.
+ *
+ * Zero-height days are real zeros here, not gaps: pages are only ever recorded by
+ * logging them. Moved from the Activity trends to sit under the control that adds
+ * to today's count.
+ */
+@Composable
+private fun ReadingTrendCard(state: DashboardUiState) {
+    TrackerCard(title = "Pages read", subtitle = "per day") {
+        BarChart(
+            days = state.logSeries { it.bookPagesRead?.toFloat() },
+            goalLine = state.goals.dailyPagesGoal?.toFloat(),
+            modifier = Modifier.fillMaxWidth().height(140.dp),
         )
     }
 }
