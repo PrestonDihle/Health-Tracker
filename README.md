@@ -17,10 +17,10 @@ reps and reading.
 | **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
 
 The cards are being moved into this arrangement a tab at a time. Until that
-finishes, Fuel, Activity and Wellness open the screen holding most of what they
-will carry — the old fasting, trends and landing screens respectively — and Log
-is empty. Nothing has been made unreachable in the meantime; the tab a card
-opens under is the only thing that changes.
+finishes, Fuel carries its fasting cards and nothing else yet, Activity and
+Wellness open the old trends and landing screens, and Log is empty. Nothing has
+been made unreachable in the meantime; the tab a card opens under is the only
+thing that changes.
 
 ## Reference lines
 

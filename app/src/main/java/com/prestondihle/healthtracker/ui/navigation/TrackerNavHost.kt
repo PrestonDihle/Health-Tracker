@@ -30,8 +30,8 @@ import androidx.navigation.compose.rememberNavController
 import com.prestondihle.healthtracker.di.AppContainer
 import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
-import com.prestondihle.healthtracker.ui.fasting.FastingPlanScreen
-import com.prestondihle.healthtracker.ui.fasting.FastingPlanViewModel
+import com.prestondihle.healthtracker.ui.fuel.FuelScreen
+import com.prestondihle.healthtracker.ui.fuel.FuelViewModel
 import com.prestondihle.healthtracker.ui.placeholder.PlaceholderScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsViewModel
@@ -49,11 +49,11 @@ import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
  * characters of "Settings", which has always fitted -- which is why Nutrition
  * became Fuel and Wellbeing became Wellness rather than being left to truncate.
  *
- * Three tabs are wired to a screen that is not their eventual one. The cards are
- * moved a tab at a time, and unhooking a screen before its replacement exists
- * would leave the reader unable to log anything it carried in the meantime --
- * on the phone holding the only copy of this data. Each temporary route below
- * says what will replace it.
+ * Activity and Wellness are still wired to a screen that is not their eventual
+ * one. The cards are moved a tab at a time, and unhooking a screen before its
+ * replacement exists would leave the reader unable to log anything it carried in
+ * the meantime -- on the phone holding the only copy of this data. Each
+ * temporary route below says what will replace it.
  */
 enum class Screen(val route: String, val label: String, val icon: ImageVector) {
     Today("today", "Today", Icons.Filled.QueryStats),
@@ -115,15 +115,15 @@ fun TrackerNavHost(appContainer: AppContainer) {
                             "card on its own tab.",
                 )
             }
-            // Temporary: Fuel eventually carries fasting plus hydration,
-            // caffeine, creatine, supplements, glucose and ketones, meals and
-            // the macro trend. Fasting is the part that already exists.
+            // Fuel's own screen, still filling up: fasting has arrived, and
+            // hydration, caffeine, creatine, supplements, glucose and ketones,
+            // the day's meals and the macro trend follow.
             composable(Screen.Fuel.route) {
-                val vm: FastingPlanViewModel =
+                val vm: FuelViewModel =
                     viewModel(
-                        factory = FastingPlanViewModel.provideFactory(appContainer.trackerRepository)
+                        factory = FuelViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                FastingPlanScreen(vm)
+                FuelScreen(vm)
             }
             // Temporary: Activity eventually carries grip strength and movement
             // beside the step, grip, pushup and squat trends. The old Trends

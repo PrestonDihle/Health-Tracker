@@ -88,11 +88,12 @@ metric with a daily goal (`DailyLog.bookPagesRead`), so the word already means s
 same collision is why the logging tab is **Log** rather than Log Book, the other half of the reason
 being that two words do not fit a sixth of a phone's width.
 
-**The cards are mid-move between tabs.** Today, Log and Settings open the screen they will keep;
-Fuel, Activity and Wellness are wired to the old fasting, trends and landing screens until their
-own cards arrive. A screen unhooked before its replacement exists would leave everything it carries
-unloggable in the meantime, on the phone holding the only copy of this data — so nothing is unhooked
-early, and `TrackerNavHost` names the eventual owner of every temporary route.
+**The cards are mid-move between tabs.** Today, Log, Fuel and Settings open the screen they will
+keep — Fuel with its fasting cards so far and the rest still to come; Activity and Wellness are
+wired to the old trends and landing screens until their own cards arrive. A screen unhooked before
+its replacement exists would leave everything it carries unloggable in the meantime, on the phone
+holding the only copy of this data — so nothing is unhooked early, and `TrackerNavHost` names the
+eventual owner of every temporary route.
 
 One place where the tab and the code disagree, and it will come up:
 

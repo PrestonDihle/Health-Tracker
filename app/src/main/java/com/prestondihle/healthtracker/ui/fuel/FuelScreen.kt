@@ -1,4 +1,4 @@
-﻿package com.prestondihle.healthtracker.ui.fasting
+﻿package com.prestondihle.healthtracker.ui.fuel
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -61,7 +61,7 @@ private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
 private data class TimeEdit(val day: DayOfWeek, val editingStart: Boolean, val initial: LocalTime)
 
 @Composable
-fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
+fun FuelScreen(viewModel: FuelViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var timeEdit by remember { mutableStateOf<TimeEdit?>(null) }
     var addingFast by remember { mutableStateOf(false) }
@@ -74,7 +74,7 @@ fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
         item { AdherenceCard(state) }
 
         item {
-            PlanCard(
+            FuelCard(
                 title = "Fasting pattern",
                 subtitle = "Last 14 days. Filled is fasted, blank is eating.",
             ) {
@@ -85,7 +85,7 @@ fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
         item { StatsCard(state.stats) }
 
         item {
-            PlanCard(
+            FuelCard(
                 title = "Weekly plan",
                 subtitle = "Times are when eating is allowed. Switch a day off for no eating at all.",
             ) {
@@ -104,7 +104,7 @@ fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
         }
 
         item {
-            PlanCard(
+            FuelCard(
                 title = "Extended fasts",
                 subtitle = "These override the weekly plan for the days they cover",
             ) {
@@ -145,8 +145,8 @@ fun FastingPlanScreen(viewModel: FastingPlanViewModel) {
 }
 
 @Composable
-private fun AdherenceCard(state: FastingPlanUiState) {
-    PlanCard(title = "Adherence", subtitle = "Week of ${DATE_FORMAT.format(state.weekStart)}") {
+private fun AdherenceCard(state: FuelUiState) {
+    FuelCard(title = "Adherence", subtitle = "Week of ${DATE_FORMAT.format(state.weekStart)}") {
         val score = state.adherence?.score
         Text(
             text = score?.let { "$it%" } ?: "--",
@@ -181,7 +181,7 @@ private fun AdherenceCard(state: FastingPlanUiState) {
 
 @Composable
 private fun StatsCard(stats: FastingStats) {
-    PlanCard(title = "Fasting stats", subtitle = "Totals count overlapping fasts only once") {
+    FuelCard(title = "Fasting stats", subtitle = "Totals count overlapping fasts only once") {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -408,7 +408,7 @@ private fun AddExtendedFastDialog(
 }
 
 @Composable
-private fun PlanCard(title: String, subtitle: String?, content: @Composable () -> Unit) {
+private fun FuelCard(title: String, subtitle: String?, content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

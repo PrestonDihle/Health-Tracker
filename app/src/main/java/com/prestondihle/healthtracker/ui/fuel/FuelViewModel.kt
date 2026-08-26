@@ -1,4 +1,4 @@
-﻿package com.prestondihle.healthtracker.ui.fasting
+﻿package com.prestondihle.healthtracker.ui.fuel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -29,7 +29,7 @@ import java.time.temporal.TemporalAdjusters
 /** How far back the timeline draws. Two weeks fits a phone without scrolling forever. */
 private const val TIMELINE_DAYS = 14L
 
-data class FastingPlanUiState(
+data class FuelUiState(
     val days: List<FastingPlanDay> = emptyList(),
     val extendedFasts: List<PlannedExtendedFast> = emptyList(),
     val adherence: AdherenceResult? = null,
@@ -72,7 +72,7 @@ data class FastingPlanUiState(
         }
 }
 
-class FastingPlanViewModel(
+class FuelViewModel(
     private val repository: TrackerRepository,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
 ) : ViewModel() {
@@ -83,7 +83,7 @@ class FastingPlanViewModel(
             start.plusWeeks(1).atStartOfDay(zoneId).toInstant()
     }
 
-    val uiState: StateFlow<FastingPlanUiState> =
+    val uiState: StateFlow<FuelUiState> =
         run {
             val today = LocalDate.now(zoneId)
             val (weekStart, weekEnd) = weekBounds(today)
@@ -118,7 +118,7 @@ class FastingPlanViewModel(
                         now = now,
                     )
 
-                FastingPlanUiState(
+                FuelUiState(
                     days = plan,
                     extendedFasts = extended,
                     adherence =
@@ -147,7 +147,7 @@ class FastingPlanViewModel(
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = FastingPlanUiState(),
+                initialValue = FuelUiState(),
             )
 
     init {
@@ -204,7 +204,7 @@ class FastingPlanViewModel(
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    FastingPlanViewModel(repository) as T
+                    FuelViewModel(repository) as T
             }
     }
 }
