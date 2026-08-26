@@ -1,10 +1,11 @@
-package com.prestondihle.healthtracker.ui.master
+package com.prestondihle.healthtracker.ui.today
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.BloodSugarReading
 import com.prestondihle.healthtracker.data.CaffeineIntake
+import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MealEntry
@@ -35,6 +36,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
@@ -143,7 +145,7 @@ private const val CURVE_STEP_MAX_SECONDS = 600L
  */
 private val SLEEP_HISTORY: Duration = Duration.ofHours(18)
 
-data class MasterGraphUiState(
+data class TodayUiState(
     val range: MasterRange = MasterRange.DAY,
     val now: Instant = Instant.now(),
     val meals: List<MealEntry> = emptyList(),
@@ -168,6 +170,16 @@ data class MasterGraphUiState(
      * rather than starting inside it says.
      */
     val sleep: List<SleepNight> = emptyList(),
+    /**
+     * Today's rolled-up figures, for the totals above the plot.
+     *
+     * The daily cache rather than the time series: steps, sleep, calories and
+     * macros are asked for as a day here, and the series below already answer
+     * *when*. Null until the first sync of the day lands.
+     */
+    val snapshot: HealthDaySnapshot? = null,
+    /** Average pace over runs of at least a mile, all-time. Not a personal best. */
+    val bestMileSeconds: Int? = null,
     val goals: UserGoals = UserGoals(),
     /** Drawn smoothed only when the user has asked for it in settings. */
     val smoothGlucose: Boolean = false,
@@ -384,45 +396,25 @@ data class MasterGraphUiState(
                     .coerceIn(CURVE_STEP_MIN_SECONDS, CURVE_STEP_MAX_SECONDS)
             )
 
-    /** What is entering the blood right now, for the read-out above the chart. */
-    fun rateNow(macro: Macro): Float = MacroAbsorption.rateAt(servings, macro, now)
+    /**
+     * Calories eaten so far today. Nothing logged means nothing eaten.
+     *
+     * Unlike the burn figures this is not a measurement that might simply not
+     * have synced yet -- food reaches Health Connect only by being entered by
+     * hand, so an absent value and a zero are the same statement.
+     */
+    val caloriesEaten: Int
+        get() = snapshot?.dietaryCalories ?: 0
 
     /**
-     * The most recent meal that has not finished absorbing, if any.
+     * Calories eaten minus calories burned, or null while the burn is unknown.
      *
-     * Used to say how far along it is, which is the question the curves are drawn
-     * to answer and is otherwise left to eyeballing the slope.
+     * Negative is a deficit. The burn half keeps its guard: it comes from a watch,
+     * so a missing value means "not synced", and standing in a zero would report
+     * a surplus the size of the day's food.
      */
-    val lastMeal: MealEntry?
-        get() = distinctMeals.maxByOrNull { it.timestamp }
-
-    /** How much of [lastMeal]'s carbohydrate has reached the blood, as a fraction. */
-    fun lastMealAbsorbed(macro: Macro): Float? =
-        lastMeal?.let { MacroAbsorption.absorbedFraction(macro, it.timestamp, now) }
-
-    val latestGlucose: BloodSugarReading?
-        get() = glucose.maxByOrNull { it.timestamp }
-
-    val latestKetone: KetoneReading?
-        get() = ketones.maxByOrNull { it.timestamp }
-
-    val latestHeartRate: HeartRateBucket?
-        get() = heartRate.maxByOrNull { it.bucketStartMillis }
-
-    /**
-     * Steps in the last complete hour, for the read-out above the chart.
-     *
-     * The hour in progress is deliberately skipped: it is a fraction of an hour's
-     * walking quoted as an hourly figure, so it reads as a collapse in activity
-     * for fifty-nine minutes out of every sixty.
-     */
-    val stepsLastHour: StepBucket?
-        get() {
-            val currentHourStart =
-                now.atZone(zoneId).truncatedTo(ChronoUnit.HOURS).toInstant().toEpochMilli()
-            return steps.filter { it.hourStartMillis < currentHourStart }
-                .maxByOrNull { it.hourStartMillis }
-        }
+    val netCalories: Int?
+        get() = snapshot?.totalCalories?.let { caloriesEaten - it }
 
     val hasAnything: Boolean
         get() =
@@ -451,7 +443,18 @@ private data class PreferenceBundle(
     val goals: UserGoals,
     val smoothGlucose: Boolean,
     val labelledAxes: List<AxisMetric>,
+    val snapshot: HealthDaySnapshot?,
+    val bestMileSeconds: Int?,
 )
+
+/**
+ * The day rolled up, which no series on the plot can answer.
+ *
+ * Bundled separately and folded in below because `combine` takes five sources at
+ * a time, and these two are the only ones here asked for as a *day* rather than
+ * as a span.
+ */
+private data class DailyBundle(val snapshot: HealthDaySnapshot?, val bestMileSeconds: Int?)
 
 /** Which slice of the timeline is on screen: how wide, and how far back. */
 private data class WindowBundle(val range: MasterRange, val panOffset: Duration)
@@ -482,7 +485,7 @@ internal fun pannedTo(current: Duration, delta: Duration): Duration {
  * Everything that happens on one timeline: what was eaten, how it is being
  * absorbed, and how blood sugar, ketones and heart rate moved in response.
  */
-class MasterGraphViewModel(
+class TodayViewModel(
     private val repository: TrackerRepository,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
 ) : ViewModel() {
@@ -565,31 +568,43 @@ class MasterGraphViewModel(
         }
 
     /** Bundled because combine's typed overloads stop at five sources. */
+    private val today: LocalDate
+        get() = LocalDate.now(zoneId)
+
+    private val daily: Flow<DailyBundle> =
+        combine(
+            repository.getHealthSnapshot(today),
+            repository.getBestMileSecondsAllTime(),
+            ::DailyBundle,
+        )
+
     private val preferences: Flow<PreferenceBundle> =
         combine(
             syncing,
             visibleSeries,
-            repository.getUserGoals(),
-            repository.getUserSettings(),
             labelledAxes,
-        ) { isSyncing, visible, goals, settings, axes ->
+            combine(repository.getUserGoals(), repository.getUserSettings(), ::Pair),
+            daily,
+        ) { isSyncing, visible, axes, (goals, settings), day ->
             PreferenceBundle(
                 isSyncing = isSyncing,
                 visibleSeries = visible,
                 goals = goals ?: UserGoals(),
                 smoothGlucose = settings?.smoothGlucose ?: false,
                 labelledAxes = axes,
+                snapshot = day.snapshot,
+                bestMileSeconds = day.bestMileSeconds,
             )
         }
 
-    val uiState: StateFlow<MasterGraphUiState> =
+    val uiState: StateFlow<TodayUiState> =
         combine(seriesFlow, window, minuteTicker, healthState, preferences) {
             series,
             viewed,
             now,
             permission,
             prefs ->
-            MasterGraphUiState(
+            TodayUiState(
                 range = viewed.range,
                 panOffset = viewed.panOffset,
                 now = now,
@@ -600,6 +615,8 @@ class MasterGraphViewModel(
                 steps = series.steps,
                 caffeine = series.caffeine,
                 sleep = series.sleep,
+                snapshot = prefs.snapshot,
+                bestMileSeconds = prefs.bestMileSeconds,
                 goals = prefs.goals,
                 smoothGlucose = prefs.smoothGlucose,
                 healthState = permission,
@@ -612,7 +629,7 @@ class MasterGraphViewModel(
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = MasterGraphUiState(zoneId = zoneId),
+                initialValue = TodayUiState(zoneId = zoneId),
             )
 
     init {
@@ -753,7 +770,14 @@ class MasterGraphViewModel(
                 to.minus(Duration.ofHours(range.value.hours + MacroAbsorption.RELEVANT_HISTORY_HOURS))
             syncing.value = true
             repository.syncTimeSeries(from, to)
-            // Glucose is not part of syncTimeSeries -- it is cached a calendar
+            // The totals card above the plot reads the daily snapshot, and
+            // `syncTimeSeries` does not write it: steps, sleep, calories and
+            // macros are rolled up a day at a time by `syncHealthData` alone.
+            // Syncing only the series would leave that card blank over a chart
+            // drawn from the very walk it could not report -- which is the shape
+            // the sleep card already shipped in once, the other way round.
+            repository.syncHealthData(today)
+            // Glucose is not part of either sync -- it is cached a calendar
             // day at a time -- so a hole in the trace this chart is drawing is
             // only ever filled by going back for it deliberately. Anchored at now
             // rather than at the window: the backfill covers a fixed 72 hours,
@@ -768,7 +792,7 @@ class MasterGraphViewModel(
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    MasterGraphViewModel(repository) as T
+                    TodayViewModel(repository) as T
             }
     }
 }

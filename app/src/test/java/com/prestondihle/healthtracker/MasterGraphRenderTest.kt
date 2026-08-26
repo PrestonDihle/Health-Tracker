@@ -39,11 +39,11 @@ import com.prestondihle.healthtracker.health.MealSample
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.health.SleepSessionSample
 import com.prestondihle.healthtracker.repository.TrackerRepository
-import com.prestondihle.healthtracker.ui.master.MasterGraphScreen
-import com.prestondihle.healthtracker.ui.master.MasterGraphViewModel
-import com.prestondihle.healthtracker.ui.master.MasterRange
-import com.prestondihle.healthtracker.ui.master.MasterSeries
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.today.MasterRange
+import com.prestondihle.healthtracker.ui.today.MasterSeries
+import com.prestondihle.healthtracker.ui.today.TodayScreen
+import com.prestondihle.healthtracker.ui.today.TodayViewModel
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -195,10 +195,10 @@ class MasterGraphRenderTest {
         seed: suspend (TrackerRepository) -> Unit = {},
     ) {
         runBlocking { seed(repository) }
-        val viewModel = MasterGraphViewModel(repository, ZoneId.of("UTC"))
+        val viewModel = TodayViewModel(repository, ZoneId.of("UTC"))
         composeRule.setContent {
             HealthTrackerTheme {
-                Surface(modifier = Modifier.fillMaxSize()) { MasterGraphScreen(viewModel) }
+                Surface(modifier = Modifier.fillMaxSize()) { TodayScreen(viewModel) }
             }
         }
         composeRule.waitForIdle()
@@ -232,7 +232,7 @@ class MasterGraphRenderTest {
     fun `renders with synced meals, heart rate and steps`() {
         renderScreen()
 
-        composeRule.onNodeWithText("Right now").assertIsDisplayed()
+        composeRule.onNodeWithText("Activity").assertIsDisplayed()
         composeRule.onNodeWithText("Food, blood and body").assertIsDisplayed()
         composeRule.onRoot().captureRoboImage("build/screenshots/master_graph.png")
 
@@ -389,25 +389,29 @@ class MasterGraphRenderTest {
             )
         }
 
-        // Waiting on the meal list itself is not possible: it is the last card in
-        // a lazy column, so it is not composed until something scrolls to it, and
-        // scrolling to a node that does not exist yet throws. The "Last meal"
-        // line in the card at the top is driven by the same meals and is on
-        // screen from the start, so it is what says the sync has landed.
+        // The meal list is the last card on the screen, and a lazy column does
+        // not compose what is below the fold -- so the sync cannot be waited on
+        // before something scrolls down to it, and scrolling to a node that does
+        // not exist yet throws. The card's *title* is what breaks that circle:
+        // it is drawn whether or not there are any meals, so it can be reached
+        // before the sync has landed and the wait can happen once we are there.
+        //
+        // Scrolling is available here in a way it is not on the dashboard: this
+        // screen's ticker is a plain state flow nudged on refresh, not a loop, so
+        // it reaches idle.
+        composeRule
+            .onNode(hasScrollAction())
+            .performScrollToNode(hasText("Meals in this window"))
         composeRule.waitUntil(SETTLE_TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Last meal", substring = true)
+                .onAllNodesWithText("merged", substring = true)
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
 
-        // The meal list is the last card on the screen. Scrolling is available
-        // here in a way it is not on the dashboard: this screen's ticker is a
-        // plain state flow nudged on refresh, not a loop, so it reaches idle.
-        //
-        // Scrolled to the note at the *foot* of the card rather than its title:
-        // stopping at the title leaves the card straddling the bottom edge, and
-        // everything below the fold is found but not displayed.
+        // Scrolled again, to the note at the *foot* of the card rather than its
+        // title: stopping at the title leaves the card straddling the bottom
+        // edge, and everything below the fold is found but not displayed.
         composeRule
             .onNode(hasScrollAction())
             .performScrollToNode(hasText("merged", substring = true))

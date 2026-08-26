@@ -4,10 +4,10 @@ import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.domain.Macro
-import com.prestondihle.healthtracker.ui.master.MasterGraphUiState
-import com.prestondihle.healthtracker.ui.master.MasterRange
-import com.prestondihle.healthtracker.ui.master.PAN_SNAP
-import com.prestondihle.healthtracker.ui.master.pannedTo
+import com.prestondihle.healthtracker.ui.today.MasterRange
+import com.prestondihle.healthtracker.ui.today.PAN_SNAP
+import com.prestondihle.healthtracker.ui.today.TodayUiState
+import com.prestondihle.healthtracker.ui.today.pannedTo
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -36,7 +36,7 @@ class PanWindowTest {
         meals: List<MealEntry> = emptyList(),
         caffeine: List<CaffeineIntake> = emptyList(),
     ) =
-        MasterGraphUiState(
+        TodayUiState(
             range = range,
             now = now,
             panOffset = panOffset,

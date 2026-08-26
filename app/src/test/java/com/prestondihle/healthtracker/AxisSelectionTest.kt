@@ -1,15 +1,15 @@
 package com.prestondihle.healthtracker
 
 import com.prestondihle.healthtracker.ui.components.ChartAxis
-import com.prestondihle.healthtracker.ui.master.AxisMetric
-import com.prestondihle.healthtracker.ui.master.MAX_LABELLED_AXES
-import com.prestondihle.healthtracker.ui.master.MasterGraphUiState
-import com.prestondihle.healthtracker.ui.master.MasterSeries
-import com.prestondihle.healthtracker.ui.master.axisColorFor
-import com.prestondihle.healthtracker.ui.master.colorIn
 import com.prestondihle.healthtracker.ui.theme.LightChartColors
-import com.prestondihle.healthtracker.ui.master.metric
-import com.prestondihle.healthtracker.ui.master.series
+import com.prestondihle.healthtracker.ui.today.AxisMetric
+import com.prestondihle.healthtracker.ui.today.MAX_LABELLED_AXES
+import com.prestondihle.healthtracker.ui.today.MasterSeries
+import com.prestondihle.healthtracker.ui.today.TodayUiState
+import com.prestondihle.healthtracker.ui.today.axisColorFor
+import com.prestondihle.healthtracker.ui.today.colorIn
+import com.prestondihle.healthtracker.ui.today.metric
+import com.prestondihle.healthtracker.ui.today.series
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -24,7 +24,7 @@ import org.junit.Test
 class AxisSelectionTest {
 
     private fun state(vararg labelled: AxisMetric) =
-        MasterGraphUiState(labelledAxes = labelled.toList())
+        TodayUiState(labelledAxes = labelled.toList())
 
     @Test
     fun `the first choice takes the left gutter and the second the right`() {
@@ -46,7 +46,7 @@ class AxisSelectionTest {
 
     @Test
     fun `the default pairing is glucose against the macro curves`() {
-        val uiState = MasterGraphUiState()
+        val uiState = TodayUiState()
 
         assertEquals(listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS), uiState.labelledAxes)
         assertEquals(MAX_LABELLED_AXES, uiState.labelledAxes.size)
@@ -73,7 +73,7 @@ class AxisSelectionTest {
 
     @Test
     fun `an axis serving one line takes that line's colour`() {
-        val uiState = MasterGraphUiState()
+        val uiState = TodayUiState()
 
         assertEquals(MasterSeries.GLUCOSE.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.GLUCOSE, LightChartColors))
         assertEquals(MasterSeries.CAFFEINE.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.CAFFEINE, LightChartColors))
@@ -84,7 +84,7 @@ class AxisSelectionTest {
         // Tinting g/h in the carbohydrate colour would claim the protein and fat
         // curves are read against some other axis. There is no honest colour
         // here, and the ordinary label grey is the honest answer.
-        val uiState = MasterGraphUiState()
+        val uiState = TodayUiState()
 
         assertNull(uiState.axisColorFor(AxisMetric.MACROS, LightChartColors))
     }
@@ -92,7 +92,7 @@ class AxisSelectionTest {
     @Test
     fun `switching the other macros off hands the axis to the survivor`() {
         val uiState =
-            MasterGraphUiState(
+            TodayUiState(
                 visibleSeries = MasterSeries.entries.toSet() - MasterSeries.PROTEIN -
                     MasterSeries.FAT
             )
@@ -105,7 +105,7 @@ class AxisSelectionTest {
         // Nothing is drawn against it, so there is nothing for the numbers to
         // belong to -- and colouring them would point at a line that is not there.
         val uiState =
-            MasterGraphUiState(visibleSeries = MasterSeries.entries.toSet() - MasterSeries.GLUCOSE)
+            TodayUiState(visibleSeries = MasterSeries.entries.toSet() - MasterSeries.GLUCOSE)
 
         assertNull(uiState.axisColorFor(AxisMetric.GLUCOSE, LightChartColors))
     }

@@ -1,4 +1,4 @@
-package com.prestondihle.healthtracker.ui.master
+package com.prestondihle.healthtracker.ui.today
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +49,7 @@ import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.MacroAbsorption
+import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
@@ -63,6 +64,7 @@ import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.ChartColors
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
+import com.prestondihle.healthtracker.ui.theme.Pine
 import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -81,7 +83,7 @@ private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
+fun TodayScreen(viewModel: TodayViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     LazyColumn(
@@ -106,7 +108,7 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
 
         if (state.healthState != HealthPermissionState.GRANTED) {
             item {
-                MasterCard(title = "Health Connect") {
+                TodayCard(title = "Health Connect") {
                     Text(
                         "Meals and heart rate come from Health Connect. Connect it on the Today " +
                             "screen to fill this graph in; glucose and ketones logged by hand " +
@@ -117,7 +119,7 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
             }
         }
 
-        item { NowCard(state = state, onRefresh = viewModel::refresh) }
+        item { ActivityCard(state = state, onRefresh = viewModel::refresh) }
 
         item {
             CombinedChartCard(
@@ -146,7 +148,7 @@ fun MasterGraphScreen(viewModel: MasterGraphViewModel) {
 }
 
 @Composable
-private fun MasterCard(
+private fun TodayCard(
     title: String,
     action: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
@@ -176,78 +178,100 @@ private fun MasterCard(
     }
 }
 
-/** The state of play at this instant: what is landing, and what the body is doing. */
+/**
+ * The day's totals, above the timeline that explains them.
+ *
+ * Both syncs hang off the one refresh here. The card reads the daily snapshot,
+ * which only `syncHealthData` fills, while everything below it is drawn from the
+ * time-series caches, which only `syncTimeSeries` writes -- and a screen that
+ * ran one of them would show a day's steps over a chart that had never heard of
+ * the walk, or the reverse. That is the failure the sleep card already shipped
+ * once, reading "No sleep recorded yet" directly under an Activity card
+ * displaying the very night it said it did not have.
+ */
 @Composable
-private fun NowCard(state: MasterGraphUiState, onRefresh: () -> Unit) {
-    MasterCard(
-        title = "Right now",
+private fun ActivityCard(state: TodayUiState, onRefresh: () -> Unit) {
+    TodayCard(
+        title = "Activity",
         action = {
             IconButton(onClick = onRefresh, enabled = !state.isSyncing) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Sync meals and heart rate")
+                Icon(Icons.Filled.Refresh, contentDescription = "Sync Health Connect")
             }
         },
     ) {
+        val snapshot = state.snapshot
         Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
-                label = "Carbs in",
-                value = state.rateNow(Macro.CARB).asRate(),
+                label = "Steps",
+                value = snapshot?.steps?.toString() ?: "--",
+                supporting = state.goals.dailyStepGoal?.let { "goal $it" },
                 modifier = Modifier.weight(1f),
             )
             Metric(
-                label = "Protein in",
-                value = state.rateNow(Macro.PROTEIN).asRate(),
+                label = "Resting HR",
+                value = snapshot?.restingHeartRateBpm?.let { "$it bpm" } ?: "--",
                 modifier = Modifier.weight(1f),
             )
             Metric(
-                label = "Fat in",
-                value = state.rateNow(Macro.FAT).asRate(),
+                label = "Sleep",
+                value = snapshot?.sleepMinutes?.let { Units.formatMinutes(it) } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Best mile",
+                value = state.bestMileSeconds?.let { Units.formatPace(it) } ?: "--",
+                supporting = "avg pace",
                 modifier = Modifier.weight(1f),
             )
         }
 
         HorizontalDivider()
 
+        // Energy in, energy out, the difference, and where it came from -- all
+        // one row so intake, expenditure and composition read together. Six
+        // columns leaves no room for supporting text; the labels carry it.
         Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
-                label = "Glucose",
-                value = state.latestGlucose?.let { "${it.mgDl}" } ?: "--",
-                supporting = state.latestGlucose?.timestamp?.asAgo(state.now),
+                label = "Eaten",
+                // Zero rather than "--": food is hand-entered, so nothing logged
+                // means nothing eaten, and the net figure below depends on it.
+                value = state.caloriesEaten.toString(),
                 modifier = Modifier.weight(1f),
             )
             Metric(
-                label = "Ketones",
-                value = state.latestKetone?.let { Ketones.format(it.ppm) } ?: "--",
-                supporting = state.latestKetone?.timestamp?.asAgo(state.now),
+                label = "Burned",
+                value = snapshot?.totalCalories?.toString() ?: "--",
                 modifier = Modifier.weight(1f),
             )
-            Metric(
-                label = "Heart rate",
-                value = state.latestHeartRate?.let { "${it.bpm}" } ?: "--",
-                supporting = state.latestHeartRate?.timestamp?.asAgo(state.now),
-                modifier = Modifier.weight(1f),
-            )
-            Metric(
-                label = "Steps",
-                value = state.stepsLastHour?.let { "${it.steps}" } ?: "--",
-                // "last hour" rather than an age, because this is a count over an
-                // interval and not a reading taken at a moment.
-                supporting = state.stepsLastHour?.let { "last hour" },
-                modifier = Modifier.weight(1f),
-            )
-        }
 
-        // How far along the most recent meal is. Carbs are quoted because they
-        // are the fastest of the three, so this is the figure that decides
-        // whether a glucose reading taken now is still on the way up.
-        state.lastMeal?.let { meal ->
-            val carbFraction = state.lastMealAbsorbed(Macro.CARB) ?: 0f
-            val fatFraction = state.lastMealAbsorbed(Macro.FAT) ?: 0f
-            Text(
-                "Last meal ${meal.timestamp.asAgo(state.now)}: " +
-                    "${(carbFraction * 100).toInt()}% of its carbs and " +
-                    "${(fatFraction * 100).toInt()}% of its fat absorbed",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            val net = state.netCalories
+            Metric(
+                label = "Net",
+                // Blank only while the burn has not synced; a missing burn would
+                // read as a surplus the size of the day's food.
+                value = net?.let { if (it > 0) "+$it" else it.toString() } ?: "--",
+                valueColor =
+                    when {
+                        net == null || net == 0 -> null
+                        net > 0 -> MaterialTheme.colorScheme.error
+                        else -> Pine
+                    },
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Protein",
+                value = snapshot?.proteinGrams?.let { "${it.toInt()}g" } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Carbs",
+                value = snapshot?.carbGrams?.let { "${it.toInt()}g" } ?: "--",
+                modifier = Modifier.weight(1f),
+            )
+            Metric(
+                label = "Fat",
+                value = snapshot?.fatGrams?.let { "${it.toInt()}g" } ?: "--",
+                modifier = Modifier.weight(1f),
             )
         }
     }
@@ -272,7 +296,7 @@ internal val AxisMetric.series: List<MasterSeries>
  * protein and fat curves are read against some other axis. Switching two of the
  * three off resolves it, and the axis takes the survivor's colour.
  */
-internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric, colors: ChartColors): Color? =
+internal fun TodayUiState.axisColorFor(metric: AxisMetric, colors: ChartColors): Color? =
     metric.series.filter(::isVisible).singleOrNull()?.colorIn(colors)
 
 /**
@@ -283,7 +307,7 @@ internal fun MasterGraphUiState.axisColorFor(metric: AxisMetric, colors: ChartCo
  * these bounds would let a series change shape as it moved between axes, which
  * is the one thing switching axes must not do.
  */
-private fun MasterGraphUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisSpec =
+private fun TodayUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisSpec =
     when (metric) {
         // No target band here, unlike the Today chart, which keeps one.
         //
@@ -336,7 +360,7 @@ private fun MasterGraphUiState.specFor(metric: AxisMetric, colors: ChartColors):
  * here, or it would go on being drawn to its private range while the numbers
  * printed beside it described something else.
  */
-private fun MasterGraphUiState.placementOf(
+private fun TodayUiState.placementOf(
     metric: AxisMetric,
     colors: ChartColors,
 ): Pair<ChartAxis, AxisSpec?> =
@@ -345,7 +369,7 @@ private fun MasterGraphUiState.placementOf(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CombinedChartCard(
-    state: MasterGraphUiState,
+    state: TodayUiState,
     onToggleSeries: (MasterSeries, Boolean) -> Unit,
     onToggleAxis: (AxisMetric) -> Unit,
     onPan: (Duration) -> Unit,
@@ -459,7 +483,7 @@ private fun CombinedChartCard(
             ),
         )
 
-    MasterCard(title = "Food, blood and body") {
+    TodayCard(title = "Food, blood and body") {
         // A window dragged off the clock has to say so. Everything else on this
         // screen -- the range chips, the "Right now" card above -- reads as live,
         // and a plot of last Tuesday under all of it looks exactly like a plot of
@@ -578,7 +602,7 @@ private fun CombinedChartCard(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AxisPicker(state: MasterGraphUiState, onToggle: (AxisMetric) -> Unit) {
+private fun AxisPicker(state: TodayUiState, onToggle: (AxisMetric) -> Unit) {
     Text(
         "Axis units",
         style = MaterialTheme.typography.labelMedium,
@@ -617,7 +641,7 @@ private fun AxisPicker(state: MasterGraphUiState, onToggle: (AxisMetric) -> Unit
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SeriesToggles(
-    state: MasterGraphUiState,
+    state: TodayUiState,
     onToggle: (MasterSeries, Boolean) -> Unit,
 ) {
     val chartColors = LocalChartColors.current
@@ -675,7 +699,7 @@ internal fun MasterSeries.colorIn(colors: ChartColors): Color =
 /** Where the absorption curves come from, since they are the one modelled thing here. */
 @Composable
 private fun AbsorptionModelCard() {
-    MasterCard(title = "About the food curves") {
+    TodayCard(title = "About the food curves") {
         Text(
             "Health Connect records a meal as one lump of grams at one time. The dashed lines " +
                 "spread each meal over the hours it is actually reaching the blood, so the area " +
@@ -711,7 +735,7 @@ private fun AbsorptionModelCard() {
  */
 @Composable
 private fun MealListCard(
-    state: MasterGraphUiState,
+    state: TodayUiState,
     onAdd: (calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) -> Unit,
     onUpdate: (MealEntry, Int, Int, Int, Int, Instant) -> Unit,
     onDelete: (MealEntry) -> Unit,
@@ -720,7 +744,7 @@ private fun MealListCard(
     var adding by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf<MealEntry?>(null) }
 
-    MasterCard(
+    TodayCard(
         title = "Meals in this window",
         action = {
             TextButton(onClick = { adding = true }, contentPadding = CompactButtonPadding) {
@@ -923,7 +947,7 @@ private val PannedSpanFormat = DateTimeFormatter.ofPattern("d MMM h:mm a")
  * midnight that named only its start would put the small hours on the wrong
  * date.
  */
-private fun MasterGraphUiState.windowLabel(): String {
+private fun TodayUiState.windowLabel(): String {
     val start = windowStart.atZone(zoneId)
     val end = windowEnd.atZone(zoneId)
     return if (start.toLocalDate() == end.toLocalDate()) {
@@ -933,21 +957,8 @@ private fun MasterGraphUiState.windowLabel(): String {
     }
 }
 
-/** `12 g/h`, or a dash while nothing is arriving -- a bare "0" reads as an error. */
-private fun Float.asRate(): String = if (this < 0.5f) "--" else "${toInt()} g/h"
-
 private fun Duration.asPeak(): String =
     if (toMinutes() < 90) "${toMinutes()} min" else "%.1f h".format(toMinutes() / 60f)
-
-/** `2h ago`, which is the only thing worth knowing about a reading's age here. */
-private fun Instant.asAgo(now: Instant): String {
-    val minutes = Duration.between(this, now).toMinutes()
-    return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "${minutes}m ago"
-        else -> "${minutes / 60}h ${minutes % 60}m ago"
-    }
-}
 
 /** The macros a meal contributed, skipping the ones the logging app left out. */
 private fun MealEntry.macroSummary(): String {
@@ -974,6 +985,8 @@ private fun Metric(
     label: String,
     value: String,
     supporting: String? = null,
+    /** Null keeps the default text colour; set only where the value itself carries meaning. */
+    valueColor: Color? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -987,6 +1000,7 @@ private fun Metric(
             value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
+            color = valueColor ?: Color.Unspecified,
             maxLines = 1,
         )
         if (supporting != null) {

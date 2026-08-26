@@ -94,12 +94,13 @@ own cards arrive. A screen unhooked before its replacement exists would leave ev
 unloggable in the meantime, on the phone holding the only copy of this data — so nothing is unhooked
 early, and `TrackerNavHost` names the eventual owner of every temporary route.
 
-Two places where the tab and the code disagree, both of which will come up:
+One place where the tab and the code disagree, and it will come up:
 
-- **Today is `MasterGraphScreen` in the source**, with `MasterGraphViewModel` and
-  `MasterGraphUiState` behind it. The tab said Master until the graph became the landing screen.
-- **The chart card is titled *Food, blood and body***, which is a third name again for the thing the
-  source calls the master graph.
+- **The chart on Today is still the *master graph*.** The screen around it is `TodayScreen`,
+  `TodayViewModel` and `TodayUiState`, but the graph inside kept its own vocabulary —
+  `MasterSeries`, `MasterRange`, and a card titled *Food, blood and body*. The tab moved; the chart
+  did not become a different chart, and renaming its parts after the tab that happens to host them
+  would be the drift this section exists to warn about rather than a cure for it.
 
 `DashboardScreen`, `DashboardViewModel` and `DashboardUiState` still exist and still say Dashboard,
 but they are no longer Today: they hold the cards on their way to Fuel, Activity and Wellness, and
@@ -165,15 +166,17 @@ that width so switching windows is a redraw rather than a round trip. Six chips 
 of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the widest
 options behind a gesture nobody knows is there.
 
-**The master graph's window is no longer anchored to now.** `MasterGraphUiState.panOffset` is how
+**The master graph's window is no longer anchored to now.** `TodayUiState.panOffset` is how
 far back a horizontal drag has pulled the right edge, and `windowEnd` is `now - panOffset`.
 Everything that draws must measure from `windowEnd`, never from `now`: the absorption and caffeine
 curves are *sampled between two bounds* rather than clipped afterwards, so one still ending at `now`
 does not stop short on a panned window -- it runs on past the right-hand edge, in the same ink as the
 part of it that belongs there. `mealsInWindow` needs the same upper bound, since it is also what the
 marker rules are built from, and a meal listed with no rule to find is worse than one left out.
-`now` itself stays `now`: the "Right now" card, `rateNow`, `stepsLastHour` and every `asAgo` are
-about this moment whatever the plot is showing.
+`now` itself stays `now`: the Activity card's totals are *today's* however far back the plot has been
+dragged, `syncHealthData` is called for `today` rather than for the window, and
+`backfillGlucoseGaps` is anchored at this moment rather than at the window's edge. Panning is a look
+at history; it does not move the day.
 
 Two consequences worth knowing. `advanceNow()` grows `panOffset` by exactly what the clock gained
 whenever it is panned, so the ticker cannot drag a parked window along behind it -- the reader went
@@ -208,7 +211,7 @@ three separate meals on one Tuesday — so every absorption curve was anchored t
 in. This is not something the app can compute its way out of; the clock time was never written. Two
 things follow from it:
 
-- `MasterGraphUiState.hasClockTime` calls a time of day **shared to the second by two different
+- `TodayUiState.hasClockTime` calls a time of day **shared to the second by two different
   meals** a stamp rather than a measurement. Genuine timestamps land on a different second every
   time; a source that knows only the date lands on the same one for ever. Midnight counts
   unconditionally, since a lone meal at exactly `00:00:00` is a date too. The list says "set time"
@@ -310,7 +313,7 @@ reports. Two things about the real data are worth knowing before reading a night
 23:00 is not found by a window opening at midnight — asking for today alone returns the second half
 of last night as a session that apparently started at 00:00. `readSleepSessions` widens its filter
 back by `SLEEP_SESSION_OVERLAP` (18 h) and then filters on genuine overlap, so the widening costs at
-most one extra night and never loses the near half of one. `MasterGraphViewModel` widens its query
+most one extra night and never loses the near half of one. `TodayViewModel` widens its query
 the same way and for the same reason: at 3h zoom no night is ever *wholly* inside the window, and a
 containment test would shade nothing at all on exactly the zoom where knowing you were asleep
 explains most of what the other lines are doing.

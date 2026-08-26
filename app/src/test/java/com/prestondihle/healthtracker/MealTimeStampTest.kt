@@ -2,8 +2,8 @@ package com.prestondihle.healthtracker
 
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
-import com.prestondihle.healthtracker.ui.master.MasterGraphUiState
-import com.prestondihle.healthtracker.ui.master.MasterRange
+import com.prestondihle.healthtracker.ui.today.MasterRange
+import com.prestondihle.healthtracker.ui.today.TodayUiState
 import java.time.Instant
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -38,7 +38,7 @@ class MealTimeStampTest {
      * days, and the widest window is where a history worth correcting is read.
      */
     private fun state(vararg meals: MealEntry) =
-        MasterGraphUiState(
+        TodayUiState(
             range = MasterRange.WEEK,
             now = Instant.parse("2026-08-20T18:00:00Z"),
             meals = meals.toList(),

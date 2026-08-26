@@ -84,8 +84,8 @@ which double-counts. The app instead derives the contributing packages from the
 aggregate's own data origins and re-aggregates per source, and
 **Settings -> Step source** shows the per-app totals for today so one can be
 pinned as the one that counts. The same pinned source drives the hourly step
-bars on the Master screen, so the two screens can never disagree about how far
-you walked.
+bars on the master graph, so the daily total and the timeline can never disagree
+about how far you walked.
 
 ### Calories
 
@@ -135,7 +135,7 @@ the chart that means "asleep, stage unknown" without also meaning one of the
 three named stages. Where a night contains any, the card says how much, so the
 drawn trace and the printed totals can never quietly disagree.
 
-On the Master screen the same nights appear as a shaded band behind everything
+On the master graph the same nights appear as a shaded band behind everything
 else rather than as a ninth line. Sleep is not a quantity to read off an axis
 there; it is the answer to *why* for most of what the other lines do overnight —
 the heart rate floor, the flat blood sugar, the steps that stop. A change of
@@ -297,9 +297,9 @@ cut off, so a 210 reading still plots; it is simply not budgeted for.
 Three things can be drawn on it, and they are deliberately distinct:
 
 - A **grey band** for the target range, set in Settings. A filled region answers
-  "was it in range" at a glance. **On the Today chart only** — the Master screen
-  drew it behind eight other series, where it stopped reading as the blood sugar
-  target and started reading as a region of the plot.
+  "was it in range" at a glance. **On the glucose and ketone chart only** — the
+  master graph drew it behind eight other series, where it stopped reading as the
+  blood sugar target and started reading as a region of the plot.
 - A **solid rule** at a single reference value, also set in Settings and
   defaulting to 100 mg/dL. This answers "above or below". It is solid where the
   blood pressure chart's 120 rule is dashed: that one is a published clinical

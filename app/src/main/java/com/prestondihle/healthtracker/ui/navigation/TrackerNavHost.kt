@@ -32,11 +32,11 @@ import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
 import com.prestondihle.healthtracker.ui.fasting.FastingPlanScreen
 import com.prestondihle.healthtracker.ui.fasting.FastingPlanViewModel
-import com.prestondihle.healthtracker.ui.master.MasterGraphScreen
-import com.prestondihle.healthtracker.ui.master.MasterGraphViewModel
 import com.prestondihle.healthtracker.ui.placeholder.PlaceholderScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsViewModel
+import com.prestondihle.healthtracker.ui.today.TodayScreen
+import com.prestondihle.healthtracker.ui.today.TodayViewModel
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 
@@ -100,14 +100,12 @@ fun TrackerNavHost(appContainer: AppContainer) {
             startDestination = Screen.Today.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            // Today is the master graph. The screen is renamed rather than
-            // rebuilt, so this points at it under its old name until that lands.
             composable(Screen.Today.route) {
-                val vm: MasterGraphViewModel =
+                val vm: TodayViewModel =
                     viewModel(
-                        factory = MasterGraphViewModel.provideFactory(appContainer.trackerRepository)
+                        factory = TodayViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                MasterGraphScreen(vm)
+                TodayScreen(vm)
             }
             composable(Screen.Log.route) {
                 PlaceholderScreen(
