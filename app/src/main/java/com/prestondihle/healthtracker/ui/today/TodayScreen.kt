@@ -297,7 +297,20 @@ private fun TodayUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisS
                 color = axisColorFor(metric, colors),
             )
         AxisMetric.STEPS ->
-            AxisSpec(min = 0f, max = 1_200f, label = "steps/h", color = axisColorFor(metric, colors))
+            AxisSpec(
+                min = 0f,
+                max = 1_200f,
+                // The bar covers a quarter hour, a half hour or an hour depending
+                // on the zoom, so the rate label has to say which.
+                label =
+                    "steps/" +
+                        when (stepBucketMinutes) {
+                            15L -> "15m"
+                            30L -> "30m"
+                            else -> "h"
+                        },
+                color = axisColorFor(metric, colors),
+            )
         // 200 mg is around two strong coffees still in the body at once, which
         // is where the dashboard's caffeine chart tops out; both plot the same
         // quantity and a reader moving between them should not have to re-learn
@@ -419,11 +432,11 @@ private fun CombinedChartCard(
             series(
                 key = MasterSeries.STEPS,
                 label = "Steps",
-                points = state.steps.map { TimePoint(it.timestamp, it.steps.toFloat()) },
+                points = state.displaySteps.map { TimePoint(it.timestamp, it.steps.toFloat()) },
                 color = chartColors.steps,
                 showPoints = false,
                 kind = SeriesKind.BAR,
-                barWidth = Duration.ofMinutes(StepBucket.BUCKET_MINUTES),
+                barWidth = Duration.ofMinutes(state.stepBucketMinutes),
             ),
             // Dashed, alongside the macro curves and for the same reason: what is
             // measured is the dose and the minute it was drunk, and everything

@@ -231,6 +231,38 @@ data class TodayUiState(
     val windowStart: Instant
         get() = windowEnd.minus(Duration.ofHours(range.hours))
 
+    /**
+     * How wide a step bar is at the current zoom.
+     *
+     * Finer windows earn finer bars: a quarter hour up to and including six
+     * hours, a half hour at twelve and twenty-four, an hour beyond -- where a
+     * fifteen-minute bar would be a hair too thin to see across two days.
+     */
+    val stepBucketMinutes: Long
+        get() =
+            when {
+                range.hours <= 6 -> 15
+                range.hours <= 24 -> 30
+                else -> 60
+            }
+
+    /**
+     * The stored fifteen-minute step buckets summed up to [stepBucketMinutes].
+     *
+     * Grouped by the display bucket each fifteen-minute slice falls in, so the
+     * bars widen with the window without the cache ever being re-read. Fifteen
+     * divides thirty and sixty, so every group is whole buckets.
+     */
+    val displaySteps: List<StepBucket>
+        get() {
+            if (stepBucketMinutes == StepBucket.BUCKET_MINUTES) return steps
+            val sizeMs = stepBucketMinutes * 60_000L
+            return steps
+                .groupBy { (it.bucketStartMillis / sizeMs) * sizeMs }
+                .map { (start, group) -> StepBucket(start, group.sumOf { it.steps }) }
+                .sortedBy { it.bucketStartMillis }
+        }
+
     /** Whether the window has been dragged off the clock. */
     val isPanned: Boolean
         get() = !panOffset.isZero

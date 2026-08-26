@@ -385,17 +385,23 @@ data class HeartRateBucket(
  * that overlaps a window rewrites it instead of laying a second, offset copy of
  * the same day beside it.
  *
- * An hour is the resolution a step count is actually meaningful at. Five-minute
- * step buckets are mostly zeroes with occasional spikes, which draws as noise
- * rather than as activity.
+ * Stored at fifteen minutes -- the finest the master graph ever draws. Wider
+ * bars (thirty minutes, an hour) are summed up from these at display time as the
+ * window widens, so one cached resolution feeds every zoom. The column keeps its
+ * original name to stay migration-free; the property does not, because a
+ * fifteen-minute bucket keyed by `hourStartMillis` reads as a bug.
  */
 @Entity
-data class StepBucket(@PrimaryKey val hourStartMillis: Long, val steps: Int) {
+data class StepBucket(
+    @PrimaryKey @ColumnInfo(name = "hourStartMillis") val bucketStartMillis: Long,
+    val steps: Int,
+) {
     val timestamp: Instant
-        get() = Instant.ofEpochMilli(hourStartMillis)
+        get() = Instant.ofEpochMilli(bucketStartMillis)
 
     companion object {
-        const val BUCKET_MINUTES = 60L
+        /** The stored (finest) bucket. Display buckets are multiples of this. */
+        const val BUCKET_MINUTES = 15L
     }
 }
 

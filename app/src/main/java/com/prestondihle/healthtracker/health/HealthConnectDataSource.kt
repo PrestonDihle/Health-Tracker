@@ -414,7 +414,11 @@ class HealthConnectDataSource(
                         AggregateGroupByDurationRequest(
                             metrics = setOf(StepsRecord.COUNT_TOTAL),
                             timeRangeFilter = TimeRangeFilter.between(from, to),
-                            timeRangeSlicer = Duration.ofHours(1),
+                            // Fifteen minutes: the finest the master graph draws.
+                            // Wider bars are summed up from these at display time,
+                            // so the cache is read once at the finest resolution.
+                            // Must stay in step with StepBucket.BUCKET_MINUTES.
+                            timeRangeSlicer = Duration.ofMinutes(15),
                             dataOriginFilter = dataOriginFilter,
                         )
                     )

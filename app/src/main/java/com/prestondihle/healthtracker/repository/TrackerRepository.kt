@@ -542,7 +542,7 @@ class TrackerRepository(
                 hours.maxOf { it.hourStart.toEpochMilli() } + 1,
             )
             dao.upsertStepBuckets(
-                hours.map { StepBucket(hourStartMillis = it.hourStart.toEpochMilli(), steps = it.steps) }
+                hours.map { StepBucket(bucketStartMillis = it.hourStart.toEpochMilli(), steps = it.steps) }
             )
         }
 
