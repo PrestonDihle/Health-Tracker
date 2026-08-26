@@ -15,6 +15,7 @@ import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.KetoneReading
+import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.UserGoals
@@ -28,6 +29,7 @@ import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.FastingAdherence
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
+import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
@@ -46,6 +48,7 @@ import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
@@ -124,6 +127,12 @@ private const val DEFAULT_GOAL_MINUTES = 16 * 60
  */
 private const val LOG_HISTORY_DAYS = 14L
 
+/**
+ * How far back the Log tab's meal list reaches -- a fixed day, not the master
+ * chart's window, so the list reads the same however that chart is zoomed.
+ */
+private const val MEAL_WINDOW_HOURS = 24L
+
 data class DashboardUiState(
     val today: LocalDate = LocalDate.now(),
     val now: Instant = Instant.now(),
@@ -157,6 +166,8 @@ data class DashboardUiState(
     val latestWaist: WaistEntry? = null,
     val glucose: List<BloodSugarReading> = emptyList(),
     val ketones: List<KetoneReading> = emptyList(),
+    /** Recent meals, for the last-24-hours list on the Log tab. */
+    val meals: List<MealEntry> = emptyList(),
     val glucoseWindow: GlucoseWindow = GlucoseWindow.DAY,
     val settings: UserSettings = UserSettings(),
     val caffeine: List<CaffeineIntake> = emptyList(),
@@ -208,6 +219,50 @@ data class DashboardUiState(
         val byDate = logHistory.associate { it.date to valueOf(it) }
         return historyDays.map { DayPoint(it, byDate[it]) }
     }
+
+    /** Left edge of the meal list's fixed 24-hour window. */
+    private val mealWindowStart: Instant
+        get() = now.minus(Duration.ofHours(MEAL_WINDOW_HOURS))
+
+    /**
+     * Meals counted once, collapsing the duplicate records some sources write for
+     * one meal -- the same rule the Today chart uses so the two never disagree.
+     */
+    private val distinctMeals: List<MealEntry>
+        get() = MealDuplicates.collapse(meals.sortedBy { it.id })
+
+    /** How many records the collapse absorbed, so the list can own up to it. */
+    val duplicatesCollapsed: Int
+        get() = meals.size - distinctMeals.size
+
+    /** Meals eaten in the last 24 hours, newest first. */
+    val mealsInWindow: List<MealEntry>
+        get() =
+            distinctMeals
+                .filter { it.timestamp in mealWindowStart..now }
+                .sortedByDescending { it.timestamp }
+
+    /**
+     * Times of day that are a stamp rather than a measurement.
+     *
+     * A source that knows only the date lands every meal on the same second; a
+     * real timestamp never repeats one. Midnight joins unconditionally, since a
+     * lone meal at exactly 00:00:00 is a date too.
+     */
+    private val stampedTimesOfDay: Set<LocalTime>
+        get() =
+            distinctMeals
+                .groupBy { it.timestamp.atZone(zoneId).toLocalTime() }
+                .filterValues { it.size > 1 }
+                .keys + LocalTime.MIDNIGHT
+
+    /** Whether a meal carries a real clock time or only the date it was eaten on. */
+    fun hasClockTime(meal: MealEntry): Boolean =
+        meal.timestamp.atZone(zoneId).toLocalTime() !in stampedTimesOfDay
+
+    /** Meals in the window carrying a stamped time rather than a measured one. */
+    val undatedMealsInWindow: List<MealEntry>
+        get() = mealsInWindow.filterNot(::hasClockTime)
 
     /**
      * Creatine taken today, in grams.
@@ -413,6 +468,7 @@ private data class MetabolicBundle(
     val glucose: List<BloodSugarReading>,
     val ketones: List<KetoneReading>,
     val caffeine: List<CaffeineIntake>,
+    val meals: List<MealEntry>,
     val glucoseWindow: GlucoseWindow,
     val settings: UserSettings,
 )
@@ -512,17 +568,30 @@ class DashboardViewModel(
             // window is still decaying inside it, and dropping it would start the
             // curve at the wrong height.
             val caffeineSince = now.minus(Duration.ofHours(Caffeine.RELEVANT_HISTORY_HOURS))
+            val mealsSince = now.minus(Duration.ofHours(MEAL_WINDOW_HOURS))
             return combine(
                 repository.getBloodSugarSince(since),
                 repository.getKetonesSince(since),
-                repository.getCaffeineSince(caffeineSince),
+                // Paired because combine's typed overloads stop at five sources and
+                // the meal list rides on this same food-and-blood bundle.
+                combine(
+                    repository.getCaffeineSince(caffeineSince),
+                    repository.getMealsSince(mealsSince),
+                ) { caffeine, meals -> caffeine to meals },
                 glucoseWindow,
                 repository.getUserSettings(),
-            ) { glucose, ketones, caffeine, window, settings ->
+            ) { glucose, ketones, caffeineMeals, window, settings ->
                 // The query always covers the widest window; narrowing is left to
                 // the chart, which clips to its own bounds. Switching windows is
                 // then a redraw rather than a re-query.
-                MetabolicBundle(glucose, ketones, caffeine, window, settings ?: UserSettings())
+                MetabolicBundle(
+                    glucose,
+                    ketones,
+                    caffeineMeals.first,
+                    caffeineMeals.second,
+                    window,
+                    settings ?: UserSettings(),
+                )
             }
         }
 
@@ -594,6 +663,7 @@ class DashboardViewModel(
                     latestWaist = todayBundle.waist,
                     glucose = metabolicBundle.glucose,
                     ketones = metabolicBundle.ketones,
+                    meals = metabolicBundle.meals,
                     glucoseWindow = metabolicBundle.glucoseWindow,
                     settings = metabolicBundle.settings,
                     caffeine = metabolicBundle.caffeine,
@@ -756,6 +826,45 @@ class DashboardViewModel(
 
     fun addBloodPressure(systolic: Int, diastolic: Int) {
         viewModelScope.launch { repository.addBloodPressure(systolic, diastolic) }
+    }
+
+    /**
+     * Logs a meal by hand.
+     *
+     * A zero is stored as a zero rather than as "not recorded": everything here
+     * was typed deliberately, so an untouched field means none of that macro --
+     * unlike a synced meal, where a missing figure means the source did not break
+     * the food down.
+     */
+    fun addMeal(calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) {
+        viewModelScope.launch {
+            repository.addMeal(
+                at = at,
+                calories = calories,
+                proteinGrams = protein.toFloat(),
+                carbGrams = carbs.toFloat(),
+                fatGrams = fat.toFloat(),
+            )
+        }
+    }
+
+    /** Rewrites a meal's macros and time together. */
+    fun updateMeal(meal: MealEntry, calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) {
+        viewModelScope.launch {
+            repository.updateMeal(
+                meal.copy(
+                    timestamp = at,
+                    calories = calories,
+                    proteinGrams = protein.toFloat(),
+                    carbGrams = carbs.toFloat(),
+                    fatGrams = fat.toFloat(),
+                )
+            )
+        }
+    }
+
+    fun deleteMeal(meal: MealEntry) {
+        viewModelScope.launch { repository.deleteMeal(meal) }
     }
 
     fun setGlucoseWindow(window: GlucoseWindow) {

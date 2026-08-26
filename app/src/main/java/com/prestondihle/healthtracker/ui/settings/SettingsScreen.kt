@@ -40,6 +40,7 @@ import com.prestondihle.healthtracker.data.UnitSystemEnum
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.AbsorptionModelCard
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.work.CaffeineLastCallWorker
@@ -475,6 +476,11 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         item {
             BackupCard(isExporting = state.isExporting, onExport = viewModel::exportBackup)
         }
+
+        // Reference for the food-absorption curves on the Today chart. It explains
+        // a model rather than setting anything, so it sits at the foot of Settings
+        // rather than taking room on the chart it describes.
+        item { AbsorptionModelCard() }
     }
 }
 

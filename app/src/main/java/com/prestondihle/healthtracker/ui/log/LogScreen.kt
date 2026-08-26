@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
+import com.prestondihle.healthtracker.ui.components.MealListCard
 import com.prestondihle.healthtracker.ui.dashboard.BloodPressureCard
 import com.prestondihle.healthtracker.ui.dashboard.BodyCard
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
@@ -48,6 +49,31 @@ fun LogScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHostStat
         verticalArrangement = Arrangement.spacedBy(CardGap),
         contentPadding = PaddingValues(vertical = CardGap),
     ) {
+        // Meals lead: they are the most-logged thing here, and the card doubles
+        // as the last day's meals to check against before adding another.
+        item {
+            MealListCard(
+                meals = state.mealsInWindow,
+                undatedMeals = state.undatedMealsInWindow,
+                duplicatesCollapsed = state.duplicatesCollapsed,
+                zoneId = state.zoneId,
+                now = state.now,
+                hasClockTime = { state.hasClockTime(it) },
+                onAdd = { calories, protein, carbs, fat, at ->
+                    viewModel.addMeal(calories, protein, carbs, fat, at)
+                    toast("Logged meal")
+                },
+                onUpdate = { meal, calories, protein, carbs, fat, at ->
+                    viewModel.updateMeal(meal, calories, protein, carbs, fat, at)
+                    toast("Meal updated")
+                },
+                onDelete = {
+                    viewModel.deleteMeal(it)
+                    toast("Meal deleted")
+                },
+            )
+        }
+
         item { BodyCard(state = state, onWaistChange = viewModel::setWaistCm) }
 
         item {

@@ -1,0 +1,279 @@
+package com.prestondihle.healthtracker.ui.components
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.prestondihle.healthtracker.data.MealEntry
+import com.prestondihle.healthtracker.domain.Macro
+import com.prestondihle.healthtracker.domain.MacroAbsorption
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+// ---------------------------------------------------------------------------
+// Meal cards.
+//
+// Both lived on Today, under the food chart. The reference card ("About the
+// food curves") moved to the foot of Settings, and the meal list moved to Log,
+// so they are shared from here rather than tied to one screen's state -- the
+// list takes its meals and a few helpers as parameters, not a whole UiState.
+// ---------------------------------------------------------------------------
+
+/** Where the absorption curves come from, since they are the one modelled thing on the chart. */
+@Composable
+internal fun AbsorptionModelCard() {
+    TrackerCard(title = "About the food curves") {
+        Text(
+            "Health Connect records a meal as one lump of grams at one time. The dashed lines " +
+                "spread each meal over the hours it is actually reaching the blood, so the area " +
+                "under a curve is the grams eaten and its height is grams per hour arriving.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Macro.entries.forEach { macro ->
+            val kinetics = MacroAbsorption.kinetics(macro)
+            Text(
+                "${macro.label}: starts ${kinetics.lag.toMinutes()} min after eating, " +
+                    "peaks at ${kinetics.timeToPeak.asPeak()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            "Peak times are population averages for mixed meals, from published gastric " +
+                "emptying, aminoacidaemia and chylomicron studies. Individual digestion varies " +
+                "several-fold, so read these as an expectation rather than a measurement.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The last day's meals, each tappable to say when it was eaten.
+ *
+ * Editable because a nutrition source is free to record only the date. When it
+ * does, every meal arrives at one fixed time of day -- so such a meal says so
+ * rather than printing a plausible-looking clock time, and one tap fixes it.
+ *
+ * [meals] and [undatedMeals] are already scoped to the window the caller wants
+ * shown (on Log, the last 24 hours), and [hasClockTime] is the caller's own test
+ * for a stamped-versus-measured time, so this card carries no window of its own.
+ */
+@Composable
+internal fun MealListCard(
+    meals: List<MealEntry>,
+    undatedMeals: List<MealEntry>,
+    duplicatesCollapsed: Int,
+    zoneId: ZoneId,
+    now: Instant,
+    hasClockTime: (MealEntry) -> Boolean,
+    onAdd: (calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) -> Unit,
+    onUpdate: (MealEntry, Int, Int, Int, Int, Instant) -> Unit,
+    onDelete: (MealEntry) -> Unit,
+) {
+    var editing by remember { mutableStateOf<MealEntry?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf<MealEntry?>(null) }
+
+    TrackerCard(
+        title = "Meals, last 24 hours",
+        action = {
+            TextButton(onClick = { adding = true }, contentPadding = CompactButtonPadding) {
+                Text("Log meal")
+            }
+        },
+    ) {
+        if (meals.isEmpty()) {
+            Text(
+                "Nothing eaten in the last 24 hours, or nothing that reached Health Connect. " +
+                    "Log a meal to record it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        val undated = undatedMeals.size
+        if (undated > 0) {
+            Text(
+                "$undated of these carry a stamped time rather than the one ${
+                    if (undated == 1) "it was" else "they were"
+                } eaten at. Tap one to say when you actually ate it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        meals.forEach { meal ->
+            Row(
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .clickable { editing = meal }
+                        .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        meal.name?.takeIf { it.isNotBlank() } ?: "Meal",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        meal.macroSummary(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val placed = hasClockTime(meal)
+                Text(
+                    if (placed) {
+                        DateTimeFormatter.ofPattern("EEE h:mm a")
+                            .format(meal.timestamp.atZone(zoneId))
+                    } else {
+                        DateTimeFormatter.ofPattern("EEE").format(meal.timestamp.atZone(zoneId)) +
+                            " · set time"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color =
+                        if (placed) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
+                )
+                // A bin on the row itself. The editor can delete too, but it keeps
+                // that button below four steppers and a clock face, which on a
+                // phone is off the bottom of the dialog -- a delete nobody can find
+                // is not a delete.
+                IconButton(onClick = { confirmingDelete = meal }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "Delete meal, ${meal.macroSummary()}",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
+
+        // Said out loud rather than quietly applied: collapsing changes the day's
+        // totals, and a figure that moved without explanation is worse than the
+        // duplicate it corrected.
+        if (duplicatesCollapsed > 0) {
+            Text(
+                "$duplicatesCollapsed repeated record" +
+                    "${if (duplicatesCollapsed == 1) "" else "s"} from the source " +
+                    "merged; each meal is counted once.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    editing?.let { meal ->
+        MealEntryDialog(
+            initial = meal.asDraft(),
+            zoneId = zoneId,
+            onDismiss = { editing = null },
+            onConfirm = {
+                onUpdate(meal, it.calories, it.proteinGrams, it.carbGrams, it.fatGrams, it.at)
+                editing = null
+            },
+            isEdit = true,
+        )
+    }
+
+    // Confirmed, unlike the caffeine bin beside it. A meal carries a whole
+    // absorption curve rather than one number, the bins sit in a list people
+    // scroll past, and for a synced meal this is one-way: the row is kept hidden
+    // precisely so the next sync cannot bring it back.
+    confirmingDelete?.let { meal ->
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = null },
+            title = { Text("Delete this meal?") },
+            text = { Text(meal.macroSummary()) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(meal)
+                        confirmingDelete = null
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") } },
+            containerColor = MaterialTheme.colorScheme.surface,
+        )
+    }
+
+    if (adding) {
+        MealEntryDialog(
+            initial =
+                MealDraft(calories = 0, proteinGrams = 0, carbGrams = 0, fatGrams = 0, at = now),
+            zoneId = zoneId,
+            onDismiss = { adding = false },
+            onConfirm = {
+                onAdd(it.calories, it.proteinGrams, it.carbGrams, it.fatGrams, it.at)
+                adding = false
+            },
+        )
+    }
+}
+
+private val Macro.label: String
+    get() =
+        when (this) {
+            Macro.PROTEIN -> "Protein"
+            Macro.CARB -> "Carbs"
+            Macro.FAT -> "Fat"
+        }
+
+private fun Duration.asPeak(): String =
+    if (toMinutes() < 90) "${toMinutes()} min" else "%.1f h".format(toMinutes() / 60f)
+
+/**
+ * A stored meal as the editor's fields.
+ *
+ * A macro the source never recorded opens at zero, since a stepper has to start
+ * somewhere -- but saving then writes that zero as a real figure, which is the
+ * honest outcome: the dialog is a statement of what was eaten, and anything left
+ * untouched has been confirmed as none.
+ */
+private fun MealEntry.asDraft() =
+    MealDraft(
+        calories = calories ?: 0,
+        proteinGrams = proteinGrams?.toInt() ?: 0,
+        carbGrams = carbGrams?.toInt() ?: 0,
+        fatGrams = fatGrams?.toInt() ?: 0,
+        at = timestamp,
+    )
+
+/** The macros a meal contributed, skipping the ones the logging app left out. */
+private fun MealEntry.macroSummary(): String {
+    val parts = buildList {
+        calories?.let { add("$it kcal") }
+        proteinGrams?.let { add("${it.toInt()}g protein") }
+        carbGrams?.let { add("${it.toInt()}g carb") }
+        fatGrams?.let { add("${it.toInt()}g fat") }
+    }
+    return if (parts.isEmpty()) "no macros recorded" else parts.joinToString(" · ")
+}
