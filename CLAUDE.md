@@ -18,6 +18,12 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 | One test method | `.\gradlew.bat :app:testDebugUnitTest --tests "*FastingAdherenceTest.a feeding window crossing midnight is handled"` |
 | Android lint | `.\gradlew.bat :app:lintDebug` |
 
+**`lintDebug` currently fails, and not because of anything recent.** `work/CaffeineLastCall.kt` calls
+`java.time.LocalDate.ofInstant`, which needs API 34 against a `minSdk` of 26 — a real latent crash on
+anything below Android 14, invisible on the author's own S25. The fix is almost certainly
+`instant.atZone(zone).toLocalDate()`, the idiom the rest of the codebase already uses. Until it
+lands, a red lint run is the state of the tree rather than evidence you broke something.
+
 The APK lands at `app\build\outputs\apk\debug\app-debug.apk`. Test names are backticked and contain
 spaces, so the `--tests` filter must be quoted as shown.
 
@@ -45,7 +51,15 @@ The `-wal` and `-shm` files go with it; a backup of the main file alone can be m
 recent writes. There is no `sqlite3` on the device, so reading the data back means pulling the file
 or using the app's own CSV export.
 
-Driving the UI over adb has three traps, all of which cost an hour between them:
+Driving the UI over adb has four traps, all of which have cost something:
+
+- **A screenshot is shown scaled, and `input tap` takes real device pixels.** The phone is
+  1080x2340; a screenshot read back at 923x2000 needs every coordinate multiplied by about 1.17
+  before it is tapped. Taking the displayed y as read lands the tap a couple of hundred pixels high,
+  which on Today is far enough to hit a *logging button* — one such miss wrote a stray 100 ml
+  hydration entry into live data that no screen in the app can delete. **Check `adb shell wm size`
+  and scale, or tap by resolved node rather than by eye.** This is the trap with the worst
+  consequences, because unlike the other three it fails silently *and* writes.
 
 - **A tap sent before the screen has settled lands on whatever was there before.** Reinstalling
   resets navigation to Today, and a `LazyColumn` scrolls to the top when it recomposes. Put the tap
@@ -58,6 +72,51 @@ Driving the UI over adb has three traps, all of which cost an hour between them:
 
 `assembleRelease` is not usable out of the box — it reads `KEYSTORE_PATH`, `STORE_PASSWORD` and
 `KEY_PASSWORD` from the environment and needs a real upload key. No signing material is in the repo.
+
+## Vocabulary
+
+Four nested levels: **tab → screen → card → chart part.** Worth reading before the architecture
+section, because everything below uses these words precisely.
+
+A **tab** is one of the six buttons in the bottom bar; a **screen** is what it opens. They are
+one-to-one, so either names a destination unambiguously — say *tab* only when the button itself is
+the subject. A **card** is one titled panel stacked down a screen; Today has fourteen, and the title
+printed at its top is its name.
+
+**"Page" is not a word for anything here.** Nothing in the app is one, and *pages read* is a tracked
+metric with a daily goal (`DailyLog.bookPagesRead`), so the word already means something else.
+
+Two places where the tab and the code disagree, both of which will come up:
+
+- **Today is `Dashboard` in the source** — `DashboardScreen`, `DashboardViewModel`,
+  `DashboardUiState`. The tab has said Today since there were six of them.
+- **Master has three names**: the tab says Master, the source says `MasterGraphScreen`, and the chart
+  card on it is titled *Food, blood and body*.
+
+The chart words are not interchangeable, and the distinctions are enforced by the drawing code rather
+than by convention — see *Drawing weight, and what gets read as data* for why each exists:
+
+| Word | What it is |
+| --- | --- |
+| **plot** | the canvas itself, inside its card |
+| **series** | one drawn line or set of bars (`ChartSeries`) |
+| **band** | a shaded range of **values** — "was it in range" (`AxisSpec.band`) |
+| **shade** | a shaded range of **time** — "what was happening then" (`ChartShade`) |
+| **rule** | a single horizontal line at one value (`AxisRule`) |
+| **marker** | a vertical line at one moment (`ChartMarker`) |
+| **axis** / **gutter** | the numbers down a side (`AxisSpec`) |
+| **legend** / **key** | the named swatches under the plot |
+| **crosshair** | the hairline a tap on the plot leaves |
+| **chips** | the range buttons — 3h/6h/12h/24h/48h/7d |
+| **switches** | the per-series on/off row on Master (`SeriesToggles`) |
+
+**Band and shade are the pair most easily confused**, and confusing them builds the wrong thing: a
+band backs one axis and asks whether a value was in range, a shade runs the full height of the plot
+and asks what was happening at that time. Sleep needed the second and there was only the first, which
+is why `ChartShade` exists.
+
+**Range is the setting; window is the span it produces.** `MasterRange.DAY` is a range; the 24 hours
+it covers is the window, and that window moves when the plot is dragged — which is a **pan**.
 
 ## Architecture
 
@@ -219,6 +278,19 @@ wrong shape twice over, since a night is not a day and does not belong to one.
 **`SLEEP_DURATION_TOTAL` is the only aggregate `SleepSessionRecord` offers.** There is no per-stage
 aggregate, so stage detail can only come from a raw `readRecords`. That is the whole reason this is
 a cache of sessions rather than four more numbers on the snapshot.
+
+**Garmin does populate the stages**, which was an open question until the first build reached the
+phone — it writes REM, light and deep, and the three add to exactly the duration the aggregate
+reports. Two things about the real data are worth knowing before reading a night on screen:
+
+- **Garmin bounds a session to the sleep itself, not to the time in bed.** The first real night
+  carried no `AWAKE` stretches at all, so time asleep and time in bed came out identical and the
+  trace never reached the top of the hypnogram. That is not the card failing to find the waking; it
+  is the source not reporting any. **Do not "fix" the axis by dropping the awake level** on the
+  strength of it — a different source, or a worse night, will use it, and the level is what makes the
+  other three readable as a scale.
+- One night is one night. Neither of these is a law about Garmin, only what the only data available
+  actually contained.
 
 **Health Connect matches a session against the filter by its own span**, so a night beginning at
 23:00 is not found by a window opening at midnight — asking for today alone returns the second half

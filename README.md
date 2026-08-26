@@ -110,6 +110,11 @@ Reporting the eight and a half would be flattering rather than accurate, which i
 the whole reason the stages are worth having — time in bed is quoted underneath,
 so the difference between the two is visible rather than hidden.
 
+The two read the same on a night whose source recorded no waking, which is what
+Garmin does when it bounds a session to the sleep itself rather than to the whole
+time in bed. Identical figures mean no waking was reported, not that the two are
+the same measurement.
+
 The chart is a hypnogram with the night's heart rate drawn over it. The two are
 on one plot rather than two because the reason to look at either is the other: a
 heart rate that stays high through the first two cycles is what a night of little
