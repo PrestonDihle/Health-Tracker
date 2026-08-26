@@ -78,20 +78,32 @@ Driving the UI over adb has four traps, all of which have cost something:
 Four nested levels: **tab → screen → card → chart part.** Worth reading before the architecture
 section, because everything below uses these words precisely.
 
-A **tab** is one of the six buttons in the bottom bar; a **screen** is what it opens. They are
-one-to-one, so either names a destination unambiguously — say *tab* only when the button itself is
-the subject. A **card** is one titled panel stacked down a screen; Today has fourteen, and the title
-printed at its top is its name.
+A **tab** is one of the six buttons in the bottom bar — Today, Log, Fuel, Activity, Wellness,
+Settings; a **screen** is what it opens. They are one-to-one, so either names a destination
+unambiguously — say *tab* only when the button itself is the subject. A **card** is one titled panel
+stacked down a screen, and the title printed at its top is its name.
 
 **"Page" is not a word for anything here.** Nothing in the app is one, and *pages read* is a tracked
-metric with a daily goal (`DailyLog.bookPagesRead`), so the word already means something else.
+metric with a daily goal (`DailyLog.bookPagesRead`), so the word already means something else. The
+same collision is why the logging tab is **Log** rather than Log Book, the other half of the reason
+being that two words do not fit a sixth of a phone's width.
+
+**The cards are mid-move between tabs.** Today, Log and Settings open the screen they will keep;
+Fuel, Activity and Wellness are wired to the old fasting, trends and landing screens until their
+own cards arrive. A screen unhooked before its replacement exists would leave everything it carries
+unloggable in the meantime, on the phone holding the only copy of this data — so nothing is unhooked
+early, and `TrackerNavHost` names the eventual owner of every temporary route.
 
 Two places where the tab and the code disagree, both of which will come up:
 
-- **Today is `Dashboard` in the source** — `DashboardScreen`, `DashboardViewModel`,
-  `DashboardUiState`. The tab has said Today since there were six of them.
-- **Master has three names**: the tab says Master, the source says `MasterGraphScreen`, and the chart
-  card on it is titled *Food, blood and body*.
+- **Today is `MasterGraphScreen` in the source**, with `MasterGraphViewModel` and
+  `MasterGraphUiState` behind it. The tab said Master until the graph became the landing screen.
+- **The chart card is titled *Food, blood and body***, which is a third name again for the thing the
+  source calls the master graph.
+
+`DashboardScreen`, `DashboardViewModel` and `DashboardUiState` still exist and still say Dashboard,
+but they are no longer Today: they hold the cards on their way to Fuel, Activity and Wellness, and
+go when the last of those has moved.
 
 The chart words are not interchangeable, and the distinctions are enforced by the drawing code rather
 than by convention — see *Drawing weight, and what gets read as data* for why each exists:
@@ -133,9 +145,11 @@ Room database, the `HealthConnectDataSource`, and the single `TrackerRepository`
 pulls the container off the application and hands it to `TrackerNavHost`, which creates each
 screen's ViewModel through that ViewModel's own `provideFactory(repository)` companion function.
 Adding a screen means: a `Screen` enum entry, a `composable` block in `TrackerNavHost`, and a
-ViewModel with a `provideFactory`. The bottom bar now carries six tabs (Today, Fasting, Master,
-Trends, History, Settings) — Material divides the width evenly and truncates, so **new labels have to
-be one short word**; "Master Graph" renders as "Master G...".
+ViewModel with a `provideFactory`. The bottom bar carries six tabs (Today, Log, Fuel, Activity,
+Wellness, Settings) — Material divides the width evenly and truncates, so **new labels have to be one
+short word**; "Master Graph" rendered as "Master G...". Eight characters is the most that has ever
+fitted, which is why Nutrition became Fuel and Wellbeing became Wellness rather than being left to
+truncate.
 
 **ViewModels expose exactly one `StateFlow<...UiState>`**, assembled by `combine` over repository
 flows and `stateIn(SharingStarted.WhileSubscribed(5_000))`. Derived values (fast duration, goal

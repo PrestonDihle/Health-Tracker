@@ -9,12 +9,18 @@ reps and reading.
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | The landing page: current fast duration, weekly fast adherence, steps, last night's sleep stages, hydration, caffeine, creatine, supplements, a 3h-to-72h glucose and ketone chart, waist, grip strength, blood pressure, vibe/energy/focus, pushups and air squats, pages read |
-| **Fasting** | Weekly feeding-window plan, scheduled multi-day extended fasts, the adherence score, a 14-day fasted/not-fasted timeline, and stats: totals, longest, average and streaks |
-| **Master** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it |
-| **Trends** | 7, 14, 30 and 90-day history for steps, waist, weight, grip strength, blood pressure, resting heart rate, sleep, stacked macros, reps, mood and reading — each against its own reference line |
-| **History** | Backfill or correct any past day |
+| **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
+| **Log** | Every logging control in one place, so several things can be entered without changing tabs |
+| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; glucose and ketones; the day's meals; the macro trend |
+| **Activity** | Grip strength and rep logging, with the step, grip strength, pushup and air squat trends |
+| **Wellness** | Sleep stages, waist and weight, blood pressure, vibe/energy/focus and reading, each with its trend |
 | **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
+
+The cards are being moved into this arrangement a tab at a time. Until that
+finishes, Fuel, Activity and Wellness open the screen holding most of what they
+will carry — the old fasting, trends and landing screens respectively — and Log
+is empty. Nothing has been made unreachable in the meantime; the tab a card
+opens under is the only thing that changes.
 
 ## Reference lines
 
