@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,7 +37,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.data.UnitSystemEnum
+import kotlin.math.roundToInt
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
@@ -67,6 +70,84 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
+        item {
+            SettingsCard(title = "You") {
+                Text(
+                    "Max heart rate zones the runs on the Activity tab. The rest are here for " +
+                        "the figures that read off them.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val settings = state.settings
+
+                IntStepper(
+                    label = "Max heart rate",
+                    value = settings.maxHeartRateBpm ?: 190,
+                    onValueChange = {
+                        viewModel.saveSettings(settings.copy(maxHeartRateBpm = it))
+                    },
+                    range = 100..230,
+                    valueFormatter = { "$it bpm" },
+                    supportingText =
+                        settings.ageYears?.let { "220 − age ≈ ${220 - it} bpm" }
+                            ?: "what your runs are zoned against",
+                )
+                HorizontalDivider()
+
+                IntStepper(
+                    label = "Age",
+                    value = settings.ageYears ?: 30,
+                    onValueChange = { viewModel.saveSettings(settings.copy(ageYears = it)) },
+                    range = 10..120,
+                    valueFormatter = { "$it yr" },
+                )
+                HorizontalDivider()
+
+                // Stored in cm to match Health Connect; stepped in whole inches or
+                // centimetres depending on the unit setting above.
+                if (settings.unitSystem == UnitSystemEnum.IMPERIAL) {
+                    IntStepper(
+                        label = "Height",
+                        value = settings.heightCm?.let { Units.cmToInches(it).roundToInt() } ?: 68,
+                        onValueChange = {
+                            viewModel.saveSettings(
+                                settings.copy(heightCm = Units.inchesToCm(it.toFloat()))
+                            )
+                        },
+                        range = 36..96,
+                        valueFormatter = { "${it / 12}' ${it % 12}\"" },
+                    )
+                } else {
+                    IntStepper(
+                        label = "Height",
+                        value = settings.heightCm?.roundToInt() ?: 173,
+                        onValueChange = {
+                            viewModel.saveSettings(settings.copy(heightCm = it.toFloat()))
+                        },
+                        range = 90..250,
+                        valueFormatter = { "$it cm" },
+                    )
+                }
+                HorizontalDivider()
+
+                Text("Sex", style = MaterialTheme.typography.bodyLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                            Sex.MALE to "Male",
+                            Sex.FEMALE to "Female",
+                            Sex.UNSPECIFIED to "Prefer not to say",
+                        )
+                        .forEach { (option, label) ->
+                            FilterChip(
+                                selected = settings.sex == option,
+                                onClick = { viewModel.saveSettings(settings.copy(sex = option)) },
+                                label = { Text(label) },
+                            )
+                        }
+                }
+            }
+        }
+
         item {
             SettingsCard(title = "Units") {
                 Row(verticalAlignment = Alignment.CenterVertically) {

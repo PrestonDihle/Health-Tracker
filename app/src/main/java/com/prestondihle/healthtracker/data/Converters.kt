@@ -68,4 +68,8 @@ class Converters {
 
     @TypeConverter
     fun toSleepStage(name: String?): SleepStage? = name?.let { SleepStage.valueOf(it) }
+
+    @TypeConverter fun fromSex(sex: Sex?): String? = sex?.name
+
+    @TypeConverter fun toSex(name: String?): Sex? = name?.let { Sex.valueOf(it) }
 }

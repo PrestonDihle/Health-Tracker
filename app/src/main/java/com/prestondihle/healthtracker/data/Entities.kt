@@ -16,6 +16,9 @@ enum class DataSourceEnum { MANUAL, HEALTH_CONNECT }
 
 enum class UnitSystemEnum { IMPERIAL, METRIC }
 
+/** Biological sex, for the metrics that read differently by it. UNSPECIFIED is the unset state. */
+enum class Sex { MALE, FEMALE, UNSPECIFIED }
+
 enum class MovementType { PUSHUP, AIR_SQUAT }
 
 /**
@@ -582,4 +585,18 @@ data class UserSettings(
      * Turning it on is a deliberate act, and the chart says so while it is on.
      */
     val smoothGlucose: Boolean = false,
+    /**
+     * Personal profile, for the metrics computed against the body rather than a
+     * goal: max heart rate drives the run-intensity zones, and age, sex and
+     * height are here for the figures that will read off them.
+     *
+     * Max heart rate is entered rather than derived: 220 minus age is only a
+     * population average, and anyone who has seen their own on a hard effort
+     * knows it better than the formula does. All nullable/UNSPECIFIED until set,
+     * so an upgrading user is never shown a made-up profile.
+     */
+    val maxHeartRateBpm: Int? = null,
+    val ageYears: Int? = null,
+    val sex: Sex = Sex.UNSPECIFIED,
+    val heightCm: Float? = null,
 )

@@ -38,7 +38,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SleepSessionEntry::class,
         SleepStageEntry::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -402,6 +402,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The personal profile on `UserSettings`.
+         *
+         * Three nullable additions and one non-null. `sex` carries a SQLite
+         * `DEFAULT 'UNSPECIFIED'` because the column is `NOT NULL` and existing
+         * rows need a value -- matching how `smoothGlucose` seeded its `NOT NULL`
+         * default. The others are left NULL, which is the "not set yet" the UI
+         * reads as an empty profile.
+         */
+        internal val migration13To14Statements =
+            listOf(
+                "ALTER TABLE `UserSettings` ADD COLUMN `maxHeartRateBpm` INTEGER",
+                "ALTER TABLE `UserSettings` ADD COLUMN `ageYears` INTEGER",
+                "ALTER TABLE `UserSettings` ADD COLUMN `sex` TEXT NOT NULL DEFAULT 'UNSPECIFIED'",
+                "ALTER TABLE `UserSettings` ADD COLUMN `heightCm` REAL",
+            )
+
+        private val MIGRATION_13_14 =
+            object : Migration(13, 14) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration13To14Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -428,6 +452,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_10_11,
                                 MIGRATION_11_12,
                                 MIGRATION_12_13,
+                                MIGRATION_13_14,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()
