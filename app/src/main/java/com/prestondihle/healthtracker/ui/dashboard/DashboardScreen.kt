@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,16 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
@@ -71,17 +65,23 @@ import androidx.compose.material3.FilterChip
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
-import com.prestondihle.healthtracker.ui.components.SupplementEntryDialog
+import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
+import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.InlineLogButton
 import com.prestondihle.healthtracker.ui.components.InstantPickerDialog
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.LabeledSlider
+import com.prestondihle.healthtracker.ui.components.LogButton
+import com.prestondihle.healthtracker.ui.components.Metric
 import com.prestondihle.healthtracker.ui.components.ScaleDescriptors
 import com.prestondihle.healthtracker.ui.components.Stepper
+import com.prestondihle.healthtracker.ui.components.SupplementEntryDialog
 import com.prestondihle.healthtracker.ui.components.TimePoint
+import com.prestondihle.healthtracker.ui.components.TrackerCard
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
 import java.time.Duration
@@ -294,98 +294,17 @@ fun DashboardScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHo
 // them below the fold.
 // ---------------------------------------------------------------------------
 
-private val CardGap = 8.dp
-private val CardPadding = 10.dp
-private val CardSpacing = 6.dp
 private val ChartHeight = 170.dp
 private val EmptyChartHeight = 72.dp
 private val BarHeight = 5.dp
-
-/** Buttons at stock size waste a lot of vertical space when a card has three of them. */
-private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-
-/**
- * A commit action sized to sit inline with a [Stepper]'s arrows.
- *
- * Passed as the stepper's `trailingContent`, this collapses what used to be a
- * whole second row -- a right-aligned "Log X" button -- onto the same line as the
- * value being logged. Filled (primary) where the arrows are tonal, so the button
- * that writes a reading stands apart from the two that only nudge it. Each card
- * reclaims a full button-height row, which is most of the point of the dense
- * layout: more metrics above the fold.
- */
-@Composable
-private fun InlineLogButton(
-    contentDescription: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
-    FilledIconButton(onClick = onClick, enabled = enabled) {
-        Icon(Icons.Filled.Check, contentDescription = contentDescription)
-    }
-}
-
-/**
- * A compact log action, right-aligned under its inputs.
- *
- * Used where there is no single stepper to sit inline with: the mood card's
- * three sliders, and caffeine, where the button opens a dialog rather than
- * committing a dialled-in value. A small button pinned to the right reads as
- * "commit" without giving a secondary action the weight of a full-width primary
- * button.
- */
-@Composable
-private fun LogButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Button(onClick = onClick, enabled = enabled, contentPadding = CompactButtonPadding) {
-            Text(text)
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Cards
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun DashboardCard(
-    title: String,
-    action: @Composable (() -> Unit)? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(
-            modifier = Modifier.padding(CardPadding),
-            verticalArrangement = Arrangement.spacedBy(CardSpacing),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                action?.invoke()
-            }
-            content()
-        }
-    }
-}
-
-@Composable
 private fun HealthConnectPrompt(state: HealthPermissionState, onConnect: () -> Unit) {
-    DashboardCard(title = "Health Connect") {
+    TrackerCard(title = "Health Connect") {
         val message =
             when (state) {
                 HealthPermissionState.UNAVAILABLE ->
@@ -418,7 +337,7 @@ private fun String.asPermissionLabel(): String =
 
 @Composable
 private fun MissingPermissionsPrompt(missing: Set<String>, onGrant: () -> Unit) {
-    DashboardCard(title = "Health Connect") {
+    TrackerCard(title = "Health Connect") {
         Text(
             "Not yet allowed to read: ${missing.joinToString { it.asPermissionLabel() }}. " +
                 "Those metrics stay blank until granted.",
@@ -439,7 +358,7 @@ private fun FastCard(
 ) {
     var editing by remember { mutableStateOf<FastEdit?>(null) }
 
-    DashboardCard(title = "Fasting") {
+    TrackerCard(title = "Fasting") {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -562,7 +481,7 @@ private fun FastCard(
 
 @Composable
 private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
-    DashboardCard(
+    TrackerCard(
         title = "Activity",
         action = {
             IconButton(onClick = onRefresh, enabled = !state.isSyncing) {
@@ -672,14 +591,14 @@ internal fun SleepCard(state: DashboardUiState) {
     val chartColors = LocalChartColors.current
     val night = state.sleep
 
-    DashboardCard(title = "Sleep") {
+    TrackerCard(title = "Sleep") {
         if (night == null) {
             Text(
                 "No sleep recorded yet. Nights arrive with the next Health Connect sync.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            return@DashboardCard
+            return@TrackerCard
         }
 
         Row(
@@ -812,7 +731,7 @@ private fun Duration.shareOf(whole: Duration): String? {
 
 @Composable
 private fun HydrationCard(state: DashboardUiState, onAdd: (Int) -> Unit) {
-    DashboardCard(title = "Hydration") {
+    TrackerCard(title = "Hydration") {
         val goalMl = state.goals.dailyWaterMlGoal ?: 2957
         val oz = Units.mlToWholeOz(state.hydrationMl)
         val goalOz = Units.mlToWholeOz(goalMl)
@@ -871,7 +790,7 @@ private fun CreatineCard(
     onLog: (Int) -> Unit,
     onDelete: (CreatineIntake) -> Unit,
 ) {
-    DashboardCard(title = "Creatine") {
+    TrackerCard(title = "Creatine") {
         Metric(
             label = "Today",
             value = "${state.creatineTodayGrams} g",
@@ -945,7 +864,7 @@ private fun SupplementsCard(
     var adding by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Supplement?>(null) }
 
-    DashboardCard(
+    TrackerCard(
         title = "Supplements",
         action = {
             IconButton(onClick = { adding = true }) {
@@ -1062,7 +981,7 @@ private fun CaffeineCard(
     val chartColors = LocalChartColors.current
     var dialog by remember { mutableStateOf<CaffeineDialog?>(null) }
 
-    DashboardCard(title = "Caffeine") {
+    TrackerCard(title = "Caffeine") {
         // Taken today leads: it is the only figure here that is a plain fact
         // rather than a model output, and it is what a daily limit is read
         // against. The three to its right are all the same decay curve sampled
@@ -1226,7 +1145,7 @@ private fun MetabolicCard(
 ) {
     val chartColors = LocalChartColors.current
 
-    DashboardCard(title = "Glucose and ketones") {
+    TrackerCard(title = "Glucose and ketones") {
         // Zooming in is the point: a CGM trace over 24 hours flattens the swing
         // around a single meal into a wiggle, and 3 to 6 hours is where that
         // swing is actually readable. Wrapped because six chips do not fit on one
@@ -1376,7 +1295,7 @@ private fun MetabolicCard(
 
 @Composable
 private fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
-    DashboardCard(title = "Body") {
+    TrackerCard(title = "Body") {
         // Held locally and written only on Log, so dialling past the target value
         // does not save a string of measurements that were never taken. Re-seeds
         // whenever the stored value changes underneath it.
@@ -1430,7 +1349,7 @@ private const val DEFAULT_GRIP_LBS = 90f
  */
 @Composable
 private fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) -> Unit) {
-    DashboardCard(title = "Grip strength") {
+    TrackerCard(title = "Grip strength") {
         var dominant by
             remember(state.latestGrip?.dominantKg) {
                 mutableFloatStateOf(
@@ -1504,7 +1423,7 @@ private fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) ->
 
 @Composable
 private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> Unit) {
-    DashboardCard(title = "Blood pressure") {
+    TrackerCard(title = "Blood pressure") {
         var systolic by remember { mutableIntStateOf(120) }
         var diastolic by remember { mutableIntStateOf(80) }
 
@@ -1548,7 +1467,7 @@ private fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> U
 
 @Composable
 private fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit) {
-    DashboardCard(title = "How are you?") {
+    TrackerCard(title = "How are you?") {
         var vibe by remember(state.dailyLog.vibe) { mutableIntStateOf(state.dailyLog.vibe ?: 5) }
         var energy by
             remember(state.dailyLog.energy) { mutableIntStateOf(state.dailyLog.energy ?: 5) }
@@ -1564,7 +1483,7 @@ private fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit)
 
 @Composable
 private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> Unit) {
-    DashboardCard(title = "Movement") {
+    TrackerCard(title = "Movement") {
         var pushups by remember { mutableIntStateOf(20) }
         var squats by remember { mutableIntStateOf(20) }
 
@@ -1608,7 +1527,7 @@ private fun ReadingCard(
     onLogPages: (Int) -> Unit,
     onSetPages: (Int) -> Unit,
 ) {
-    DashboardCard(title = "Reading") {
+    TrackerCard(title = "Reading") {
         val readToday = state.dailyLog.bookPagesRead ?: 0
         val goal = state.goals.dailyPagesGoal
 
@@ -1665,39 +1584,3 @@ private fun LocalDate.asShortDate(): String = DateTimeFormatter.ofPattern("MMM d
 /** Says which 9 PM the evening estimate means, since it rolls over once tonight's has passed. */
 private fun Instant.asEveningSupporting(state: DashboardUiState): String =
     if (atZone(state.zoneId).toLocalDate() == state.today) "tonight" else "tomorrow"
-
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun Metric(
-    label: String,
-    value: String,
-    supporting: String? = null,
-    /** Null keeps the default text colour; set only where the value itself carries meaning. */
-    valueColor: Color? = null,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = valueColor ?: Color.Unspecified,
-            maxLines = 1,
-        )
-        if (supporting != null) {
-            Text(
-                supporting,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-    }
-}

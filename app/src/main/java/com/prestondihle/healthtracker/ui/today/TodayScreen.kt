@@ -3,7 +3,6 @@ package com.prestondihle.healthtracker.ui.today
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,8 +18,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,15 +50,19 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
+import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.ChartShade
+import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.MealDraft
 import com.prestondihle.healthtracker.ui.components.MealEntryDialog
+import com.prestondihle.healthtracker.ui.components.Metric
 import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
+import com.prestondihle.healthtracker.ui.components.TrackerCard
 import com.prestondihle.healthtracker.ui.theme.ChartColors
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
@@ -69,12 +70,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-private val CardGap = 10.dp
-private val CardPadding = 12.dp
 private val ChartHeight = 300.dp
-
-/** Sized to sit on a card's title row without stretching it. */
-private val CompactButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
 /**
  * Everything on one timeline: the macros of each meal spread into the hours they
@@ -108,7 +104,7 @@ fun TodayScreen(viewModel: TodayViewModel) {
 
         if (state.healthState != HealthPermissionState.GRANTED) {
             item {
-                TodayCard(title = "Health Connect") {
+                TrackerCard(title = "Health Connect") {
                     Text(
                         "Meals and heart rate come from Health Connect. Connect it on the Today " +
                             "screen to fill this graph in; glucose and ketones logged by hand " +
@@ -147,36 +143,6 @@ fun TodayScreen(viewModel: TodayViewModel) {
     }
 }
 
-@Composable
-private fun TodayCard(
-    title: String,
-    action: @Composable (() -> Unit)? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(
-            modifier = Modifier.padding(CardPadding),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                action?.invoke()
-            }
-            content()
-        }
-    }
-}
 
 /**
  * The day's totals, above the timeline that explains them.
@@ -191,7 +157,7 @@ private fun TodayCard(
  */
 @Composable
 private fun ActivityCard(state: TodayUiState, onRefresh: () -> Unit) {
-    TodayCard(
+    TrackerCard(
         title = "Activity",
         action = {
             IconButton(onClick = onRefresh, enabled = !state.isSyncing) {
@@ -483,7 +449,7 @@ private fun CombinedChartCard(
             ),
         )
 
-    TodayCard(title = "Food, blood and body") {
+    TrackerCard(title = "Food, blood and body") {
         // A window dragged off the clock has to say so. Everything else on this
         // screen -- the range chips, the "Right now" card above -- reads as live,
         // and a plot of last Tuesday under all of it looks exactly like a plot of
@@ -699,7 +665,7 @@ internal fun MasterSeries.colorIn(colors: ChartColors): Color =
 /** Where the absorption curves come from, since they are the one modelled thing here. */
 @Composable
 private fun AbsorptionModelCard() {
-    TodayCard(title = "About the food curves") {
+    TrackerCard(title = "About the food curves") {
         Text(
             "Health Connect records a meal as one lump of grams at one time. The dashed lines " +
                 "spread each meal over the hours it is actually reaching the blood, so the area " +
@@ -744,7 +710,7 @@ private fun MealListCard(
     var adding by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf<MealEntry?>(null) }
 
-    TodayCard(
+    TrackerCard(
         title = "Meals in this window",
         action = {
             TextButton(onClick = { adding = true }, contentPadding = CompactButtonPadding) {
@@ -979,37 +945,3 @@ private fun MealEntry.macroSummary(): String {
  */
 private fun MealEntry.markerLabel(): String? =
     carbGrams?.let { "${it.toInt()}g C" } ?: calories?.let { "$it kcal" }
-
-@Composable
-private fun Metric(
-    label: String,
-    value: String,
-    supporting: String? = null,
-    /** Null keeps the default text colour; set only where the value itself carries meaning. */
-    valueColor: Color? = null,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = valueColor ?: Color.Unspecified,
-            maxLines = 1,
-        )
-        if (supporting != null) {
-            Text(
-                supporting,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-    }
-}

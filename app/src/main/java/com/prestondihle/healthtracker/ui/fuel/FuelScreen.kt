@@ -44,7 +44,10 @@ import com.prestondihle.healthtracker.data.FastingType
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.domain.FastingStats
 import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.FastingTimeline
+import com.prestondihle.healthtracker.ui.components.Metric
+import com.prestondihle.healthtracker.ui.components.TrackerCard
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
@@ -67,14 +70,14 @@ fun FuelScreen(viewModel: FuelViewModel) {
     var addingFast by remember { mutableStateOf(false) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = CardGap),
+        verticalArrangement = Arrangement.spacedBy(CardGap),
+        contentPadding = PaddingValues(vertical = CardGap),
     ) {
         item { AdherenceCard(state) }
 
         item {
-            FuelCard(
+            TrackerCard(
                 title = "Fasting pattern",
                 subtitle = "Last 14 days. Filled is fasted, blank is eating.",
             ) {
@@ -85,7 +88,7 @@ fun FuelScreen(viewModel: FuelViewModel) {
         item { StatsCard(state.stats) }
 
         item {
-            FuelCard(
+            TrackerCard(
                 title = "Weekly plan",
                 subtitle = "Times are when eating is allowed. Switch a day off for no eating at all.",
             ) {
@@ -104,7 +107,7 @@ fun FuelScreen(viewModel: FuelViewModel) {
         }
 
         item {
-            FuelCard(
+            TrackerCard(
                 title = "Extended fasts",
                 subtitle = "These override the weekly plan for the days they cover",
             ) {
@@ -146,7 +149,7 @@ fun FuelScreen(viewModel: FuelViewModel) {
 
 @Composable
 private fun AdherenceCard(state: FuelUiState) {
-    FuelCard(title = "Adherence", subtitle = "Week of ${DATE_FORMAT.format(state.weekStart)}") {
+    TrackerCard(title = "Adherence", subtitle = "Week of ${DATE_FORMAT.format(state.weekStart)}") {
         val score = state.adherence?.score
         Text(
             text = score?.let { "$it%" } ?: "--",
@@ -181,14 +184,14 @@ private fun AdherenceCard(state: FuelUiState) {
 
 @Composable
 private fun StatsCard(stats: FastingStats) {
-    FuelCard(title = "Fasting stats", subtitle = "Totals count overlapping fasts only once") {
+    TrackerCard(title = "Fasting stats", subtitle = "Totals count overlapping fasts only once") {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            StatMetric("Today", stats.todaySeconds.asHours())
-            StatMetric("7 days", stats.weekSeconds.asHours())
-            StatMetric("30 days", stats.monthSeconds.asHours())
+            Metric("Today", stats.todaySeconds.asHours())
+            Metric("7 days", stats.weekSeconds.asHours())
+            Metric("30 days", stats.monthSeconds.asHours())
         }
 
         HorizontalDivider()
@@ -197,40 +200,21 @@ private fun StatsCard(stats: FastingStats) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            StatMetric(
+            Metric(
                 "Longest",
                 stats.longestFast?.let { Units.formatDuration(it) } ?: "--",
                 stats.longestFastEnded?.let { DATE_FORMAT.format(it.atZone(ZoneId.systemDefault())) },
             )
-            StatMetric(
+            Metric(
                 "Average",
                 if (stats.completedFasts == 0) "--"
                 else Units.formatDuration(Duration.ofSeconds(stats.averageFastSeconds)),
                 "${stats.completedFasts} finished",
             )
-            StatMetric(
+            Metric(
                 "Streak",
                 "${stats.currentStreakDays}d",
                 "best ${stats.bestStreakDays}d",
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatMetric(label: String, value: String, supporting: String? = null) {
-    Column {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        if (supporting != null) {
-            Text(
-                supporting,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -405,31 +389,4 @@ private fun AddExtendedFastDialog(
             }
         },
     )
-}
-
-@Composable
-private fun FuelCard(title: String, subtitle: String?, content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            content()
-        }
-    }
 }
