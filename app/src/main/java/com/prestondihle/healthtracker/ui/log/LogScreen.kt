@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.dashboard.BloodPressureCard
@@ -21,6 +22,7 @@ import com.prestondihle.healthtracker.ui.dashboard.BodyCard
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
 import com.prestondihle.healthtracker.ui.dashboard.GripStrengthCard
 import com.prestondihle.healthtracker.ui.dashboard.MoodCard
+import com.prestondihle.healthtracker.ui.dashboard.MovementCard
 import com.prestondihle.healthtracker.ui.dashboard.ReadingCard
 import kotlinx.coroutines.launch
 
@@ -87,6 +89,17 @@ fun LogScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHostStat
                     toast("Logged $it pages")
                 },
                 onSetPages = viewModel::setPages,
+            )
+        }
+
+        item {
+            MovementCard(
+                state = state,
+                onLog = { movement, reps ->
+                    viewModel.logReps(movement, reps)
+                    val name = if (movement == MovementType.PUSHUP) "pushups" else "air squats"
+                    toast("Logged $reps $name")
+                },
             )
         }
 

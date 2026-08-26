@@ -166,17 +166,6 @@ fun DashboardScreen(
         // The mood trend, still fed by the sliders now on the Log tab.
         item { MoodTrendCard(state = state) }
 
-        item {
-            MovementCard(
-                state = state,
-                onLog = { movement, reps ->
-                    viewModel.logReps(movement, reps)
-                    val name = if (movement == MovementType.PUSHUP) "pushups" else "air squats"
-                    toast("Logged $reps $name")
-                },
-            )
-        }
-
         // Pages read per day.
         item { ReadingTrendCard(state = state) }
 
@@ -874,7 +863,7 @@ private fun MoodTrendCard(state: DashboardUiState) {
 }
 
 @Composable
-private fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> Unit) {
+internal fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> Unit) {
     TrackerCard(title = "Movement") {
         var pushups by remember { mutableIntStateOf(20) }
         var squats by remember { mutableIntStateOf(20) }
