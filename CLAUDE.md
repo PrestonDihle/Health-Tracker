@@ -79,7 +79,10 @@ Driving the UI over adb has four traps, all of which have cost something:
   input. If a tap appears to do nothing, check `logcat` for `freeze com.prestondihle.healthtracker`
   and bring the activity back to the front.
 - **A picture-in-picture window swallows taps** in the bottom-right corner, which is where the
-  Settings tab is. Drag it away rather than tapping through it.
+  Settings tab is. Drag it away rather than tapping through it. It also **hides whatever is under it
+  in a screenshot**, which is the more misleading half: a waist trend read back with the PiP over
+  its top-right looked like a chart drawing its rules and no data, and the trace was there the whole
+  time. `input swipe` moves the window; check a chart is actually empty before believing it is.
 
 `assembleRelease` is not usable out of the box — it reads `KEYSTORE_PATH`, `STORE_PASSWORD` and
 `KEY_PASSWORD` from the environment and needs a real upload key. No signing material is in the repo.
