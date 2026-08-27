@@ -154,7 +154,6 @@ data class DashboardUiState(
     val sleep: SleepNight? = null,
     /** Buckets spanning the night, for the trace drawn under the hypnogram. */
     val sleepHeartRate: List<HeartRateBucket> = emptyList(),
-    val hydrationMl: Int = 0,
     val dailyLog: DailyLog = DailyLog(LocalDate.now()),
     /** Recent daily logs for the mood and reading trends shown next to their inputs. */
     val logHistory: List<DailyLog> = emptyList(),
@@ -425,7 +424,6 @@ private data class FastingBundle(
 
 private data class TodayBundle(
     val log: DailyLog?,
-    val hydrationMl: Int,
     val waist: WaistEntry?,
     val bloodPressures: List<BloodPressureReading>,
     val creatine: List<CreatineIntake>,
@@ -531,7 +529,6 @@ class DashboardViewModel(
             val date = today
             return combine(
                 repository.getDailyLog(date),
-                repository.getHydrationTotalMl(date),
                 repository.getLatestWaistOnOrBefore(date),
                 combine(
                     repository.getBloodPressureForDate(date),
@@ -547,10 +544,9 @@ class DashboardViewModel(
                 ) { pushups, squats, grip, supplements, taken ->
                     BodyBundle(pushups, squats, grip, supplements, taken)
                 },
-            ) { log, hydration, waist, bpCreatineHistory, body ->
+            ) { log, waist, bpCreatineHistory, body ->
                 TodayBundle(
                     log,
-                    hydration,
                     waist,
                     bpCreatineHistory.first,
                     bpCreatineHistory.second,
@@ -653,7 +649,6 @@ class DashboardViewModel(
                     bestMileSeconds = health.bestMileSeconds,
                     sleep = health.sleep,
                     sleepHeartRate = health.heartRate,
-                    hydrationMl = todayBundle.hydrationMl,
                     dailyLog = todayBundle.log ?: DailyLog(date),
                     logHistory = todayBundle.logHistory,
                     historyStart = date.minusDays(LOG_HISTORY_DAYS - 1),
@@ -740,10 +735,6 @@ class DashboardViewModel(
                 syncing.value = false
             }
         }
-    }
-
-    fun addHydration(milliliters: Int) {
-        viewModelScope.launch { repository.addHydration(milliliters) }
     }
 
     /** Adds to today's running total rather than replacing it, so several sittings accumulate. */

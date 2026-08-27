@@ -185,6 +185,8 @@ interface TrackerDao {
 
     @Insert suspend fun insertHydration(entry: HydrationEntry)
 
+    @Update suspend fun updateHydration(entry: HydrationEntry)
+
     @Delete suspend fun deleteHydration(entry: HydrationEntry)
 
     // ----- Bodyweight exercise sets -----------------------------------------

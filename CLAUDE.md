@@ -64,9 +64,13 @@ Driving the UI over adb has four traps, all of which have cost something:
   1080x2340; a screenshot read back at 923x2000 needs every coordinate multiplied by about 1.17
   before it is tapped. Taking the displayed y as read lands the tap a couple of hundred pixels high,
   which on Today is far enough to hit a *logging button* — one such miss wrote a stray 100 ml
-  hydration entry into live data that no screen in the app can delete. **Check `adb shell wm size`
-  and scale, or tap by resolved node rather than by eye.** This is the trap with the worst
-  consequences, because unlike the other three it fails silently *and* writes.
+  hydration entry into live data. **Check `adb shell wm size` and scale, or tap by resolved node
+  rather than by eye.** This is the trap with the worst consequences, because unlike the other three
+  it fails silently *and* writes. That entry has since been deleted, through the correction list the
+  incident is the reason for — but note what made it expensive: 100 ml is also the ordinary dose
+  logged here, so the bad row was indistinguishable from a real one and took a query over the
+  backup to find at all. **A wrong tap that writes something plausible is not recoverable by
+  looking at the data afterwards.**
 
 - **A tap sent before the screen has settled lands on whatever was there before.** Reinstalling
   resets navigation to Today, and a `LazyColumn` scrolls to the top when it recomposes. Put the tap
@@ -280,6 +284,26 @@ flag into a real delete, which would pass every other test and quietly resurrect
 Reads split accordingly: `getMealsBetween` (screens and curves) excludes hidden rows;
 `getMealsInRange` (the sync's content check) includes them, so a deleted meal also keeps out the
 upstream duplicate of itself arriving later under a different record id.
+
+**Hydration and caffeine are the other side of that rule, and are deleted for real.** Both are
+hand-entered end to end with no upstream record to arrive again, so a hidden flag would have nothing
+to keep out and would only leave the row to be counted by something that forgot to filter.
+`HydrationEditTest` pins the delete *and* a following sync, which is the same guard
+`MealDeletionTest` provides from the opposite direction: the two tables must not be made consistent
+with each other, and the test is what says so.
+
+**The correction list reaches back a week while the card's total stops at midnight**, and the pair
+is the point. A stray tap logs 100 ml, which is also the ordinary dose, so it is spotted a day or
+two later from a figure that looks too high — a list ending at midnight would offer the fix only
+while nobody yet knew it was needed. Counting those older rows into today's figure would be the same
+bug pointing the other way, so `hydrationMl` filters to today exactly as `caffeineTodayMg` does. The
+card says "Last 7 days" over the list, because a reader who has just read *Today 17 oz* will take
+what follows for today unless told otherwise.
+
+`ui/components/IntakeEntryDialog.kt` serves both. What differs between a dose and a drink is a
+title, a step and a unit; what they share is the part with the traps in it — clamping a saved time
+to now, refusing a date in the future, rebuilding an `Instant` from the picker in the right zone.
+Two copies of that would be two things to fix each time one turned out to be wrong.
 
 **The same source may also write one meal as several records.** One day carried six records that were
 two meals repeated three times, each with a Health Connect id of its own — so the unique index saw
@@ -971,6 +995,11 @@ each other, and which of them wins is the input's shape rather than the filter's
 `MealDeletionTest` is a Robolectric test with no UI in it, exercising the repository against an
 in-memory database and a stubborn data source that keeps re-offering the meal that was deleted. Any
 behaviour that only shows up *across* a sync belongs there rather than in a render test.
+
+`HydrationEditTest` is the counterpart for the manual side: that a deleted drink stays deleted
+across a sync, that an edit rewrites the row rather than adding a second one, and that the week-wide
+list and the today-only total do not borrow each other's window. All four are things that would look
+right on the card for as long as nobody checked the figure.
 
 `SleepSyncTest` is the same shape for the other cache that changes under you: a source whose night
 the test re-scores between syncs. It pins that a re-scored night *replaces* its stages rather than

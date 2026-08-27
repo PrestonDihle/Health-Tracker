@@ -244,6 +244,15 @@ class TrackerRepository(
     suspend fun addHydration(milliliters: Int, at: Instant = Instant.now()) =
         dao.insertHydration(HydrationEntry(timestamp = at, milliliters = milliliters))
 
+    suspend fun updateHydration(entry: HydrationEntry) = dao.updateHydration(entry)
+
+    /**
+     * Removes the row outright, unlike a synced meal.
+     *
+     * Hydration is hand-entered and has no upstream record to arrive again on
+     * the next sync, so there is nothing for a hidden flag to keep out and a
+     * real delete is the honest one.
+     */
     suspend fun deleteHydration(entry: HydrationEntry) = dao.deleteHydration(entry)
 
     // ----- Bodyweight exercise ----------------------------------------------

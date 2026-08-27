@@ -32,26 +32,43 @@ import java.time.format.DateTimeFormatter
 private val DAY_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
 
 /**
- * Amount and time for one caffeine dose, used for both logging and correcting.
+ * How much, and when, for one hand-logged intake -- used to log and to correct.
  *
- * Date is a pair of nudge buttons rather than a full calendar: a dose is nearly
- * always today or last night, and a second nested dialog to say so would cost
- * more taps than the whole entry is worth.
+ * One dialog for caffeine and water rather than one apiece. What differs between
+ * them is a title, a step size and a unit; what they share is the part with the
+ * traps in it -- clamping a saved time to now, refusing a date in the future,
+ * and rebuilding an `Instant` from a picker in the right zone. A second copy of
+ * that would be a second thing to fix each time one of them turns out to be
+ * wrong, and the copy nobody remembered to fix is the one still shipping.
+ *
+ * Date is a pair of nudge buttons rather than a full calendar: an entry is
+ * nearly always today or last night, and a second nested dialog to say so would
+ * cost more taps than the whole entry is worth.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CaffeineEntryDialog(
-    initialMilligrams: Int,
+fun IntakeEntryDialog(
+    /** Shown when logging something new. */
+    newTitle: String,
+    /** Shown when correcting an existing entry. */
+    editTitle: String,
+    /** Wording for the delete action, e.g. "Delete this dose". */
+    deleteLabel: String,
+    initialAmount: Int,
+    step: Int,
+    range: IntRange,
+    /** The unit, and anything else worth saying about the amount as it changes. */
+    supporting: (Int) -> String,
     initialTime: Instant,
     onDismiss: () -> Unit,
-    onConfirm: (milligrams: Int, at: Instant) -> Unit,
+    onConfirm: (amount: Int, at: Instant) -> Unit,
     zoneId: ZoneId = ZoneId.systemDefault(),
-    /** Supplied when correcting an existing dose; absent when logging a new one. */
+    /** Supplied when correcting an existing entry; absent when logging a new one. */
     onDelete: (() -> Unit)? = null,
 ) {
     val initialLocal = remember(initialTime, zoneId) { LocalDateTime.ofInstant(initialTime, zoneId) }
 
-    var milligrams by remember { mutableIntStateOf(initialMilligrams) }
+    var amount by remember { mutableIntStateOf(initialAmount) }
     var date by remember { mutableStateOf<LocalDate>(initialLocal.toLocalDate()) }
     val timeState =
         rememberTimePickerState(
@@ -64,7 +81,7 @@ fun CaffeineEntryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (onDelete == null) "Log caffeine" else "Edit dose") },
+        title = { Text(if (onDelete == null) newTitle else editTitle) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -72,11 +89,11 @@ fun CaffeineEntryDialog(
             ) {
                 IntStepper(
                     label = "Amount",
-                    value = milligrams,
-                    onValueChange = { milligrams = it },
-                    step = 5,
-                    range = 0..1_000,
-                    supportingText = "mg",
+                    value = amount,
+                    onValueChange = { amount = it },
+                    step = step,
+                    range = range,
+                    supportingText = supporting(amount),
                 )
 
                 Row(
@@ -89,7 +106,7 @@ fun CaffeineEntryDialog(
                         if (date == today) "Today" else DAY_FORMAT.format(date),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    // A dose cannot be in the future, so forward stops at today.
+                    // An entry cannot be in the future, so forward stops at today.
                     TextButton(
                         onClick = { date = date.plusDays(1) },
                         enabled = date.isBefore(today),
@@ -101,7 +118,7 @@ fun CaffeineEntryDialog(
                 TimePicker(state = timeState, modifier = Modifier.fillMaxWidth())
 
                 if (onDelete != null) {
-                    TextButton(onClick = onDelete) { Text("Delete this dose") }
+                    TextButton(onClick = onDelete) { Text(deleteLabel) }
                 }
             }
         },
@@ -112,7 +129,7 @@ fun CaffeineEntryDialog(
                         date.atTime(LocalTime.of(timeState.hour, timeState.minute))
                             .atZone(zoneId)
                             .toInstant()
-                    onConfirm(milligrams, minOf(at, Instant.now()))
+                    onConfirm(amount, minOf(at, Instant.now()))
                 }
             ) {
                 Text("Save")

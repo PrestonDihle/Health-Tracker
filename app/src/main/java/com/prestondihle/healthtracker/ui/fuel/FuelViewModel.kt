@@ -8,6 +8,7 @@ import com.prestondihle.healthtracker.data.CreatineIntake
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
 import com.prestondihle.healthtracker.data.FastingType
+import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.SupplementSlot
@@ -42,6 +43,17 @@ private const val TIMELINE_DAYS = 14L
 
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
+
+/**
+ * How far back a logged drink can still be corrected.
+ *
+ * A week, which is longer than the day the card totals and deliberately so. The
+ * ordinary dose here is 100 ml logged by tapping a button several times in a
+ * row, so a stray tap writes something identical to a real entry and is only
+ * ever spotted later, from a day's figure looking too high. A list that ended at
+ * midnight would offer the correction only while nobody yet knew it was needed.
+ */
+private const val HYDRATION_EDITABLE_DAYS = 7L
 
 /**
  * Half the caffeine window, extending equally either side of now.
@@ -79,7 +91,16 @@ data class FuelUiState(
     /** Most recently finished fast, so a forgotten Stop can be corrected. */
     val lastCompletedFast: FastingSession? = null,
     val hasPlan: Boolean = false,
-    val hydrationMl: Int = 0,
+    /**
+     * Water entry by entry over the last [HYDRATION_EDITABLE_DAYS] days, oldest first.
+     *
+     * Wider than the day the card totals, because the entry worth removing is
+     * rarely noticed on the day it was written -- a stray tap logs 100 ml, which
+     * is also the ordinary dose here, and it is indistinguishable from a real one
+     * until the day's figure is looked at afterwards. A list that stopped at
+     * midnight would be a correction that expires overnight.
+     */
+    val hydration: List<HydrationEntry> = emptyList(),
     /**
      * Doses reaching back beyond the plotted window.
      *
@@ -174,6 +195,22 @@ data class FuelUiState(
 
     private val caffeineDoses: List<CaffeineDose>
         get() = caffeine.map { CaffeineDose(it.timestamp, it.milligrams) }
+
+    /**
+     * Millilitres drunk since midnight, which is what the goal is read against.
+     *
+     * Derived from the listed rows rather than queried as its own `SUM`, which
+     * is what it used to be. Two reads of one table can disagree -- and the
+     * moment an entry became deletable, a headline that had not caught up with
+     * the list under it would be the first thing anybody noticed and the last
+     * thing they trusted. Filtered to today because the list is deliberately
+     * wider than the day: the same shape as [caffeineTodayMg].
+     */
+    val hydrationMl: Int
+        get() {
+            val midnight = today.atStartOfDay(zoneId).toInstant()
+            return hydration.filter { !it.timestamp.isBefore(midnight) }.sumOf { it.milliliters }
+        }
 
     /** Milligrams still in the body right now. */
     val caffeineNowMg: Float
@@ -273,7 +310,7 @@ class FuelViewModel(
         get() {
             val date = today
             return combine(
-                repository.getHydrationTotalMl(date),
+                repository.getHydrationBetween(date.minusDays(HYDRATION_EDITABLE_DAYS - 1), date),
                 repository.getCreatineForDate(date),
                 repository.getSupplements(),
                 repository.getSupplementsTakenOn(date),
@@ -368,7 +405,7 @@ class FuelViewModel(
                     activeFast = running.active,
                     lastCompletedFast = running.lastCompleted,
                     hasPlan = plan.isNotEmpty(),
-                    hydrationMl = taken.hydrationMl,
+                    hydration = taken.hydration,
                     caffeine = running.caffeine,
                     creatineToday = taken.creatine,
                     supplements = taken.supplements,
@@ -500,6 +537,18 @@ class FuelViewModel(
         viewModelScope.launch { repository.addHydration(milliliters) }
     }
 
+    /** Corrects a logged drink. A zero amount deletes it, matching the caffeine rule. */
+    fun updateHydration(entry: HydrationEntry, milliliters: Int, at: Instant) {
+        viewModelScope.launch {
+            if (milliliters <= 0) repository.deleteHydration(entry)
+            else repository.updateHydration(entry.copy(milliliters = milliliters, timestamp = at))
+        }
+    }
+
+    fun deleteHydration(entry: HydrationEntry) {
+        viewModelScope.launch { repository.deleteHydration(entry) }
+    }
+
     fun logCaffeine(milligrams: Int, at: Instant = Instant.now()) {
         if (milligrams <= 0) return
         viewModelScope.launch { repository.addCaffeine(milligrams, at) }
@@ -563,7 +612,7 @@ private data class PlanBundle(
 
 /** What has gone in today. */
 private data class IntakeBundle(
-    val hydrationMl: Int,
+    val hydration: List<HydrationEntry>,
     val creatine: List<CreatineIntake>,
     val supplements: List<Supplement>,
     val supplementsTaken: Set<Long>,

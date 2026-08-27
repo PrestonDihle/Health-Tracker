@@ -55,7 +55,7 @@ data class MealDraft(
  * reading if the meals underneath them are, so the meals have to be editable.
  *
  * Date is a pair of nudge buttons rather than a calendar, matching
- * [CaffeineEntryDialog] -- a meal being corrected is nearly always today or
+ * [IntakeEntryDialog] -- a meal being corrected is nearly always today or
  * yesterday, and a nested dialog to say so would cost more taps than the whole
  * entry is worth.
  */

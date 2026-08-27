@@ -58,6 +58,7 @@ import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.CreatineIntake
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingType
+import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.SupplementSlot
@@ -66,7 +67,7 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.BarHeight
-import com.prestondihle.healthtracker.ui.components.CaffeineEntryDialog
+import com.prestondihle.healthtracker.ui.components.IntakeEntryDialog
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
@@ -227,6 +228,14 @@ fun FuelScreen(
                             onAdd = {
                                 viewModel.addHydration(it)
                                 toast("Logged $it ml")
+                            },
+                            onUpdate = { entry, ml, at ->
+                                viewModel.updateHydration(entry, ml, at)
+                                toast(if (ml <= 0) "Entry removed" else "Entry updated")
+                            },
+                            onDelete = {
+                                viewModel.deleteHydration(it)
+                                toast("Entry removed")
                             },
                         )
                     },
@@ -685,7 +694,14 @@ private fun FastCard(
 
 
 @Composable
-private fun HydrationCard(state: FuelUiState, onAdd: (Int) -> Unit) {
+private fun HydrationCard(
+    state: FuelUiState,
+    onAdd: (Int) -> Unit,
+    onUpdate: (HydrationEntry, Int, Instant) -> Unit,
+    onDelete: (HydrationEntry) -> Unit,
+) {
+    var dialog by remember { mutableStateOf<HydrationEntry?>(null) }
+
     TrackerCard(title = "Hydration") {
         val goalMl = state.goals.dailyWaterMlGoal ?: 2957
         val oz = Units.mlToWholeOz(state.hydrationMl)
@@ -714,6 +730,86 @@ private fun HydrationCard(state: FuelUiState, onAdd: (Int) -> Unit) {
                 Text("+100 ml")
             }
         }
+
+        // Recent drinks, newest first, each tappable to fix an amount or a time
+        // -- and each with a bin, because the entry this list exists for is the
+        // one logged by a stray tap that no screen could remove.
+        val recent = state.hydration.sortedByDescending { it.timestamp }
+
+        if (recent.isNotEmpty()) {
+            HorizontalDivider()
+
+            // Said out loud because the figure above it is today's and this list
+            // is not: rows carry their weekday, but a reader who has just read
+            // "Today 17 oz" will take what follows for today unless told.
+            Text(
+                "Last 7 days",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            recent.forEach { entry ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        modifier =
+                            Modifier.weight(1f)
+                                .clickable { dialog = entry }
+                                .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // Both units, because the two buttons above log in two
+                        // and neither alone says which one this row came from.
+                        Text(
+                            "${entry.milliliters} ml · ${Units.mlToWholeOz(entry.milliliters)} oz",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            entry.timestamp.asShortDateTime(state),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { onDelete(entry) }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription =
+                                "Delete ${entry.milliliters} ml at " +
+                                    entry.timestamp.asShortDateTime(state),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    dialog?.let { editing ->
+        IntakeEntryDialog(
+            newTitle = "Log water",
+            editTitle = "Edit drink",
+            deleteLabel = "Delete this entry",
+            initialAmount = editing.milliliters,
+            step = 25,
+            range = 0..3_000,
+            supporting = { "ml · ${Units.mlToWholeOz(it)} oz" },
+            initialTime = editing.timestamp,
+            zoneId = state.zoneId,
+            onDismiss = { dialog = null },
+            onConfirm = { ml, at ->
+                onUpdate(editing, ml, at)
+                dialog = null
+            },
+            onDelete = {
+                onDelete(editing)
+                dialog = null
+            },
+        )
     }
 }
 
@@ -1069,8 +1165,14 @@ private fun CaffeineCard(
 
     dialog?.let { open ->
         val editing = (open as? CaffeineDialog.Edit)?.intake
-        CaffeineEntryDialog(
-            initialMilligrams = editing?.milligrams ?: DEFAULT_CAFFEINE_MG,
+        IntakeEntryDialog(
+            newTitle = "Log caffeine",
+            editTitle = "Edit dose",
+            deleteLabel = "Delete this dose",
+            initialAmount = editing?.milligrams ?: DEFAULT_CAFFEINE_MG,
+            step = 5,
+            range = 0..1_000,
+            supporting = { "mg" },
             initialTime = editing?.timestamp ?: state.now,
             zoneId = state.zoneId,
             onDismiss = { dialog = null },

@@ -502,6 +502,26 @@ so it is never mistaken for a measurement.
 
 The maths is in `domain/Caffeine.kt` and covered by `CaffeineTest`.
 
+## Fixing what was logged by mistake
+
+Water and caffeine are both listed under their cards, newest first, and every
+row can be tapped to correct its amount or its time or binned outright. The
+rows are deleted for real, unlike a synced meal: nothing upstream has ever heard
+of them, so there is no record waiting to arrive again and nothing for a hidden
+flag to keep out.
+
+**The list reaches back further than the total above it** — a week for water.
+This is not tidiness. Water is logged by tapping *+100 ml* several times in a
+row, so a stray tap writes something identical to a real entry and is only ever
+noticed later, from a day's figure looking too high. A list that ended at
+midnight would offer the correction only while nobody yet knew they needed it.
+The day's figure still stops at midnight, so an older row shows in the list
+without being counted into today.
+
+This exists because of a specific incident. An automated tap, scaled wrongly from
+a screenshot, landed on a logging button and wrote 100 ml of water that had never
+been drunk — and for a long time no screen in the app could remove it.
+
 ## Units
 
 Everything is **stored in metric** to match Health Connect, and converted at the
