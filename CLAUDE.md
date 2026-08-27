@@ -695,6 +695,22 @@ dashed because they are published figures, the same rule that keeps 120/80 dashe
 glucose reference solid. Both lanes' rules are drawn even though only one applies, since the
 distance to the other is exactly what somebody changing lanes is asking about.
 
+**The projected two-mile score is the one figure on the card nobody performed**, and it says so
+twice. `domain/RunPace.kt` normalises a run's elapsed time to two miles and
+`TrackerRepository.getBestTwoMileSeconds` takes the quickest over the last 90 days; the card prints
+it as a projection with the reason underneath. Health Connect records a session's total distance and
+its bounds and nothing about the pace inside, so this is an average over a whole run rather than a
+two-mile effort — a run with a warmup reads slower than the runner is, an interval session slower
+still. It is deliberately **not** drawn in the column of scored events, where it would read as a
+sixth result.
+
+**A run shorter than two miles projects nothing rather than being extrapolated up.** That is the
+rule the whole thing hangs on: a hard mile scaled to two produces a confident score for a distance
+nobody ran, and on this card it would be indistinguishable from one that was earned. Runs with no
+recorded distance are the same — null, not zero. Read live and never cached, for the reason the runs
+chart is: a cached best from the spring is not a projection, it is a memory, and it would sit there
+looking exactly like the real thing.
+
 The entry steppers open on **that event's own 60-point requirement** rather than on zero
 (`AftScoring.minimumFor`). The run is over a thousand seconds and the deadlift over a hundred
 pounds, so zero is a long way from anywhere useful, and the pass mark is the figure being aimed at
@@ -1050,8 +1066,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
-`SleepTest`, `CsvTest`, `RunZonesTest`, `AftScoringTest` and `CaffeineLastCallTest` are the pure-JVM
-suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
+`SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest` and `CaffeineLastCallTest`
+are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same

@@ -108,6 +108,8 @@ internal fun AftCard(
             )
         }
 
+        ProjectedTwoMile(state = state)
+
         if (state.totals.size >= 2) {
             HorizontalDivider()
             ScoreTrend(state = state)
@@ -172,6 +174,47 @@ internal fun AftCard(
         )
     }
 }
+
+/**
+ * What the last quarter's runs say the two-mile event would score.
+ *
+ * The one figure on this card that nobody performed. It exists for the months
+ * between record tests, and it is stated as a projection every time it appears
+ * because of how it is built: Health Connect records a session's total distance
+ * and its start and end and nothing about the pace inside, so this is an average
+ * over a whole run rather than a two-mile effort. A run with a warmup in it
+ * reads slower than the runner is; an interval session reads slower still.
+ *
+ * The same rule that keeps a modelled curve dashed applies to a number. It is
+ * not drawn beside the scored events for exactly that reason -- sitting in that
+ * column it would read as a sixth result.
+ */
+@Composable
+private fun ProjectedTwoMile(state: AftUiState) {
+    val seconds = state.projectedTwoMileSeconds ?: return
+    val points = state.projectedTwoMileScore
+
+    HorizontalDivider()
+    Text(
+        if (points == null) {
+            "Recent runs project a two-mile pace of ${formatTime(seconds)}."
+        } else {
+            "Recent runs project $points points on the two-mile run " +
+                "(${formatTime(seconds)})."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        "Projection, not a result: average pace over a whole run rather than a " +
+            "two-mile effort, from the last 90 days.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** `19:45`, the way the run tables print a time. */
+private fun formatTime(seconds: Int): String = "%d:%02d".format(seconds / 60, seconds % 60)
 
 /** Total, verdict and the event with least room over the floor. */
 @Composable

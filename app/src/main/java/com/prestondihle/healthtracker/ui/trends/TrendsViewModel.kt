@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import java.time.Instant
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
@@ -58,6 +59,16 @@ enum class TrendsRange(val label: String, val days: Long) {
 private const val DEFAULT_MAX_HEART_RATE = 190
 
 /**
+ * How far back the two-mile projection looks for a qualifying run.
+ *
+ * A quarter, matching the widest trend window. Long enough that somebody who
+ * races rarely still has something to project from, short enough that the figure
+ * is about the shape they are in now -- a best from a year ago is not a
+ * projection of anything, and would sit on the card looking exactly like one.
+ */
+private const val PROJECTION_WINDOW_DAYS = 90L
+
+/**
  * The AFT attempts and the profile they are scored against.
  *
  * Holds the raw attempts and computes every score on read. The profile moves --
@@ -71,11 +82,30 @@ data class AftUiState(
     val lane: AftLane = AftLane.GENERAL,
     val ageYears: Int? = null,
     val sex: Sex = Sex.UNSPECIFIED,
+    /**
+     * Quickest two miles the recent runs imply, or null when none went that far.
+     *
+     * An average over a whole run rather than a two-mile effort, so it reads
+     * slower than a real one and is presented as a projection throughout.
+     */
+    val projectedTwoMileSeconds: Int? = null,
     val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     /** False when the profile is too thin to place the Soldier on a scale at all. */
     val canScore: Boolean
         get() = AftScoring.canScore(ageYears, sex, lane)
+
+    /**
+     * What the recent runs would score on the two-mile event, if run that way.
+     *
+     * A model, and labelled one wherever it appears. It exists for the months
+     * between record tests, when the only evidence available is ordinary runs.
+     */
+    val projectedTwoMileScore: Int?
+        get() =
+            projectedTwoMileSeconds?.let {
+                AftScoring.score(AftEvent.TWO_MILE_RUN, it, ageYears, sex, lane)
+            }
 
     /** The most recent attempt, which is the one the card leads with. */
     val latest: AftAttempt?
@@ -332,13 +362,23 @@ class TrendsViewModel(
      * none -- the question this chart answers is whether the score is moving
      * across tests, and that span is the attempts themselves.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     val aft: StateFlow<AftUiState> =
         combine(repository.getAftAttempts(), repository.getUserSettings()) { attempts, settings ->
+                attempts to settings
+            }
+            .mapLatest { (attempts, settings) ->
+                val now = Instant.now()
                 AftUiState(
                     attempts = attempts,
                     lane = settings?.aftLane ?: AftLane.GENERAL,
                     ageYears = settings?.ageYears,
                     sex = settings?.sex ?: Sex.UNSPECIFIED,
+                    projectedTwoMileSeconds =
+                        repository.getBestTwoMileSeconds(
+                            from = now.minus(Duration.ofDays(PROJECTION_WINDOW_DAYS)),
+                            to = now,
+                        ),
                     zoneId = zoneId,
                 )
             }

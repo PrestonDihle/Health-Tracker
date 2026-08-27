@@ -38,6 +38,7 @@ import com.prestondihle.healthtracker.data.CardOrderEntry
 import com.prestondihle.healthtracker.domain.GlucoseGaps
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.RunBreakdown
+import com.prestondihle.healthtracker.domain.RunPace
 import com.prestondihle.healthtracker.domain.RunZones
 import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.domain.SleepStageInterval
@@ -123,6 +124,24 @@ class TrackerRepository(
                 RunZones.breakdown(run.start, run.end, run.distanceMeters, samples, maxHeartRate)
             }
             .sortedBy { it.start }
+    }
+
+    /**
+     * The quickest two-mile pace the runs in this window imply, in seconds.
+     *
+     * Read live from the sessions rather than cached on the daily snapshot like
+     * [HealthDaySnapshot.bestMileSeconds]. The figure it feeds is a projection
+     * of what the reader would run today, so it has to move as the window does
+     * and go stale rather than persist -- a cached best from the spring is not a
+     * projection, it is a memory. It also needs no table and no migration, which
+     * for something derived entirely from records already being read is the
+     * right trade.
+     */
+    suspend fun getBestTwoMileSeconds(from: Instant, to: Instant): Int? {
+        val runs = runCatching { healthDataSource.readRuns(from, to) }.getOrDefault(emptyList())
+        return RunPace.bestNormalizedSeconds(
+            runs.map { it.distanceMeters to Duration.between(it.start, it.end).seconds }
+        )
     }
 
     // ----- Blood pressure ----------------------------------------------------

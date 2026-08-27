@@ -237,6 +237,24 @@ failing 180, and only finished tests are plotted on the trend below. That chart
 spans the tests themselves rather than the tab's 7-to-90-day window, because a
 record test happens about twice a year.
 
+### Projected two-mile score
+
+Between record tests the card also reads your ordinary runs and says what the
+two-mile event would score. It is labelled a projection wherever it appears,
+because it is one: Health Connect records a run's total distance and its start
+and end and nothing about the pace inside, so this is an **average over a whole
+run**, not a two-mile effort. A run with a warmup in it reads slower than you
+are, and an interval session slower still.
+
+**A run shorter than two miles projects nothing at all.** Scaling a fast mile up
+would produce a confident score for a distance nobody ran, and on a card full of
+real results it would be impossible to tell apart from one. Runs with no recorded
+distance are dropped for the same reason.
+
+It uses the quickest qualifying run of the last 90 days — long enough that
+somebody who races rarely still has something to go on, short enough that it is
+about the shape you are in now rather than the shape you were in last year.
+
 ## Fast adherence
 
 Adherence is the share of **elapsed** planned fasting time that was actually
