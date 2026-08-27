@@ -717,6 +717,48 @@ pounds, so zero is a long way from anywhere useful, and the pass mark is the fig
 anyway. Each stepper shows the points its current value would earn as it moves, which is the only
 question being asked while entering a plank time.
 
+### Body composition
+
+`domain/BodyComposition.kt` is the military body composition screen, and it is **waist over height,
+under 0.55** — nothing else. Source is the Secretary of War's 30 September 2025 direction on
+fitness standards and the Under Secretary's follow-up memorandum of 18 December 2025 setting
+1 January 2026 as the implementation date across the Joint Force.
+
+**Height and weight tables are retired, not supplemented.** Anything here that reaches for an
+AR 600-9 screening table is reaching for a standard that no longer exists. There is no table, no age
+bracket and no sex column — which is why this is the one scored thing in the app that works on a
+profile that has declined to give a sex, and why it needs only two tape measurements.
+
+Two rules decide real pass/fails and are easy to lose:
+
+- **Both measurements are recorded in inches, floored to the half.** Down, not to nearest, and
+  applied to *both* — which pulls the ratio in opposite directions, since flooring the waist shrinks
+  the numerator and flooring the height shrinks the denominator. Rounding either the convenient way,
+  or flooring only the waist because that is the measurement people think of as needing it, moves
+  verdicts.
+- **The limit is strictly less than 0.55.** Exactly 0.55 is over. A `<=` passes somebody the
+  standard fails, on precisely the value a reader is most likely to check by hand.
+
+`recordedInches` carries a thousandth-of-an-inch tolerance into its floor, and it is not a second
+rounding. Everything is stored in centimetres, so an exact 42.5 inches comes back out of `Float` as
+42.4999988 and floors to 42.0 — half an inch lost to arithmetic, in the direction that flatters the
+reader. Snapping to a quarter first was the first attempt and is wrong for a different reason: it
+*rounds*, so a genuine 75.4 comes back 75.5, which is the one thing "rounded down" rules out. The
+test that caught that is the one worth keeping.
+
+The screen is shown as a **waist rather than as a ratio** wherever a chart is involved: at a fixed
+height the limit is a horizontal line, and a line the tape can be read against beats a number that
+has to be divided. `maxPassingWaistInches` is the largest half inch strictly under `0.55 × height`
+— 41.0 at a height of 75, because 41.5 divides to 0.5533 and fails. Quoting the raw threshold of
+41.25 would name a measurement no tape is ever read to. On the waist trend it is drawn as a
+`subGoalLine`, hairline and finer-dashed, because the reader's chosen waist goal above it is where
+they are going and this is only where the standard stops.
+
+**A Soldier at or over 0.55 goes on to a body-fat assessment**, capped at 18% for men and 26% for
+women. That is not implemented: the memorandum quoted above gives the limits but not the tape
+formula, and inventing one would produce a confident percentage against a method nobody published.
+Ground rule 11 applies — find the primary source before building it.
+
 ### Room
 
 Version 17, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
@@ -1066,8 +1108,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
-`SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest` and `CaffeineLastCallTest`
-are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
+`SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest` and
+`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same

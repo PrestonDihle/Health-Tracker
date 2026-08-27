@@ -14,6 +14,7 @@ import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.data.UserGoals
+import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
@@ -152,6 +153,8 @@ data class TrendsUiState(
     val goals: UserGoals = UserGoals(),
     /** Staged weights on the way to the goal, heaviest first. */
     val weightSubGoals: List<WeightSubGoal> = emptyList(),
+    /** Carried for the body composition screen, which needs a height. */
+    val settings: UserSettings = UserSettings(),
     val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     /**
@@ -294,10 +297,12 @@ class TrendsViewModel(
                     // the outer combine's typed overloads stop at five, and a
                     // staged weight is a goal in every sense but the table it
                     // lives in.
-                    combine(repository.getUserGoals(), repository.getWeightSubGoals()) {
-                        goals,
-                        subGoals ->
-                        goals to subGoals
+                    combine(
+                        repository.getUserGoals(),
+                        repository.getWeightSubGoals(),
+                        repository.getUserSettings(),
+                    ) { goals, subGoals, settings ->
+                        Triple(goals, subGoals, settings)
                     },
                 ) { logs, snapshots, body, activity, targets ->
                     TrendsUiState(
@@ -314,6 +319,7 @@ class TrendsViewModel(
                         bloodPressure = activity.third,
                         goals = targets.first ?: UserGoals(),
                         weightSubGoals = targets.second,
+                        settings = targets.third ?: UserSettings(),
                         zoneId = zoneId,
                     )
                 }

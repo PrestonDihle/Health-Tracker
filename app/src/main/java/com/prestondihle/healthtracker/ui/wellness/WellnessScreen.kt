@@ -37,10 +37,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.domain.BodyComposition
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.Sleep
@@ -675,7 +677,64 @@ internal fun BodyCard(state: WellnessUiState, onWaistChange: (Float) -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        WaistToHeightScreen(state)
     }
+}
+
+/**
+ * The military body composition screen: waist over height, under 0.55.
+ *
+ * Shown here rather than beside the fitness test because it is a tape
+ * measurement and this is the card the tape is entered on. It reads off the
+ * measured waist rather than the stepper's current position, so dialling the
+ * stepper does not move a verdict about a measurement nobody took.
+ *
+ * Neither age nor sex enters into it, so unlike the AFT card this has nothing to
+ * ask the profile for beyond a height.
+ */
+@Composable
+private fun WaistToHeightScreen(state: WellnessUiState) {
+    val heightCm = state.settings.heightCm
+    val waistCm = state.latestWaist?.waistCm ?: return
+    val ratio = BodyComposition.ratio(waistCm, heightCm)
+
+    HorizontalDivider()
+
+    if (ratio == null) {
+        Text(
+            "Set your height on the Settings tab for the waist-to-height screen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    val passes = BodyComposition.passes(ratio)
+    val limit = BodyComposition.maxPassingWaistInches(heightCm)
+    Text(
+        "Waist to height %.3f".format(ratio) + if (passes) " — under 0.55" else " — 0.55 or over",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+        color =
+            if (passes) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+    )
+    Text(
+        buildString {
+            if (limit != null) {
+                append("Largest passing waist at your height is ")
+                append(Units.formatInches(limit.toFloat()))
+                append(". ")
+            }
+            // Both measurements are floored to the half inch before dividing,
+            // which is the standard's own rule and is worth saying: a reader
+            // checking the sum on a calculator will otherwise get a different
+            // third decimal and assume the app is wrong.
+            append("Measured in inches, each rounded down to the nearest ½ inch.")
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** Starting point for a grip stepper when nothing has ever been measured, in pounds. */

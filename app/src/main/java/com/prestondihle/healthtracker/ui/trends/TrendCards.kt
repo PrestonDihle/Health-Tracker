@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.prestondihle.healthtracker.domain.BodyComposition
 import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
@@ -71,10 +72,23 @@ internal fun TrendCard(title: String, subtitle: String?, content: @Composable ()
 
 @Composable
 internal fun WaistTrendCard(state: TrendsUiState) {
-    TrendCard(title = "Waist", subtitle = "inches") {
+    // The body composition limit, drawn as a waist rather than as a ratio: at a
+    // fixed height the screen is a horizontal line, and a line the tape can be
+    // read against is worth more here than a number that has to be divided.
+    // Hairline and finer-dashed, like a weight waypoint, because the chosen goal
+    // above it is where the reader is going and this is only where the standard
+    // stops -- two different kinds of line, and never the same weight.
+    val screenLimit = BodyComposition.maxPassingWaistInches(state.settings.heightCm)
+    TrendCard(
+        title = "Waist",
+        subtitle = if (screenLimit == null) "inches" else "inches, limit ${
+            Units.formatInches(screenLimit.toFloat())
+        }",
+    ) {
         LineChart(
             days = state.waistSeries(Units::cmToInches),
             goalLine = state.goals.goalWaistCm?.let { Units.cmToInches(it) },
+            subGoalLines = listOfNotNull(screenLimit?.toFloat()),
             modifier = Modifier.fillMaxWidth().height(140.dp),
         )
     }

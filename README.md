@@ -10,7 +10,7 @@ reps and reading.
 | Screen | What it does |
 | --- | --- |
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
-| **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
+| **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the macro trend |
 | **Activity** | The Army Fitness Test scorecard, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
@@ -254,6 +254,35 @@ distance are dropped for the same reason.
 It uses the quickest qualifying run of the last 90 days — long enough that
 somebody who races rarely still has something to go on, short enough that it is
 about the shape you are in now rather than the shape you were in last year.
+
+## Body composition
+
+The body card works out your **waist-to-height ratio**, the military body
+composition screen since 1 January 2026. It is one division: waist over height,
+and it has to come to **less than 0.55**. Height and weight tables are no longer
+used, so there is no table to look yourself up in — and no age bracket or sex
+column either, which makes this the one scored thing here that works whatever
+your profile says.
+
+The tape goes at the midpoint between your last palpable rib and the top of the
+iliac crest, usually at or just above the navel — not where a trouser size is
+measured.
+
+Two details decide close calls, and the app follows both:
+
+- **Each measurement is recorded in inches and rounded *down* to the nearest half
+  inch** — the waist and the height. That is not always in your favour: rounding
+  the height down makes the ratio larger.
+- **The limit is strictly under 0.55.** Exactly 0.55 is over it.
+
+The waist trend carries the limit as a fine dashed line, drawn as a waist rather
+than as a ratio — at a fixed height it is just a horizontal line, and one you can
+read a tape against beats a number you have to divide. The card names the largest
+waist that still passes at your height: at 6'3" that is 41", because 41½" divides
+to 0.553 and fails.
+
+A ratio of 0.55 or over leads to a body-fat assessment, which this app does not
+calculate — the memorandum gives the limits but not the method.
 
 ## Fast adherence
 
