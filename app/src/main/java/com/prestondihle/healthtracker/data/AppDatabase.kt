@@ -37,8 +37,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SupplementDose::class,
         SleepSessionEntry::class,
         SleepStageEntry::class,
+        CardOrderEntry::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -426,6 +427,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The saved per-tab card order.
+         *
+         * A new table, so the DDL is Room's own generated `CREATE TABLE` for the
+         * composite key -- no `ALTER TABLE` default to keep in step. Empty to
+         * start, which reads as "every tab in its built-in order".
+         */
+        internal val migration14To15Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `CardOrderEntry` (" +
+                    "`tab` TEXT NOT NULL, " +
+                    "`cardId` TEXT NOT NULL, " +
+                    "`position` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`tab`, `cardId`))"
+            )
+
+        private val MIGRATION_14_15 =
+            object : Migration(14, 15) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration14To15Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -453,6 +477,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_11_12,
                                 MIGRATION_12_13,
                                 MIGRATION_13_14,
+                                MIGRATION_14_15,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

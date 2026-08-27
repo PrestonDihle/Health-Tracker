@@ -34,6 +34,7 @@ import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
 import com.prestondihle.healthtracker.ui.fuel.FuelScreen
 import com.prestondihle.healthtracker.ui.fuel.FuelViewModel
 import com.prestondihle.healthtracker.ui.log.LogScreen
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.settings.SettingsScreen
 import com.prestondihle.healthtracker.ui.settings.SettingsViewModel
 import com.prestondihle.healthtracker.ui.today.TodayScreen
@@ -120,7 +121,16 @@ fun TrackerNavHost(appContainer: AppContainer) {
                 TodayScreen(vm)
             }
             composable(Screen.Log.route) {
-                LogScreen(dashboardViewModel, snackbarHostState)
+                val orderVm: CardOrderViewModel =
+                    viewModel(
+                        key = "order-${Screen.Log.route}",
+                        factory =
+                            CardOrderViewModel.provideFactory(
+                                appContainer.trackerRepository,
+                                Screen.Log.route,
+                            ),
+                    )
+                LogScreen(dashboardViewModel, snackbarHostState, orderVm)
             }
             // Fuel's own screen: fasting, hydration, caffeine, creatine,
             // supplements, and the macro trend at the foot.

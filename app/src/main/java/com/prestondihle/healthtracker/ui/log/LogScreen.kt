@@ -25,6 +25,9 @@ import com.prestondihle.healthtracker.ui.dashboard.GripStrengthCard
 import com.prestondihle.healthtracker.ui.dashboard.MoodCard
 import com.prestondihle.healthtracker.ui.dashboard.MovementCard
 import com.prestondihle.healthtracker.ui.dashboard.ReadingCard
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
+import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
+import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import kotlinx.coroutines.launch
 
 /**
@@ -36,8 +39,13 @@ import kotlinx.coroutines.launch
  * shares [DashboardViewModel] but never touches its sync.
  */
 @Composable
-fun LogScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHostState) {
+fun LogScreen(
+    viewModel: DashboardViewModel,
+    snackbarHostState: SnackbarHostState,
+    orderViewModel: CardOrderViewModel,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     fun toast(message: String) {
@@ -49,85 +57,91 @@ fun LogScreen(viewModel: DashboardViewModel, snackbarHostState: SnackbarHostStat
         verticalArrangement = Arrangement.spacedBy(CardGap),
         contentPadding = PaddingValues(vertical = CardGap),
     ) {
-        // Meals lead: they are the most-logged thing here, and the card doubles
-        // as the last day's meals to check against before adding another.
-        item {
-            MealListCard(
-                meals = state.mealsInWindow,
-                undatedMeals = state.undatedMealsInWindow,
-                duplicatesCollapsed = state.duplicatesCollapsed,
-                zoneId = state.zoneId,
-                now = state.now,
-                hasClockTime = { state.hasClockTime(it) },
-                onAdd = { calories, protein, carbs, fat, at ->
-                    viewModel.addMeal(calories, protein, carbs, fat, at)
-                    toast("Logged meal")
-                },
-                onUpdate = { meal, calories, protein, carbs, fat, at ->
-                    viewModel.updateMeal(meal, calories, protein, carbs, fat, at)
-                    toast("Meal updated")
-                },
-                onDelete = {
-                    viewModel.deleteMeal(it)
-                    toast("Meal deleted")
-                },
-            )
-        }
-
-        item { BodyCard(state = state, onWaistChange = viewModel::setWaistCm) }
-
-        item {
-            GripStrengthCard(
-                state = state,
-                onLog = { dominant, lbs ->
-                    viewModel.logGripStrengthKg(dominant, Units.lbsToKg(lbs))
-                    val hand = if (dominant) "dominant" else "non-dominant"
-                    toast("Logged ${lbs.toInt()} lb $hand grip")
-                },
-            )
-        }
-
-        item {
-            BloodPressureCard(
-                state = state,
-                onSubmit = { systolic, diastolic ->
-                    viewModel.addBloodPressure(systolic, diastolic)
-                    toast("Logged $systolic/$diastolic")
-                },
-            )
-        }
-
-        item {
-            MoodCard(
-                state = state,
-                onSubmit = { vibe, energy, focus ->
-                    viewModel.submitMood(vibe, energy, focus)
-                    toast("Saved vibe $vibe, energy $energy, focus $focus")
-                },
-            )
-        }
-
-        item {
-            ReadingCard(
-                state = state,
-                onLogPages = {
-                    viewModel.logPages(it)
-                    toast("Logged $it pages")
-                },
-                onSetPages = viewModel::setPages,
-            )
-        }
-
-        item {
-            MovementCard(
-                state = state,
-                onLog = { movement, reps ->
-                    viewModel.logReps(movement, reps)
-                    val name = if (movement == MovementType.PUSHUP) "pushups" else "air squats"
-                    toast("Logged $reps $name")
-                },
-            )
-        }
+        // Declared in their out-of-the-box order; the reader's saved order, if
+        // any, is reconciled against this. Meals lead by default: the most-logged
+        // thing here, and the card doubles as the last day's meals to check
+        // against before adding another.
+        reorderableCards(
+            cards =
+                listOf(
+                    ReorderableCard("meals") {
+                        MealListCard(
+                            meals = state.mealsInWindow,
+                            undatedMeals = state.undatedMealsInWindow,
+                            duplicatesCollapsed = state.duplicatesCollapsed,
+                            zoneId = state.zoneId,
+                            now = state.now,
+                            hasClockTime = { state.hasClockTime(it) },
+                            onAdd = { calories, protein, carbs, fat, at ->
+                                viewModel.addMeal(calories, protein, carbs, fat, at)
+                                toast("Logged meal")
+                            },
+                            onUpdate = { meal, calories, protein, carbs, fat, at ->
+                                viewModel.updateMeal(meal, calories, protein, carbs, fat, at)
+                                toast("Meal updated")
+                            },
+                            onDelete = {
+                                viewModel.deleteMeal(it)
+                                toast("Meal deleted")
+                            },
+                        )
+                    },
+                    ReorderableCard("body") {
+                        BodyCard(state = state, onWaistChange = viewModel::setWaistCm)
+                    },
+                    ReorderableCard("grip") {
+                        GripStrengthCard(
+                            state = state,
+                            onLog = { dominant, lbs ->
+                                viewModel.logGripStrengthKg(dominant, Units.lbsToKg(lbs))
+                                val hand = if (dominant) "dominant" else "non-dominant"
+                                toast("Logged ${lbs.toInt()} lb $hand grip")
+                            },
+                        )
+                    },
+                    ReorderableCard("bloodPressure") {
+                        BloodPressureCard(
+                            state = state,
+                            onSubmit = { systolic, diastolic ->
+                                viewModel.addBloodPressure(systolic, diastolic)
+                                toast("Logged $systolic/$diastolic")
+                            },
+                        )
+                    },
+                    ReorderableCard("mood") {
+                        MoodCard(
+                            state = state,
+                            onSubmit = { vibe, energy, focus ->
+                                viewModel.submitMood(vibe, energy, focus)
+                                toast("Saved vibe $vibe, energy $energy, focus $focus")
+                            },
+                        )
+                    },
+                    ReorderableCard("reading") {
+                        ReadingCard(
+                            state = state,
+                            onLogPages = {
+                                viewModel.logPages(it)
+                                toast("Logged $it pages")
+                            },
+                            onSetPages = viewModel::setPages,
+                        )
+                    },
+                    ReorderableCard("movement") {
+                        MovementCard(
+                            state = state,
+                            onLog = { movement, reps ->
+                                viewModel.logReps(movement, reps)
+                                val name =
+                                    if (movement == MovementType.PUSHUP) "pushups" else "air squats"
+                                toast("Logged $reps $name")
+                            },
+                        )
+                    },
+                ),
+            savedOrder = savedOrder,
+            onMove = orderViewModel::move,
+        )
 
         item { Spacer(Modifier.height(8.dp)) }
     }

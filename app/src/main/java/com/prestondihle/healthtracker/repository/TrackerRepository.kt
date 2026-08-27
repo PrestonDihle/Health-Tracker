@@ -33,6 +33,7 @@ import com.prestondihle.healthtracker.data.SupplementDose
 import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
+import com.prestondihle.healthtracker.data.CardOrderEntry
 import com.prestondihle.healthtracker.domain.GlucoseGaps
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.RunBreakdown
@@ -652,6 +653,16 @@ class TrackerRepository(
     fun getUserSettings(): Flow<UserSettings?> = dao.getUserSettings()
 
     suspend fun upsertUserSettings(settings: UserSettings) = dao.upsertUserSettings(settings)
+
+    // ----- Card order --------------------------------------------------------
+
+    /** The saved card ids for [tab], in order; empty means the tab's built-in order. */
+    fun getCardOrder(tab: String): Flow<List<String>> =
+        dao.getCardOrder(tab).map { rows -> rows.map { it.cardId } }
+
+    /** Rewrites the whole order for [tab], each id's slot its index in [cardIds]. */
+    suspend fun setCardOrder(tab: String, cardIds: List<String>) =
+        dao.upsertCardOrder(cardIds.mapIndexed { index, id -> CardOrderEntry(tab, id, index) })
 
     // ----- Health Connect sync ----------------------------------------------
 

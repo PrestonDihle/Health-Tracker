@@ -391,6 +391,16 @@ data class HeartRateBucket(
  * original name to stay migration-free; the property does not, because a
  * fifteen-minute bucket keyed by `hourStartMillis` reads as a bug.
  */
+/**
+ * A saved slot for one card within one tab, so a chosen order survives a restart.
+ *
+ * Keyed by (tab, cardId): each card has at most one stored position, and cards a
+ * stored order never mentions -- one added in a later version -- fall back to
+ * their built-in place after the ones it does.
+ */
+@Entity(primaryKeys = ["tab", "cardId"])
+data class CardOrderEntry(val tab: String, val cardId: String, val position: Int)
+
 @Entity
 data class StepBucket(
     @PrimaryKey @ColumnInfo(name = "hourStartMillis") val bucketStartMillis: Long,

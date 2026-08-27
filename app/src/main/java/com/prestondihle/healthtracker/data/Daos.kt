@@ -452,4 +452,11 @@ interface TrackerDao {
     fun getUserSettings(): Flow<UserSettings?>
 
     @Upsert suspend fun upsertUserSettings(settings: UserSettings)
+
+    // ----- Card order --------------------------------------------------------
+
+    @Query("SELECT * FROM CardOrderEntry WHERE tab = :tab ORDER BY position ASC")
+    fun getCardOrder(tab: String): Flow<List<CardOrderEntry>>
+
+    @Upsert suspend fun upsertCardOrder(entries: List<CardOrderEntry>)
 }
