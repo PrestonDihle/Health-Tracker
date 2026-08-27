@@ -87,6 +87,9 @@ import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.components.SupplementEntryDialog
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.components.TrackerCard
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
+import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
+import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.trends.MacrosTrendCard
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
@@ -125,11 +128,13 @@ fun FuelScreen(
     viewModel: FuelViewModel,
     snackbarHostState: SnackbarHostState,
     trendsViewModel: TrendsViewModel,
+    orderViewModel: CardOrderViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     // The macro trend belongs with food: it reads from the same source Activity's
     // other trends do, so Fuel need not re-derive it.
     val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
+    val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var timeEdit by remember { mutableStateOf<TimeEdit?>(null) }
     var addingFast by remember { mutableStateOf(false) }
@@ -208,69 +213,73 @@ fun FuelScreen(
             ExtendedFastRow(fast = fast, onDelete = { viewModel.deleteExtendedFast(fast) })
         }
 
-        // What actually went in, under the plan it was meant to fit. Hydration
-        // first because it is the one logged most often, then the two that decay
-        // or accumulate over a day, then the stack that is simply ticked off.
-        item {
-            HydrationCard(
-                state = state,
-                onAdd = {
-                    viewModel.addHydration(it)
-                    toast("Logged $it ml")
-                },
-            )
-        }
-
-        item {
-            CaffeineCard(
-                state = state,
-                onLog = { mg, at ->
-                    viewModel.logCaffeine(mg, at)
-                    toast("Logged $mg mg caffeine")
-                },
-                onUpdate = { intake, mg, at ->
-                    viewModel.updateCaffeine(intake, mg, at)
-                    toast(if (mg <= 0) "Dose removed" else "Dose updated")
-                },
-                onDelete = {
-                    viewModel.deleteCaffeine(it)
-                    toast("Dose removed")
-                },
-            )
-        }
-
-        item {
-            CreatineCard(
-                state = state,
-                onLog = { grams ->
-                    viewModel.logCreatine(grams)
-                    toast("Logged $grams g creatine")
-                },
-                onDelete = {
-                    viewModel.deleteCreatine(it)
-                    toast("Dose removed")
-                },
-            )
-        }
-
-        item {
-            SupplementsCard(
-                state = state,
-                onSetTaken = viewModel::setSupplementTaken,
-                onAdd = { name, dose, slot ->
-                    viewModel.addSupplement(name, dose, slot)
-                    toast("Added $name")
-                },
-                onDelete = {
-                    viewModel.deleteSupplement(it)
-                    toast("Removed ${it.name}")
-                },
-            )
-        }
-
-        // Calories from protein, carbs and fat over the fortnight -- the trend of
-        // what the day's macros add up to, moved here from Activity.
-        item { MacrosTrendCard(trends) }
+        // What actually went in, under the plan it was meant to fit -- and the
+        // macro trend at the foot. These reorder among themselves; the fasting
+        // schedule above stays put, since the extended-fast list is pinned to the
+        // card that schedules it. Hydration leads by default as the most-logged.
+        reorderableCards(
+            cards =
+                listOf(
+                    ReorderableCard("hydration") {
+                        HydrationCard(
+                            state = state,
+                            onAdd = {
+                                viewModel.addHydration(it)
+                                toast("Logged $it ml")
+                            },
+                        )
+                    },
+                    ReorderableCard("caffeine") {
+                        CaffeineCard(
+                            state = state,
+                            onLog = { mg, at ->
+                                viewModel.logCaffeine(mg, at)
+                                toast("Logged $mg mg caffeine")
+                            },
+                            onUpdate = { intake, mg, at ->
+                                viewModel.updateCaffeine(intake, mg, at)
+                                toast(if (mg <= 0) "Dose removed" else "Dose updated")
+                            },
+                            onDelete = {
+                                viewModel.deleteCaffeine(it)
+                                toast("Dose removed")
+                            },
+                        )
+                    },
+                    ReorderableCard("creatine") {
+                        CreatineCard(
+                            state = state,
+                            onLog = { grams ->
+                                viewModel.logCreatine(grams)
+                                toast("Logged $grams g creatine")
+                            },
+                            onDelete = {
+                                viewModel.deleteCreatine(it)
+                                toast("Dose removed")
+                            },
+                        )
+                    },
+                    ReorderableCard("supplements") {
+                        SupplementsCard(
+                            state = state,
+                            onSetTaken = viewModel::setSupplementTaken,
+                            onAdd = { name, dose, slot ->
+                                viewModel.addSupplement(name, dose, slot)
+                                toast("Added $name")
+                            },
+                            onDelete = {
+                                viewModel.deleteSupplement(it)
+                                toast("Removed ${it.name}")
+                            },
+                        )
+                    },
+                    // Calories from protein, carbs and fat over the fortnight,
+                    // moved here from Activity.
+                    ReorderableCard("macros") { MacrosTrendCard(trends) },
+                ),
+            savedOrder = savedOrder,
+            onMove = orderViewModel::move,
+        )
     }
 
     timeEdit?.let { edit ->

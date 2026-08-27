@@ -142,7 +142,12 @@ fun TrackerNavHost(appContainer: AppContainer) {
                     viewModel(
                         factory = FuelViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                FuelScreen(vm, snackbarHostState, trendsViewModel)
+                FuelScreen(
+                    vm,
+                    snackbarHostState,
+                    trendsViewModel,
+                    cardOrderVm(appContainer, Screen.Fuel.route),
+                )
             }
             // Activity: the movement trends -- steps, grip strength, pushups and
             // air squats.
