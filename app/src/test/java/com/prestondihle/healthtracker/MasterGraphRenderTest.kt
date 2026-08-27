@@ -29,19 +29,20 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
-import com.prestondihle.healthtracker.data.TrackerDao
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.domain.SleepStage
 import com.prestondihle.healthtracker.domain.SleepStageInterval
 import com.prestondihle.healthtracker.health.HealthDataSource
-import com.prestondihle.healthtracker.health.MealSample
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.health.SleepSessionSample
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.today.MasterRange
 import com.prestondihle.healthtracker.ui.today.MasterSeries
+import com.prestondihle.healthtracker.ui.components.MealListCard
+import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.today.TodayScreen
 import com.prestondihle.healthtracker.ui.today.TodayViewModel
 import java.time.Duration
@@ -78,16 +79,6 @@ class MasterGraphRenderTest {
     private val context: Context
         get() = ApplicationProvider.getApplicationContext()
 
-    /**
-     * The DAO behind the repository the current test is using.
-     *
-     * Exposed so a test can plant rows the way a *previous* version of the app
-     * left them. Duplicates that are already on disk are the case the read-time
-     * collapse exists for, and they cannot be produced through the repository --
-     * the sync now rejects them on the way in.
-     */
-    private lateinit var dao: TrackerDao
-
     private fun repository(
         dataSource: HealthDataSource = MockHealthDataSource()
     ): TrackerRepository {
@@ -95,51 +86,7 @@ class MasterGraphRenderTest {
             Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
                 .allowMainThreadQueries()
                 .build()
-        dao = db.trackerDao()
-        return TrackerRepository(dao, dataSource, ZoneId.of("UTC"))
-    }
-
-    /**
-     * A nutrition source that records the date and nothing finer, and writes each
-     * meal twice.
-     *
-     * Both halves are copied from what a real phone produced: every
-     * `NutritionRecord` landing on one fixed time of day, and the same two meals
-     * arriving as four records with four distinct Health Connect ids. Delegating
-     * the rest of the interface keeps the oddity in the test rather than in the
-     * shared mock.
-     *
-     * Deliberately *not* midnight. Midnight has its own rule, so stamping there
-     * would let a broken shared-time-of-day check still pass — the real phone's
-     * meals all sat at 10:00, which is exactly the shape that has to be caught on
-     * the repeat alone.
-     */
-    private class DateOnlyDuplicatedMeals(private val delegate: MockHealthDataSource) :
-        HealthDataSource by delegate {
-        override suspend fun readMeals(from: Instant, to: Instant): List<MealSample> {
-            val stamped = stampedTime(to)
-            if (stamped.isBefore(from)) return emptyList()
-            return (0..1).flatMap { copy ->
-                listOf(
-                    MealSample(
-                        time = stamped,
-                        calories = 602,
-                        proteinGrams = 30f,
-                        carbGrams = 16.5f,
-                        fatGrams = 20f,
-                        externalId = "duplicated-a-$copy",
-                    ),
-                    MealSample(
-                        time = stamped,
-                        calories = 573,
-                        proteinGrams = 25f,
-                        carbGrams = 9.3f,
-                        fatGrams = 18f,
-                        externalId = "duplicated-b-$copy",
-                    ),
-                )
-            }
-        }
+        return TrackerRepository(db.trackerDao(), dataSource, ZoneId.of("UTC"))
     }
 
     /**
@@ -196,9 +143,12 @@ class MasterGraphRenderTest {
     ) {
         runBlocking { seed(repository) }
         val viewModel = TodayViewModel(repository, ZoneId.of("UTC"))
+        val orderViewModel = CardOrderViewModel(repository, "today")
         composeRule.setContent {
             HealthTrackerTheme {
-                Surface(modifier = Modifier.fillMaxSize()) { TodayScreen(viewModel) }
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    TodayScreen(viewModel, orderViewModel)
+                }
             }
         }
         composeRule.waitForIdle()
@@ -235,13 +185,6 @@ class MasterGraphRenderTest {
         composeRule.onNodeWithText("Activity").assertIsDisplayed()
         composeRule.onNodeWithText("Food, blood and body").assertIsDisplayed()
         composeRule.onRoot().captureRoboImage("build/screenshots/master_graph.png")
-
-        // Below the fold once the axis picker was added to the chart card, so
-        // this one has to be scrolled to rather than asserted where it opens.
-        composeRule
-            .onNode(hasScrollAction())
-            .performScrollToNode(hasText("About the food curves"))
-        composeRule.onNodeWithText("About the food curves").assertIsDisplayed()
     }
 
     @Test
@@ -353,76 +296,71 @@ class MasterGraphRenderTest {
      * Neither is the app's arithmetic going wrong, so neither can be fixed by
      * changing it -- the screen has to say which meals are merely dated, and stop
      * believing a repeated record.
+     *
+     * The meal list moved to the Log tab, whose `DashboardViewModel` ticks and so
+     * cannot be scrolled in a test. So `MealListCard` is composed on its own -- the
+     * `SleepCard` pattern -- against a `DashboardUiState` built from the four rows,
+     * which is what runs the collapse and the stamped-time judgement the card then
+     * renders. The state-level line between a measured time and a stamped one is
+     * pinned separately in `MealTimeStampTest`.
      */
     @Test
-    fun `meals with no clock time are flagged and repeated records merged`() {
-        // Both halves of the real situation at once: four rows already on disk
-        // that are two meals written twice, and a source that keeps handing over
-        // the same four. The sync rejects its copies as already stored, and the
-        // four that were there before the fix are collapsed on the way to the
-        // screen rather than deleted.
+    fun `the meal card flags stamped times and owns up to merged duplicates`() {
+        // Two meals written twice: four rows in, two meals out. Same timestamp and
+        // macros on each pair, so the collapse merges them; different macros
+        // between the pairs, so they stay two distinct meals.
         val stamped = stampedTime(Instant.now())
-        renderScreen(repository(DateOnlyDuplicatedMeals(MockHealthDataSource()))) {
-            dao.insertMeals(
-                (0..1).flatMap { copy ->
-                    listOf(
-                        MealEntry(
-                            timestamp = stamped,
-                            calories = 602,
-                            proteinGrams = 30f,
-                            carbGrams = 16.5f,
-                            fatGrams = 20f,
-                            source = DataSourceEnum.HEALTH_CONNECT,
-                            externalId = "duplicated-a-$copy",
-                        ),
-                        MealEntry(
-                            timestamp = stamped,
-                            calories = 573,
-                            proteinGrams = 25f,
-                            carbGrams = 9.3f,
-                            fatGrams = 18f,
-                            source = DataSourceEnum.HEALTH_CONNECT,
-                            externalId = "duplicated-b-$copy",
-                        ),
+        val meals =
+            (0..1).flatMap { copy ->
+                listOf(
+                    MealEntry(
+                        timestamp = stamped,
+                        calories = 602,
+                        proteinGrams = 30f,
+                        carbGrams = 16.5f,
+                        fatGrams = 20f,
+                        source = DataSourceEnum.HEALTH_CONNECT,
+                        externalId = "duplicated-a-$copy",
+                    ),
+                    MealEntry(
+                        timestamp = stamped,
+                        calories = 573,
+                        proteinGrams = 25f,
+                        carbGrams = 9.3f,
+                        fatGrams = 18f,
+                        source = DataSourceEnum.HEALTH_CONNECT,
+                        externalId = "duplicated-b-$copy",
+                    ),
+                )
+            }
+        val state =
+            DashboardUiState(now = Instant.now(), meals = meals, zoneId = ZoneId.of("UTC"))
+
+        composeRule.setContent {
+            HealthTrackerTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    MealListCard(
+                        meals = state.mealsInWindow,
+                        undatedMeals = state.undatedMealsInWindow,
+                        duplicatesCollapsed = state.duplicatesCollapsed,
+                        zoneId = state.zoneId,
+                        now = state.now,
+                        hasClockTime = { state.hasClockTime(it) },
+                        onAdd = { _, _, _, _, _ -> },
+                        onUpdate = { _, _, _, _, _, _ -> },
+                        onDelete = {},
                     )
                 }
-            )
+            }
         }
-
-        // The meal list is the last card on the screen, and a lazy column does
-        // not compose what is below the fold -- so the sync cannot be waited on
-        // before something scrolls down to it, and scrolling to a node that does
-        // not exist yet throws. The card's *title* is what breaks that circle:
-        // it is drawn whether or not there are any meals, so it can be reached
-        // before the sync has landed and the wait can happen once we are there.
-        //
-        // Scrolling is available here in a way it is not on the dashboard: this
-        // screen's ticker is a plain state flow nudged on refresh, not a loop, so
-        // it reaches idle.
-        composeRule
-            .onNode(hasScrollAction())
-            .performScrollToNode(hasText("Meals in this window"))
-        composeRule.waitUntil(SETTLE_TIMEOUT_MS) {
-            composeRule
-                .onAllNodesWithText("merged", substring = true)
-                .fetchSemanticsNodes()
-                .isNotEmpty()
-        }
-
-        // Scrolled again, to the note at the *foot* of the card rather than its
-        // title: stopping at the title leaves the card straddling the bottom
-        // edge, and everything below the fold is found but not displayed.
-        composeRule
-            .onNode(hasScrollAction())
-            .performScrollToNode(hasText("merged", substring = true))
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Meals in this window").assertIsDisplayed()
+        composeRule.onNodeWithText("Meals, last 24 hours").assertIsDisplayed()
         composeRule
             .onNodeWithText("carry a stamped time", substring = true)
             .assertIsDisplayed()
-        // Four records in, two meals out, and the screen owns up to the merge
-        // rather than quietly halving the day's carbohydrate.
+        // Four records in, two meals out, and the card owns up to the merge rather
+        // than quietly halving the day's carbohydrate.
         composeRule
             .onNodeWithText("2 repeated records from the source merged", substring = true)
             .assertIsDisplayed()
@@ -430,7 +368,7 @@ class MasterGraphRenderTest {
         // them, so each falls back to the same placeholder.
         assertEquals(2, composeRule.onAllNodesWithText("Meal").fetchSemanticsNodes().size)
 
-        composeRule.onRoot().captureRoboImage("build/screenshots/master_graph_undated_meals.png")
+        composeRule.onRoot().captureRoboImage("build/screenshots/log_undated_meals.png")
     }
 
     @Test
@@ -637,8 +575,12 @@ private const val PLOT_DESCRIPTION = "Food, blood and body plot"
  *
  * A round hour a couple back: always in the past, inside even the narrowest
  * window on offer, and -- landing on the hour with no seconds -- the shape a
- * stamped time actually has. Top-level because the fake data source is a nested
- * class and cannot reach the test's own members.
+ * stamped time actually has.
+ *
+ * Deliberately *not* midnight. Midnight has a rule of its own, so stamping there
+ * would let a broken shared-time-of-day check still pass -- the real phone's
+ * meals all sat at 10:00, which is exactly the shape that has to be caught on
+ * the repeat alone.
  */
 private fun stampedTime(reference: Instant): Instant =
     reference.truncatedTo(ChronoUnit.HOURS).minus(Duration.ofHours(2))

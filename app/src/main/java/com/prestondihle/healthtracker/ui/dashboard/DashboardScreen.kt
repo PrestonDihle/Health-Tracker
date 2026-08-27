@@ -833,8 +833,13 @@ internal fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit
  * same 1-10 scale, and the question asked of them is whether they move together.
  * Moved here from the Activity trends so it reads next to the sliders it plots.
  */
+// Internal rather than private for the same reason SleepCard is: this screen
+// cannot be scrolled in a test, so a card this far down a LazyColumn is never
+// composed at all. Three line styles read against one 1-10 axis is exactly the
+// kind of drawing that looks right until one of them stops being distinguishable
+// from the others, and nothing outside a real layout pass would notice.
 @Composable
-private fun MoodTrendCard(state: DashboardUiState) {
+internal fun MoodTrendCard(state: DashboardUiState) {
     val chartColors = LocalChartColors.current
     TrackerCard(title = "Vibe, energy and focus", subtitle = "1 to 10") {
         MultiLineChart(

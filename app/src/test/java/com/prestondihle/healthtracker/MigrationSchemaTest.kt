@@ -203,6 +203,20 @@ class MigrationSchemaTest {
     }
 
     /**
+     * The saved card order added at v15. A new table, so its DDL is diffed
+     * directly. The composite primary key on `(tab, cardId)` is the part worth
+     * pinning -- keyed on `cardId` alone, the same card on two tabs would
+     * overwrite the other's saved slot.
+     */
+    @Test
+    fun `migration builds CardOrderEntry exactly as Room expects`() {
+        assertEquals(
+            roomSchema("CardOrderEntry"),
+            migrationSchema("CardOrderEntry", AppDatabase.migration14To15Statements),
+        )
+    }
+
+    /**
      * The v4 KetoneReading table, as Room built it before the rename.
      *
      * Spelled out here rather than derived, because the point of the test is to
@@ -385,6 +399,9 @@ class MigrationSchemaTest {
             // something they never asked for. NULL is what keeps it silent until
             // it is switched on, and that is part of what this pins.
             AppDatabase.migration11To12Statements.forEach { raw.execSQL(it) }
+            // The profile columns on UserSettings -- three nullable, plus `sex`
+            // NOT NULL with a seeded default in the same shape smoothGlucose used.
+            AppDatabase.migration13To14Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -421,6 +438,7 @@ class MigrationSchemaTest {
                 .forEach { raw.execSQL(it) }
             AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration8To9Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration13To14Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
@@ -444,9 +462,12 @@ class MigrationSchemaTest {
                     assertEquals(80, it.getInt(7))
                     assertEquals(480, it.getInt(8))
                 }
-            raw.query("SELECT `smoothGlucose` FROM `UserSettings`").use {
+            raw.query("SELECT `smoothGlucose`, `sex` FROM `UserSettings`").use {
                 it.moveToNext()
                 assertEquals(0, it.getInt(0))
+                // `sex` is NOT NULL, so an existing row needs the seeded default or
+                // the migration fails outright -- the smoothGlucose case again.
+                assertEquals("UNSPECIFIED", it.getString(1))
             }
         } finally {
             db.close()

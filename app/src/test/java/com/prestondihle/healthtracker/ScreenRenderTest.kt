@@ -26,7 +26,9 @@ import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
 import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
 import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
+import com.prestondihle.healthtracker.ui.dashboard.MoodTrendCard
 import com.prestondihle.healthtracker.ui.dashboard.SleepCard
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
@@ -35,6 +37,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -127,31 +130,56 @@ class ScreenRenderTest {
 
     @Test
     fun `trends screen renders`() {
-        val vm = TrendsViewModel(seededRepository(), zone)
-        render { TrendsScreen(vm) }
+        val repo = seededRepository()
+        val vm = TrendsViewModel(repo, zone)
+        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
         composeRule.onRoot().captureRoboImage("build/screenshots/trends.png")
     }
 
+    /**
+     * The mood chart on its own, for the reason the sleep card is.
+     *
+     * It used to be scrolled to on Activity; it lives on Wellness now, and that
+     * screen ticks -- so `performScrollToNode` never gets the idle state it waits
+     * on and the card is simply never composed. Rendering it directly is what
+     * still puts a real layout pass through the three-series chart, which is the
+     * only place its 1-10 axis and its solid/dashed/dotted styles are exercised.
+     *
+     * Seeded from the same repository the screen reads, so the state under test
+     * is the shape the view model would have assembled rather than a hand-built
+     * one that cannot go stale in the same ways.
+     */
     @Test
     fun `the combined mood chart renders`() {
-        val vm = TrendsViewModel(seededRepository(), zone)
-        render { TrendsScreen(vm) }
+        val repository = seededRepository()
+        val today = java.time.LocalDate.now(zone)
+        val start = today.minusDays(13)
+        val history = runBlocking { repository.getDailyLogs(start, today).first() }
+        // Three line styles are only told apart where all three have something to
+        // draw. An empty history renders the "no data" branch and would pass
+        // every assertion below while proving none of it.
+        assertTrue(history.any { it.vibe != null && it.energy != null && it.focus != null })
 
-        // Far enough down a lazy list that it is never composed by default, so
-        // it has to be scrolled to before it can be looked at or asserted on.
-        composeRule.onNode(hasScrollAction()).performScrollToNode(
-            hasText("Vibe, energy and focus")
-        )
-        composeRule.waitForIdle()
+        render {
+            MoodTrendCard(
+                state =
+                    DashboardUiState(
+                        logHistory = history,
+                        historyStart = start,
+                        historyEnd = today,
+                    )
+            )
+        }
 
         composeRule.onNodeWithText("Vibe, energy and focus").assertIsDisplayed()
-        composeRule.onRoot().captureRoboImage("build/screenshots/trends_mood.png")
+        composeRule.onRoot().captureRoboImage("build/screenshots/mood-card.png")
     }
 
     @Test
     fun `the grip strength trend renders both hands`() {
-        val vm = TrendsViewModel(seededRepository(), zone)
-        render { TrendsScreen(vm) }
+        val repo = seededRepository()
+        val vm = TrendsViewModel(repo, zone)
+        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
 
         composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("Grip strength"))
         composeRule.waitForIdle()
@@ -162,8 +190,9 @@ class ScreenRenderTest {
 
     @Test
     fun `every trends range renders`() {
-        val vm = TrendsViewModel(seededRepository(), zone)
-        render { TrendsScreen(vm) }
+        val repo = seededRepository()
+        val vm = TrendsViewModel(repo, zone)
+        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
 
         // Seven days is narrower than the seeded fortnight and ninety is wider
         // than it, so between them these cover both the cropping and the
@@ -196,8 +225,16 @@ class ScreenRenderTest {
      */
     @Test
     fun `dashboard renders`() {
-        val vm = DashboardViewModel(seededRepository(), zone)
-        render { DashboardScreen(vm, SnackbarHostState()) }
+        val repo = seededRepository()
+        val vm = DashboardViewModel(repo, zone)
+        render {
+            DashboardScreen(
+                vm,
+                TrendsViewModel(repo, zone),
+                CardOrderViewModel(repo, "wellness"),
+                SnackbarHostState(),
+            )
+        }
         composeRule.onRoot().captureRoboImage("build/screenshots/dashboard.png")
     }
 

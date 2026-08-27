@@ -2,8 +2,7 @@ package com.prestondihle.healthtracker
 
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
-import com.prestondihle.healthtracker.ui.today.MasterRange
-import com.prestondihle.healthtracker.ui.today.TodayUiState
+import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
 import java.time.Instant
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -32,14 +31,12 @@ class MealTimeStampTest {
         )
 
     /**
-     * A week-wide state, which is the window this matters in.
-     *
-     * The repeat that gives a stamped time away only shows up across several
-     * days, and the widest window is where a history worth correcting is read.
+     * The Log tab's meal state. Its meal list is the last 24 hours, so the meals
+     * seeded here sit inside that window; the stamped-time detection itself is
+     * judged over every loaded meal regardless of the window.
      */
     private fun state(vararg meals: MealEntry) =
-        TodayUiState(
-            range = MasterRange.WEEK,
+        DashboardUiState(
             now = Instant.parse("2026-08-20T18:00:00Z"),
             meals = meals.toList(),
             zoneId = zone,
@@ -47,14 +44,15 @@ class MealTimeStampTest {
 
     @Test
     fun `a time of day shared to the second by two meals is a stamp`() {
-        // The shape found on a real phone: every meal at exactly 10:00:00,
-        // including several on one day. Genuine timestamps do not repeat to the
-        // second, so a repeat means the source knew only the date.
+        // The shape found on a real phone: several meals on one day, every one
+        // stamped at exactly 10:00:00. Genuine timestamps do not repeat to the
+        // second, so a repeat means the source knew only the date. Different
+        // calories keep them three distinct meals rather than one collapsed.
         val meals =
             arrayOf(
-                meal(1, "2026-08-18T10:00:00Z", calories = 240),
-                meal(2, "2026-08-18T10:00:00Z", calories = 328),
-                meal(3, "2026-08-19T10:00:00Z", calories = 1248),
+                meal(1, "2026-08-20T10:00:00Z", calories = 240),
+                meal(2, "2026-08-20T10:00:00Z", calories = 328),
+                meal(3, "2026-08-20T10:00:00Z", calories = 1248),
             )
         val uiState = state(*meals)
 

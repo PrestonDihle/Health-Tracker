@@ -10,18 +10,35 @@ reps and reading.
 | Screen | What it does |
 | --- | --- |
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
-| **Log** | Every logging control in one place, so several things can be entered without changing tabs |
-| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; glucose and ketones; the day's meals; the macro trend |
-| **Activity** | Grip strength and rep logging, with the step, grip strength, pushup and air squat trends |
-| **Wellness** | Sleep stages, waist and weight, blood pressure, vibe/energy/focus and reading, each with its trend |
-| **Settings** | Units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
+| **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
+| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the macro trend |
+| **Activity** | The movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
+| **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
+| **Settings** | Your profile, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
 
-The cards are being moved into this arrangement a tab at a time. Until that
-finishes, Fuel is missing its glucose, meals and macro cards, Activity and
-Wellness open the old trends and landing screens, and Log is empty. Nothing has
-been made unreachable in the meantime; the tab a card opens under is the only
-thing that changes, and the day's totals appear on both Today and Wellness until
-Wellness gets a sync control of its own.
+**Logging and looking are split down the middle**, which is the arrangement the
+six tabs exist for: everything you type lives on Log, and the trend it feeds
+lives on the tab that reads it. Grip strength is the clearest case — the stepper
+is on Log, the both-hands chart is on Activity — and the split is what stops a
+screen being half a form and half a dashboard, which is what Wellness had become.
+
+Two things follow. Log and Wellness share one view model, so a weight typed on
+one is on the other's chart without a sync in between. And the day's totals
+appear on both Today and Wellness, deliberately: it is the card carrying the
+refresh button, and hiding it on one of the two screens most likely to be open
+when a sync is wanted would make it hard to find.
+
+### Card order
+
+**Every tab's cards can be reordered, and the order is remembered per tab.** Each
+card carries a pair of arrows in its title row; nothing is dragged. A visible
+control beats a hidden gesture here for the same reason the series switches on
+the master graph are switches — a feature nobody can see is a feature nobody
+uses, and it can be tested without simulating a drag.
+
+A card added in a later update appears at the bottom rather than vanishing,
+because the saved order is reconciled with the tab's built-in one rather than
+replacing it. Ids the save no longer recognises are dropped the same way.
 
 ## Reference lines
 
@@ -152,6 +169,28 @@ Health Connect has no mile-split concept. The app takes every running session of
 at least a mile, divides elapsed time by distance and normalises to one mile,
 then keeps the fastest. On a long run that includes a warmup this reads slower
 than a true mile PR, so it is labelled *average pace*, not a personal best.
+
+### Runs, split by heart-rate zone
+
+Activity draws one bar per running session, stacked by the minutes it spent in
+each zone — Easy below 60% of maximum heart rate, Moderate to 75%, Hard to 90%,
+Intense at or above it.
+
+**The bar's height is minutes, not distance.** That is the choice that makes a
+short hard interval session and a long easy one look as different as they felt;
+by distance they are two bars of a similar height saying nothing about effort.
+
+Zones need a maximum heart rate, which is **entered rather than derived** — the
+"You" card in Settings, alongside age, sex and height. 220-minus-age is a
+population average, and anyone who has watched their own on a hard effort knows
+it better than the formula does. Left unset it falls back to 220-minus-age, then
+to 190.
+
+Nothing is stored: the zones are computed from the session and its own heart-rate
+trace each time the chart is drawn. Cached figures would be wrong the moment the
+maximum heart rate is edited, and there would be a table to re-key every time it
+was. A run the watch recorded without a heart-rate trace draws nothing rather
+than drawing a guess.
 
 ## Fast adherence
 
@@ -514,15 +553,20 @@ needs a real upload key. No signing material is stored in this repo.
 The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
 series gap-splitting, axis selection, gap backfill, gridline spacing, axis range,
-where the waypoint stepper opens, and the panned window's own arithmetic --
-whether the curves stop at the right edge, and whether a meal past it is still
-listed. `MealDeletionTest` and `SupplementsTest` drive the repository against an
+heart-rate zone boundaries, where the waypoint stepper opens, and the panned
+window's own arithmetic -- whether the curves stop at the right edge, and whether
+a meal past it is still listed. `MealDeletionTest` and `SupplementsTest` drive the repository against an
 in-memory database for the behaviour that only appears across a sync, or between
 two tables with no foreign key holding them together.
 `MasterGraphRenderTest` and
 `ScreenRenderTest` compose whole screens against an in-memory database and
 capture images with Roborazzi, which is what catches the empty-list and
 divide-by-zero cases the chart canvas only reaches under a real layout pass.
+A few cards are composed on their own rather than through their screen -- sleep,
+the mood chart, the meal list. All three sit on a screen with a running timer,
+and a list that never stops changing cannot be scrolled by a test, so through the
+screen those cards are simply never built and their drawing goes unexercised
+while the screenshot above them still looks right.
 `MigrationSchemaTest` diffs every hand-written migration against the schema Room
 generates from the entities -- a mismatch there does not fail a build, it throws
 on the next launch for anyone upgrading.

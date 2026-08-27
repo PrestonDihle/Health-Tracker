@@ -88,14 +88,24 @@ metric with a daily goal (`DailyLog.bookPagesRead`), so the word already means s
 same collision is why the logging tab is **Log** rather than Log Book, the other half of the reason
 being that two words do not fit a sixth of a phone's width.
 
-**The cards are mid-move between tabs.** Today, Log, Fuel and Settings open the screen they will
-keep — Fuel still wants its glucose, meals and macro cards; Activity and Wellness are wired to the
-old trends and landing screens until their own cards arrive. A screen unhooked before its
-replacement exists would leave everything it carries unloggable in the meantime, on the phone
-holding the only copy of this data — so nothing is unhooked early, and `TrackerNavHost` names the
-eventual owner of every temporary route. For the same reason the Activity card is drawn on *both*
-Today and the old landing screen for now: it carries that screen's only refresh control, and the
-cards still sitting there need a way to sync until Wellness has one of its own.
+**The six-tab move is largely done, but the code still says Dashboard in places.** Each tab opens its
+own screen now: **Today** the master graph, **Log** every hand-entry control (`LogScreen`), **Fuel**
+fasting with the consumption and macro cards, **Activity** the movement and body/vitals trends
+(`TrendsScreen`), **Wellness** the display cards with the vitals, mood and pages trends
+(`DashboardScreen`), **Settings** the config. Activity keeps only the *movement* trends — steps,
+runs, grip, pushups, air squats; waist, weight, blood pressure, resting heart rate and sleep went to
+Wellness and macros to Fuel, which is why `TrendsScreen` now backs a tab whose name it does not
+share. The cards moved a tab at a time — never unhooked before
+their replacement existed, on the phone holding the only copy of this data — and a few carry a home
+that outgrew their name (below).
+
+**Two ViewModels are shared across tabs, hoisted in `TrackerNavHost` so a tab switch does not spin up
+a second copy — and, for the dashboard, a second Health Connect sync.** `DashboardViewModel` backs
+both Log (its input cards) and Wellness (its display cards); `TrendsViewModel` backs Activity,
+Wellness and Fuel (the trend charts). Log reuses Wellness's card composables directly — `BodyCard`,
+`MoodCard` and the rest are `internal` in `DashboardScreen.kt` for exactly that. The moved trend
+cards live in `ui/trends/TrendCards.kt` and the meal cards in `ui/components/MealCards.kt` so their
+new homes share one copy.
 
 One place where the tab and the code disagree, and it will come up:
 
@@ -105,9 +115,9 @@ One place where the tab and the code disagree, and it will come up:
   did not become a different chart, and renaming its parts after the tab that happens to host them
   would be the drift this section exists to warn about rather than a cure for it.
 
-`DashboardScreen`, `DashboardViewModel` and `DashboardUiState` still exist and still say Dashboard,
-but they are no longer Today: they hold the cards on their way to Fuel, Activity and Wellness, and
-go when the last of those has moved.
+`DashboardScreen`, `DashboardViewModel` and `DashboardUiState` still say Dashboard but back
+**Wellness** now, and the same view model backs Log's logging cards. Renaming the trio to Wellness
+would be half a rename, since Log leans on it too — the name is stale, not the wiring.
 
 The chart words are not interchangeable, and the distinctions are enforced by the drawing code rather
 than by convention — see *Drawing weight, and what gets read as data* for why each exists:
@@ -149,7 +159,10 @@ Room database, the `HealthConnectDataSource`, and the single `TrackerRepository`
 pulls the container off the application and hands it to `TrackerNavHost`, which creates each
 screen's ViewModel through that ViewModel's own `provideFactory(repository)` companion function.
 Adding a screen means: a `Screen` enum entry, a `composable` block in `TrackerNavHost`, and a
-ViewModel with a `provideFactory`. The bottom bar carries six tabs (Today, Log, Fuel, Activity,
+ViewModel with a `provideFactory`. A ViewModel shared across tabs is instead hoisted to the
+`TrackerNavHost` body (`viewModel()` at that scope is owned by the activity, so both routes get the
+one instance) and handed in as a parameter — that is how Log and Wellness share `DashboardViewModel`.
+The bottom bar carries six tabs (Today, Log, Fuel, Activity,
 Wellness, Settings) — Material divides the width evenly and truncates, so **new labels have to be one
 short word**; "Master Graph" rendered as "Master G...". Eight characters is the most that has ever
 fitted, which is why Nutrition became Fuel and Wellbeing became Wellness rather than being left to
@@ -192,6 +205,27 @@ those queries is open-ended forward, so an anchor an hour early is a superset an
 `Instant`/`LocalDate` vocabulary and the epoch-millisecond bounds the DAO queries expect
 (`startOfDayMillis` / `endOfDayMillis`). Callers never do that arithmetic themselves.
 
+### Card order and the profile
+
+**Every tab's cards can be reordered, and the order is saved per tab.** `ui/reorder/CardReorder.kt`
+holds it: `reorderableCards` is a `LazyListScope` extension that takes the cards in their built-in
+order — each a `ReorderableCard(id) { … }` — and draws them in the saved order under a pair of move
+arrows. A tab declares its cards once, in the order it wants out of the box, and `effectiveCardOrder`
+reconciles that with whatever the reader has saved: ids the save no longer knows are dropped, ids the
+tab gained since are appended, so a card added in an update shows up at the bottom rather than
+vanishing. `CardOrderViewModel` (one per tab, keyed by route in `TrackerNavHost`) reads and rewrites
+`CardOrderEntry`. Cards keyed by id so Compose keeps each card's own state as they swap places.
+
+Up/down arrows rather than drag — chosen deliberately — so the control is visible and testable
+without a gesture, in the same spirit as `SeriesToggles`. Two tabs took work to fit the model:
+**Settings** is config rather than a content dashboard but reorders all the same, and **Fuel**'s
+extended-fast entries had to move *inside* the "Extended fasts" card (they were separate cards below
+it) so the scheduler and its list are one reorderable unit and nothing is left pinned.
+
+The **profile** on `UserSettings` — `maxHeartRateBpm`, `ageYears`, `sex`, `heightCm` — is the "You"
+card at the top of Settings. Max HR is the one with teeth: it zones the runs chart. Height is stored
+in cm like everything else and stepped in inches or centimetres by the unit setting.
+
 ### The two-tables rule for daily data
 
 This is the most important invariant to preserve:
@@ -214,14 +248,14 @@ three separate meals on one Tuesday — so every absorption curve was anchored t
 in. This is not something the app can compute its way out of; the clock time was never written. Two
 things follow from it:
 
-- `TodayUiState.hasClockTime` calls a time of day **shared to the second by two different
-  meals** a stamp rather than a measurement. Genuine timestamps land on a different second every
-  time; a source that knows only the date lands on the same one for ever. Midnight counts
-  unconditionally, since a lone meal at exactly `00:00:00` is a date too. The list says "set time"
-  instead of printing a plausible-looking clock time. **Do not narrow this back to a midnight
-  check** — that was the first attempt, and the phone's 10:00 stamp sails straight past it. The
-  repeat is the signal; the particular hour is not. It is judged over the meals loaded, so it is
-  quieter on a 3h window than a 7d one, which is the right way round.
+- `DashboardUiState.hasClockTime` calls a time of day **shared to the second by two different
+  meals** a stamp rather than a measurement. (The meal list is the Log tab's now — its window is a
+  fixed last-24-hours, no longer the master graph's; `TodayUiState` keeps only what the graph's meal
+  markers need.) Genuine timestamps land on a different second every time; a source that knows only
+  the date lands on the same one for ever. Midnight counts unconditionally, since a lone meal at
+  exactly `00:00:00` is a date too. The list says "set time" instead of printing a plausible-looking
+  clock time. **Do not narrow this back to a midnight check** — that was the first attempt, and the
+  phone's 10:00 stamp sails straight past it. The repeat is the signal; the particular hour is not.
 - Meals are **editable and deletable**, uniquely among the Health Connect caches — and a meal can be
   logged by hand outright. A source that stamps the wrong time, writes a meal twice, or records one
   that was never eaten cannot be argued with, so the curves are only worth reading if the meals
@@ -258,8 +292,19 @@ graph, and they follow the same cache rules. `MealEntry` deliberately duplicates
 like glucose. `HeartRateBucket` averages raw samples into five-minute windows keyed on the bucket's
 start time, which is what makes a re-sync idempotent without an external id; a watch writes a beat
 rate every few seconds, which is more resolution than any chart here draws and enough rows to
-dominate the database. `StepBucket` is the same idea at hourly resolution, and the same argument
-against the snapshot's daily total: it cannot say *when* the walking happened.
+dominate the database. `StepBucket` is the same idea, and the same argument against the snapshot's
+daily total: it cannot say *when* the walking happened.
+
+**`StepBucket` is cached at fifteen minutes — the finest the master graph ever draws — and summed up
+for display.** `StepBucket.BUCKET_MINUTES` is the stored resolution; `TodayUiState.stepBucketMinutes`
+picks the *display* bucket from the window (fifteen minutes at 3h and 6h, thirty at 12h and 24h, an
+hour at 48h and beyond, where a fifteen-minute bar is a hair too thin to see across two days), and
+`displaySteps` groups the stored quarters into it. Fifteen divides thirty and sixty, so every display
+bar is whole stored buckets and the cache is read once at the finest resolution rather than re-queried
+on zoom. The column keeps its original name `hourStartMillis` via `@ColumnInfo` so the rename to
+`bucketStartMillis` needed no migration — a fifteen-minute bucket keyed by `hourStartMillis` would
+read as a bug. The chart's `barWidth` and its `steps/15m | steps/30m | steps/h` axis label follow the
+same figure, so the bar and the rate it quotes never disagree.
 
 `StepBucket` is the one cache that is **deleted before it is rewritten**. An hour's step count can
 legitimately fall to zero between syncs — the pinned source changes in Settings, or a duplicate walk
@@ -474,18 +519,33 @@ app throws away the entire page. Aggregates never construct records, so they are
 elsewhere are paginated; `readAllRecords` loops `pageToken` because a single day from a watch exceeds
 one page and taking only the first would silently undercount.
 
-`readStepsByHour` slices the same aggregate with `AggregateGroupByDurationRequest` and honours the
-same pinned source — hourly bars that summed every app while the daily total trusted one would be two
-different step counts on two screens. **The window's start is snapped down to the hour in the local
-zone before slicing**, because the slicer counts forward from whatever instant it is handed: a sync
-begun at 14:37 would otherwise produce buckets running :37 to :37, which no later sync lines up with
-and `StepBucket`'s primary key could never overwrite. Health Connect omits a slice entirely when it
-has no records in it, so an hour with no walking arrives as a *hole*, not a zero — which is why a bar
-series has to declare its own `barWidth` rather than infer one from the spacing.
+`readStepsByHour` (named for what it once did — it now slices at fifteen minutes) slices the same
+aggregate with `AggregateGroupByDurationRequest` and honours the same pinned source: bars that summed
+every app while the daily total trusted one would be two different step counts on two screens. **The
+window's start is snapped down to the hour in the local zone before slicing**, because the slicer
+counts forward from whatever instant it is handed — an hour boundary is also a fifteen-minute one, so
+the quarter-hour slices still land on :00/:15/:30/:45, where a sync begun at 14:37 would otherwise
+produce buckets no later sync lines up with and `StepBucket`'s primary key could never overwrite.
+Health Connect omits a slice entirely when it has no records in it, so a quarter-hour with no walking
+arrives as a *hole*, not a zero — which is why a bar series has to declare its own `barWidth` rather
+than infer one from the spacing.
 
 Health Connect has no mile-split concept. `bestMileSeconds` is elapsed time divided by distance,
 normalised to a mile, over runs of at least a mile — so it is *average pace*, not a PR, and is
 labelled as such in the UI.
+
+**Runs are the one Activity chart read live rather than cached.** The Runs card stacks each running
+session by the minutes it spent in each heart-rate zone — Easy below 60% of max, Moderate to 75%,
+Hard to 90%, Intense at or above it (`domain/RunZones.kt`, boundaries closed at the bottom so a
+reading exactly on one lands in the harder zone). The bar's height is minutes, not distance, which is
+the choice that lets a short hard interval and a long easy one look as different as they felt.
+`TrackerRepository.getRunBreakdowns` reads each `ExerciseSessionRecord` of type running plus its own
+heart-rate trace and computes the zones on demand; `TrendsViewModel.runs` re-runs it whenever the
+window *or* the max heart rate changes. Cached zones would be wrong the moment the reader edits their
+max HR in Settings, and there is no table to migrate or re-key when they do. A sample holds its zone
+until the next one, capped at three minutes so a watch paused at a light does not credit the zone it
+stopped in; a run with no heart-rate trace simply comes back empty rather than wrong. Max HR falls
+back to 220-age, then to 190, when the profile has set none.
 
 **Glucose is cached a calendar day at a time and only *today* is ever re-read**, which is right for a
 finished day and wrong for one that was never finished properly: a monitor out of Bluetooth range
@@ -526,7 +586,7 @@ Monday morning. The rules that the tests pin down:
 
 ### Room
 
-Version 13, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 15, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -559,6 +619,18 @@ generates the constraint form `PRIMARY KEY(`startMillis`)` even for a single-col
 compares the two schemas as *text*, so that would not have failed a test — it would have thrown on
 the next launch for anyone upgrading. **Write the table-constraint form for every primary key**,
 single-column ones included.
+
+`MIGRATION_13_14` adds the personal profile to `UserSettings` — `maxHeartRateBpm`, `ageYears`,
+`heightCm` (all nullable) and `sex` (non-null, `DEFAULT 'UNSPECIFIED'`, the same `NOT NULL`-with-
+seeded-default shape `smoothGlucose` used). Max heart rate is the load-bearing one: it zones the runs
+chart on Activity, and is entered rather than derived from age because 220-minus-age is a population
+average and anyone who has seen their own on a hard effort knows it better. The nullable three read
+as an unset profile — no made-up figure on an upgrading user.
+
+`MIGRATION_14_15` adds `CardOrderEntry`, a new table keyed on the pair `(tab, cardId)` holding a
+saved card position per tab. New table, so the DDL is Room's own `CREATE TABLE` for the composite
+key — no `ALTER TABLE` default to keep in step. Empty means every tab in its built-in order, so an
+upgrading user sees no change until they move something.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
@@ -876,11 +948,14 @@ minutes short of live -- a window three minutes short of now looks exactly like 
 New adherence, interval, stats, decay, absorption, smoothing, duplicate, gap, gridline or axis-range
 behaviour belongs there. `ExampleUnitTest` and `ExampleRobolectricTest` are scaffolding.
 
-Awkwardly, the duplicate-collapse cannot be reached through the repository any more: the sync rejects
-duplicates on the way in, so a render test that needs rows in the state a *previous* version left
-them has to plant them through the DAO. `MasterGraphRenderTest` keeps a `dao` field for that, and its
-`DateOnlyDuplicatedMeals` reproduces the source behaviour by delegating `HealthDataSource` and
-overriding only `readMeals` — which keeps the oddity in the test rather than in the shared mock.
+Awkwardly, the duplicate-collapse cannot be reached through a sync at all any more: the sync rejects
+duplicates on the way in, so a test that needs rows in the state a *previous* version of the app left
+them has to build them itself. `MasterGraphRenderTest` now hands four `MealEntry` rows straight to a
+`DashboardUiState` and composes `MealListCard` on them — the collapse and the stamped-time judgement
+both live on the state, so nothing is lost by skipping the repository, and the fake data source that
+used to plant them through the DAO is gone with it. `stampedTime` is what survives and is the part
+worth keeping: a round hour a couple back, **deliberately not midnight**, because midnight has a rule
+of its own and stamping there would let a broken shared-time-of-day check pass.
 
 A note on writing smoothing tests: assert peak *timing* against a trace that is symmetric about its
 peak. On an asymmetric one the two samples either side of a near-plateau come out within a tenth of
@@ -900,6 +975,15 @@ is on screen and this screen cannot be scrolled in a test, so the third card dow
 constructed at all — the hypnogram's canvas arithmetic would go entirely unexercised while the
 dashboard screenshot still looked fine. `SleepCard` is `internal` for exactly this, and
 `ScreenRenderTest` renders it on its own with a night seeded through the real sync.
+
+**This is the pattern the six-tab move keeps needing, and it is now three cards deep.** A card that
+moves onto a ticking screen loses its scroll-to test on arrival — the ticker means the screen never
+reaches idle, so `performScrollToNode` times out rather than finding anything. `MoodTrendCard` came
+off Activity that way and follows `SleepCard`: `internal`, composed on its own in `ScreenRenderTest`
+against a `DashboardUiState` whose `logHistory` is read back out of the seeded repository, so the
+state under test is the shape the view model would have assembled. `MealListCard` is the third, in
+`MasterGraphRenderTest`. **Prefer this to widening a scroll timeout** — the timeout is not the
+problem, and a card composed directly is also the only way its own drawing gets a real layout pass.
 
 `MasterGraphRenderTest` checks the sleep shade through the plot's **spoken description** rather than
 by looking at pixels, which is the only handle available: a wash at a tenth opacity on a canvas with
@@ -937,8 +1021,9 @@ asserted on a screen that does not tick, which is why the glucose smoothing and 
 covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
 
 **That ticker now belongs to `FuelViewModel`**, which followed the fast card off the dashboard, and
-Fuel is the longest tab in the app at thirteen cards — so it has the problem worse than the
-dashboard ever did. Today is the screen that gained by the swap: its `minuteTicker` looks like a
+Fuel is the longest tab in the app at eleven cards — so it has the problem worse than the
+dashboard ever did. (Thirteen until the extended-fast entries moved inside their own card for the
+reordering; the count moved, the problem did not.) Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master
 graph's suite can scroll and wait on idle at all.
 
