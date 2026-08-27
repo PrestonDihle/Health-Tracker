@@ -544,6 +544,17 @@ Release builds are **not** configured out of the box: `assembleRelease` reads
 `KEYSTORE_PATH`, `STORE_PASSWORD` and `KEY_PASSWORD` from the environment and
 needs a real upload key. No signing material is stored in this repo.
 
+### Lint
+
+```bash
+./gradlew :app:lintDebug
+```
+
+Clean of errors, and worth keeping that way rather than baselined. The app's
+minimum is API 26 and it is developed on a phone several versions past that, so
+calling something the platform only gained later compiles, passes every test and
+crashes on nobody's device but a user's. Lint is the only check that looks.
+
 ### Tests
 
 ```bash

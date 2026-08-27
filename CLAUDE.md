@@ -18,11 +18,18 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 | One test method | `.\gradlew.bat :app:testDebugUnitTest --tests "*FastingAdherenceTest.a feeding window crossing midnight is handled"` |
 | Android lint | `.\gradlew.bat :app:lintDebug` |
 
-**`lintDebug` currently fails, and not because of anything recent.** `work/CaffeineLastCall.kt` calls
-`java.time.LocalDate.ofInstant`, which needs API 34 against a `minSdk` of 26 — a real latent crash on
-anything below Android 14, invisible on the author's own S25. The fix is almost certainly
-`instant.atZone(zone).toLocalDate()`, the idiom the rest of the codebase already uses. Until it
-lands, a red lint run is the state of the tree rather than evidence you broke something.
+**`lintDebug` is green, so a red run is now evidence you broke something.** It was red for a long
+time on one error — `work/CaffeineLastCall.kt` calling `java.time.LocalDate.ofInstant`, API 34
+against a `minSdk` of 26 — and that is the cost worth remembering rather than the fix: while lint
+had a standing failure it could not report a new one, so the only `NewApi` error in the tree was
+also the reason a second would have gone unnoticed. It now runs clean of errors, with 40 warnings
+left standing.
+
+`LocalDate.ofInstant` and `LocalTime.ofInstant` are **Java 9 methods and arrived on Android at API
+34**; `LocalDateTime.ofInstant` is Java 8 and has been available since API 26, which is why the
+three calls to *that* one are fine and the single call to the first was not. The distinction is
+invisible on the author's own S25 and is exactly what lint is being kept green to catch. Use
+`instant.atZone(zone).toLocalDate()`, the idiom the rest of the codebase already uses.
 
 The APK lands at `app\build\outputs\apk\debug\app-debug.apk`. Test names are backticked and contain
 spaces, so the `--tests` filter must be quoted as shown.

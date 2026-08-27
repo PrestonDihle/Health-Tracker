@@ -20,7 +20,6 @@ import com.prestondihle.healthtracker.domain.Caffeine
 import com.prestondihle.healthtracker.domain.CaffeineDose
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
@@ -120,7 +119,10 @@ class CaffeineLastCallWorker(context: Context, params: WorkerParameters) :
 
         /** Tonight's bedtime, or tomorrow's once tonight's has gone by. */
         internal fun bedtimeAfter(now: Instant, zoneId: ZoneId): Instant {
-            val today = LocalDate.ofInstant(now, zoneId)
+            // Not LocalDate.ofInstant, which is API 34 against a minSdk of 26 --
+            // a crash on anything below Android 14, and invisible on the author's
+            // own phone. The two say the same thing; only this one is available.
+            val today = now.atZone(zoneId).toLocalDate()
             val tonight = today.atTime(BEDTIME).atZone(zoneId).toInstant()
             return if (tonight.isAfter(now)) tonight
             else today.plusDays(1).atTime(BEDTIME).atZone(zoneId).toInstant()
