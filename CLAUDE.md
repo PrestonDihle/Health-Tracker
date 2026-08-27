@@ -754,6 +754,22 @@ consensus ceiling for a stable trace is 36%, on `GlucoseMetrics.STABLE_CV_PERCEN
 GMI is an estimate from sensor data and is presented as a model: close enough to plan against, not
 close enough to argue with a lab result about.
 
+**Both windows on the Fuel card end at *now*, not at the end of the day or week**, and that is what
+makes the coverage gate usable rather than merely correct. Measured against a whole day a monitored
+morning covers a third of it and would report nothing until evening; measured against the day *so
+far* it says what it can honestly say and still refuses once the sensor has genuinely been off. The
+week's first day comes from `UserSettings.weekStartsOn`, which until this card was a setting nothing
+read.
+
+`GlucoseReportState.hasAnyReadings` separates the two ways the card can be empty: "the sensor has
+not covered enough of today" and "there is no CGM here at all". They want different sentences, and
+the first is temporary while the second is not.
+
+The card shows four figures rather than one because each hides what the others show — a good mean
+can be the average of a trace that was never once in range, and a good time-in-range can still swing.
+The below/above line appears only when something was outside the band; on a clean window it would be
+two zeroes taking a row to report that nothing happened.
+
 ### Body composition
 
 `domain/BodyComposition.kt` is the military body composition screen, and it is **waist over height,

@@ -63,6 +63,7 @@ import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.domain.FastingStats
+import com.prestondihle.healthtracker.domain.GlucoseMetrics
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
@@ -100,6 +101,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("h:mm a")
@@ -129,6 +131,7 @@ fun FuelScreen(
     orderViewModel: CardOrderViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val glucoseReport by viewModel.glucoseReport.collectAsStateWithLifecycle()
     // The macro trend belongs with food: it reads from the same source Activity's
     // other trends do, so Fuel need not re-derive it.
     val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
@@ -285,6 +288,7 @@ fun FuelScreen(
                     },
                     // Calories from protein, carbs and fat over the fortnight,
                     // moved here from Activity.
+                    ReorderableCard("glucoseReport") { GlucoseReportCard(report = glucoseReport) },
                     ReorderableCard("macros") { MacrosTrendCard(trends) },
                 ),
             savedOrder = savedOrder,
@@ -692,6 +696,106 @@ private fun FastCard(
     }
 }
 
+
+/**
+ * The CGM summary: how much of today sat in range, and what the week looks like.
+ *
+ * Four figures rather than one, because each hides something the others show. A
+ * good mean can be the average of a trace that was never once in range, so time
+ * in range sits beside it; and a good time in range can still be a trace that
+ * swings, which is what the coefficient of variation is for. GMI is the slowest
+ * of the four and answers a different question from all of them.
+ *
+ * Every figure is absent rather than approximated when the sensor did not cover
+ * the window. That is the one thing this card must not get wrong -- a
+ * time-in-range computed from a monitored morning reads exactly like one from a
+ * monitored day.
+ */
+@Composable
+private fun GlucoseReportCard(report: GlucoseReportState) {
+    TrackerCard(
+        title = "Blood sugar summary",
+        subtitle = "target ${report.targetLowMgDl}-${report.targetHighMgDl} mg/dL",
+    ) {
+        val today = report.today
+        if (today == null) {
+            Text(
+                if (report.hasAnyReadings) {
+                    "Not enough of today is covered to summarise it yet. " +
+                        "A reading here and there describes those minutes, not the day."
+                } else {
+                    "No blood sugar readings this week."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            GlucoseFigures(metrics = today, label = "Today")
+        }
+
+        report.week?.let { week ->
+            HorizontalDivider()
+            GlucoseFigures(
+                metrics = week,
+                label = "Since ${WEEK_START_FORMAT.format(report.weekStart)}",
+            )
+        }
+    }
+}
+
+/** `Mon 24 Aug`, for naming the week's first day without spending a line on it. */
+private val WEEK_START_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
+
+/** One window's four figures, plus what is out of range under them. */
+@Composable
+private fun GlucoseFigures(metrics: GlucoseMetrics, label: String) {
+    Text(
+        "$label · ${metrics.readingCount} readings",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Metric(
+            label = "In range",
+            value = "${(metrics.timeInRange * 100).roundToInt()}%",
+            supporting = "of readings",
+            modifier = Modifier.weight(1f),
+        )
+        Metric(
+            label = "Mean",
+            value = "${metrics.meanMgDl.roundToInt()}",
+            supporting = "mg/dL",
+            modifier = Modifier.weight(1f),
+        )
+        Metric(
+            label = "GMI",
+            value = "%.1f%%".format(metrics.gmiPercent),
+            // Said out loud because a percentage next to a mean invites being
+            // read as a lab result, which it is not.
+            supporting = "estimated",
+            modifier = Modifier.weight(1f),
+        )
+        Metric(
+            label = "Variation",
+            value = "${metrics.coefficientOfVariation.roundToInt()}%",
+            // The consensus ceiling, carried as an annotation rather than a rule
+            // because there is no plot here to draw one on.
+            supporting = "target ≤36%",
+            valueColor = if (metrics.isStable) null else MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f),
+        )
+    }
+    // Only worth a line when there is something outside the band; on a clean
+    // window it would be two zeroes taking up a row to say nothing happened.
+    if (metrics.timeBelowRange > 0f || metrics.timeAboveRange > 0f) {
+        Text(
+            "Below ${(metrics.timeBelowRange * 100).roundToInt()}% · " +
+                "above ${(metrics.timeAboveRange * 100).roundToInt()}%",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @Composable
 private fun HydrationCard(

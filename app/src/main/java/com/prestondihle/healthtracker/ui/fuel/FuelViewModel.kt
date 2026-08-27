@@ -20,14 +20,19 @@ import com.prestondihle.healthtracker.domain.FastingAdherence
 import com.prestondihle.healthtracker.domain.FastingDay
 import com.prestondihle.healthtracker.domain.FastingStatistics
 import com.prestondihle.healthtracker.domain.FastingStats
+import com.prestondihle.healthtracker.domain.GlucoseAnalysis
+import com.prestondihle.healthtracker.domain.GlucoseMetrics
 import com.prestondihle.healthtracker.repository.TrackerRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -54,6 +59,28 @@ private const val DEFAULT_GOAL_MINUTES = 16 * 60
  * midnight would offer the correction only while nobody yet knew it was needed.
  */
 private const val HYDRATION_EDITABLE_DAYS = 7L
+
+/** Fallbacks matching the shipped target band, for a goals row that predates it. */
+private const val DEFAULT_TARGET_LOW = 70
+private const val DEFAULT_TARGET_HIGH = 140
+
+/**
+ * The CGM summary shown on Fuel: today, the week so far, and the band both are
+ * read against.
+ *
+ * Either metric is null when the readings do not cover its window, which is a
+ * different thing from having no readings at all -- [hasAnyReadings] is what
+ * separates "the sensor was off for most of today" from "there is no CGM here",
+ * and the card says something different for each.
+ */
+data class GlucoseReportState(
+    val today: GlucoseMetrics? = null,
+    val week: GlucoseMetrics? = null,
+    val weekStart: LocalDate = LocalDate.now(),
+    val targetLowMgDl: Int = DEFAULT_TARGET_LOW,
+    val targetHighMgDl: Int = DEFAULT_TARGET_HIGH,
+    val hasAnyReadings: Boolean = false,
+)
 
 /**
  * Half the caffeine window, extending equally either side of now.
@@ -565,6 +592,65 @@ class FuelViewModel(
     fun deleteCaffeine(intake: CaffeineIntake) {
         viewModelScope.launch { repository.deleteCaffeine(intake) }
     }
+
+    /**
+     * The CGM summary for today and for the week so far.
+     *
+     * Both windows end at **now** rather than at the end of the day or week, and
+     * that is what makes the coverage gate usable rather than merely correct:
+     * measured against a whole day, a monitored morning covers a third of it and
+     * would report nothing until the evening. Against the day *so far* it
+     * reports what it can honestly say, and still refuses when the sensor has
+     * genuinely been off.
+     *
+     * The week's first day comes from `UserSettings.weekStartsOn`, which until
+     * now was a setting nothing read.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val glucoseReport: StateFlow<GlucoseReportState> =
+        combine(repository.getUserSettings(), repository.getUserGoals()) { settings, goals ->
+                settings to goals
+            }
+            .flatMapLatest { (settings, goals) ->
+                val date = today
+                val weekStart =
+                    date.with(
+                        TemporalAdjusters.previousOrSame(settings?.weekStartsOn ?: DayOfWeek.MONDAY)
+                    )
+                repository.getBloodSugarBetween(weekStart, date).map { readings ->
+                    val low = goals?.glucoseTargetLowMgDl ?: DEFAULT_TARGET_LOW
+                    val high = goals?.glucoseTargetHighMgDl ?: DEFAULT_TARGET_HIGH
+                    val samples = readings.map { it.timestamp to it.mgDl }
+                    val now = Instant.now()
+                    GlucoseReportState(
+                        today =
+                            GlucoseAnalysis.over(
+                                samples,
+                                date.atStartOfDay(zoneId).toInstant(),
+                                now,
+                                low,
+                                high,
+                            ),
+                        week =
+                            GlucoseAnalysis.over(
+                                samples,
+                                weekStart.atStartOfDay(zoneId).toInstant(),
+                                now,
+                                low,
+                                high,
+                            ),
+                        weekStart = weekStart,
+                        targetLowMgDl = low,
+                        targetHighMgDl = high,
+                        hasAnyReadings = readings.isNotEmpty(),
+                    )
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = GlucoseReportState(),
+            )
 
     fun logCreatine(grams: Int, at: Instant = Instant.now()) {
         if (grams <= 0) return

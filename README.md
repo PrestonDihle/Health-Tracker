@@ -11,7 +11,7 @@ reps and reading.
 | --- | --- |
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
-| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the macro trend |
+| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary and the macro trend |
 | **Activity** | The Army Fitness Test scorecard, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
@@ -419,6 +419,28 @@ stops stretching the axis it shares, which is the point of switching it off in
 the first place.
 
 ## Blood sugar
+
+Fuel carries a **summary card**: for today and for the week so far, the share of
+readings in range, the mean, an estimated GMI and the coefficient of variation.
+
+Four figures rather than one, because each hides what the others show. A good
+mean can be the average of a trace that was never once in range — swinging 55 to
+165 averages a respectable 110 and spends the whole day outside the band. A good
+time-in-range can still be a trace that swings, which is what the variation
+figure is for; the consensus target is 36% or under, and it is called out beside
+the number.
+
+**Nothing is reported for a window the sensor did not cover.** Every one of those
+figures is a proportion, so a monitored morning produces a perfectly well-formed
+time-in-range that is really about a third of a day — and on screen it would look
+exactly like a figure for the whole of it. Under 70% coverage the card says so
+instead of guessing. Coverage is judged on the span the readings occupy, not on
+counting them, so four fingersticks spread across a day still count and two
+hundred readings crammed into one morning do not.
+
+Both windows run to *now* rather than to the end of the day or week, so a
+half-finished day reports on the half that happened. The week starts on whichever
+day is set in Settings.
 
 The glucose axis runs 60–180 mg/dL by default, and **both bounds are settable**:
 a trace that lives between 80 and 120 is a flat line on a wide axis and a legible
