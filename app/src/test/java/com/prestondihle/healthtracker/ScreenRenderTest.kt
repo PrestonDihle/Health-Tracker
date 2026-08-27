@@ -18,8 +18,11 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.prestondihle.healthtracker.data.AftAttempt
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.data.DailyLog
+import com.prestondihle.healthtracker.data.Sex
+import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
@@ -173,6 +176,55 @@ class ScreenRenderTest {
 
         composeRule.onNodeWithText("Vibe, energy and focus").assertIsDisplayed()
         composeRule.onRoot().captureRoboImage("build/screenshots/mood-card.png")
+    }
+
+    /**
+     * The AFT card, scored and plotted.
+     *
+     * Activity does not tick, so unlike the mood card this one can be scrolled
+     * to for real -- which is worth doing, because the card is the only place
+     * the scoring tables meet a layout pass. The seeded profile matters as much
+     * as the attempts: without an age and a sex the card renders its "set your
+     * profile" branch and every score below it would go unexercised.
+     */
+    @Test
+    fun `the AFT card scores a seeded attempt and plots the trend`() {
+        val repo = seededRepository()
+        runBlocking {
+            repo.upsertUserSettings(UserSettings(ageYears = 24, sex = Sex.MALE))
+            // Two finished tests, because the trend needs a second point before
+            // it is a trend at all -- one attempt draws nothing worth looking at.
+            repo.addAftAttempt(
+                AftAttempt(
+                    date = java.time.LocalDate.now(zone).minusMonths(6),
+                    deadliftKg = Units.lbsToKg(250f),
+                    hrpReps = 37,
+                    sdcSeconds = 113,
+                    plankSeconds = 150,
+                    twoMileSeconds = 1028,
+                )
+            )
+            repo.addAftAttempt(
+                AftAttempt(
+                    date = java.time.LocalDate.now(zone),
+                    deadliftKg = Units.lbsToKg(290f),
+                    hrpReps = 45,
+                    sdcSeconds = 105,
+                    plankSeconds = 190,
+                    twoMileSeconds = 960,
+                )
+            )
+        }
+        val vm = TrendsViewModel(repo, zone)
+        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
+
+        composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("Army Fitness Test"))
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Army Fitness Test").assertIsDisplayed()
+        // The verdict, which only appears once all five events are in.
+        composeRule.onNodeWithText("Pass").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/aft-card.png")
     }
 
     @Test

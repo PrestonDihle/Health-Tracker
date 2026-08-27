@@ -31,6 +31,7 @@ import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val runs by viewModel.runs.collectAsStateWithLifecycle()
+    val aft by viewModel.aft.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val chartColors = LocalChartColors.current
 
@@ -72,6 +73,19 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                     // Runs, each bar a session split by heart-rate zone; read live
                     // and zoned against the max heart rate in Settings.
                     ReorderableCard("runs") { RunsTrendCard(runs) },
+                    // The AFT sits on Activity because it is the one thing here
+                    // that is a test rather than a trend -- and its score moves
+                    // on the same training the rest of this tab plots.
+                    ReorderableCard("aft") {
+                        AftCard(
+                            state = aft,
+                            onSave = {
+                                if (it.id == 0L) viewModel.addAftAttempt(it)
+                                else viewModel.updateAftAttempt(it)
+                            },
+                            onDelete = viewModel::deleteAftAttempt,
+                        )
+                    },
                     // Both hands on one chart, because the comparison between them
                     // is the point: a gap that widens over months says something
                     // neither line says on its own.

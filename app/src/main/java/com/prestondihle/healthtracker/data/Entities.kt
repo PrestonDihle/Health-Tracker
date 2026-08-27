@@ -19,6 +19,28 @@ enum class UnitSystemEnum { IMPERIAL, METRIC }
 /** Biological sex, for the metrics that read differently by it. UNSPECIFIED is the unset state. */
 enum class Sex { MALE, FEMALE, UNSPECIFIED }
 
+/**
+ * Which Army Fitness Test standard a Soldier is held to.
+ *
+ * Stored rather than derived because nothing else in this app knows the reader's
+ * MOS. The two lanes share every event table and differ only in the total
+ * required and, for a woman, which column she reads -- see
+ * `domain/AftScoring.kt`.
+ */
+enum class AftLane(val label: String, val minimumTotal: Int) {
+    /** Performance-normed by sex and age. Everyone not in a combat specialty. */
+    GENERAL("General", minimumTotal = 300),
+
+    /**
+     * Sex-neutral, still age-normed.
+     *
+     * ATP 7-22.01 lists the areas of concentration and MOSs it applies to: 11A,
+     * 11B, 11C, 11Z, 12A, 12B, 13A, 13F, 18A, 18B, 18C, 18D, 18E, 18F, 18Z, 19A,
+     * 19C, 19D, 19K and 19Z.
+     */
+    COMBAT("Combat", minimumTotal = 350),
+}
+
 enum class MovementType { PUSHUP, AIR_SQUAT }
 
 /**
@@ -647,4 +669,14 @@ data class UserSettings(
     val ageYears: Int? = null,
     val sex: Sex = Sex.UNSPECIFIED,
     val heightCm: Float? = null,
+    /**
+     * Which Army Fitness Test standard to score against.
+     *
+     * Defaults to the general standard, which is the one most Soldiers are held
+     * to and the safer of the two to guess wrong: it scores a combat-MOS Soldier
+     * a little generously on the total, where defaulting the other way would
+     * tell everyone else they had failed a test they passed. Not nullable,
+     * because there is no such thing as being on neither standard.
+     */
+    val aftLane: AftLane = AftLane.GENERAL,
 )

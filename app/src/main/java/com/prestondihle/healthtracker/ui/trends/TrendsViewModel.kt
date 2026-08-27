@@ -3,6 +3,8 @@ package com.prestondihle.healthtracker.ui.trends
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.prestondihle.healthtracker.data.AftAttempt
+import com.prestondihle.healthtracker.data.AftLane
 import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.ExerciseSet
@@ -10,10 +12,14 @@ import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
+import com.prestondihle.healthtracker.domain.AftEvent
+import com.prestondihle.healthtracker.domain.AftScorecard
+import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.DayPoint
@@ -26,7 +32,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import com.prestondihle.healthtracker.repository.TrackerRepository
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
@@ -48,6 +56,56 @@ enum class TrendsRange(val label: String, val days: Long) {
 
 /** Fallback max heart rate when the profile has neither a figure nor an age to derive one from. */
 private const val DEFAULT_MAX_HEART_RATE = 190
+
+/**
+ * The AFT attempts and the profile they are scored against.
+ *
+ * Holds the raw attempts and computes every score on read. The profile moves --
+ * a birthday changes the age band, the lane is a setting, sex may be filled in
+ * after the first attempt was logged -- and a stored score would be a claim
+ * about a profile that has since changed, indistinguishable by eye from a
+ * current one.
+ */
+data class AftUiState(
+    val attempts: List<AftAttempt> = emptyList(),
+    val lane: AftLane = AftLane.GENERAL,
+    val ageYears: Int? = null,
+    val sex: Sex = Sex.UNSPECIFIED,
+    val zoneId: ZoneId = ZoneId.systemDefault(),
+) {
+    /** False when the profile is too thin to place the Soldier on a scale at all. */
+    val canScore: Boolean
+        get() = AftScoring.canScore(ageYears, sex, lane)
+
+    /** The most recent attempt, which is the one the card leads with. */
+    val latest: AftAttempt?
+        get() = attempts.lastOrNull()
+
+    fun scorecardFor(attempt: AftAttempt): AftScorecard =
+        AftScoring.scorecard(attempt, ageYears, sex, lane)
+
+    val latestScorecard: AftScorecard?
+        get() = latest?.let { scorecardFor(it) }
+
+    /** What this event's 60-point row asks for, so an entry stepper can open there. */
+    fun minimumFor(event: AftEvent): Int? = AftScoring.minimumFor(event, ageYears, sex, lane)
+
+    /**
+     * Total score per attempt, for the trend.
+     *
+     * Only finished attempts are plotted. A part-logged test day would draw as a
+     * collapse in fitness rather than as a test that was not finished, which is
+     * exactly the reading a chart cannot argue its way out of.
+     */
+    val totals: List<Pair<Instant, Float>>
+        get() =
+            attempts
+                .map { it to scorecardFor(it) }
+                .filter { (_, card) -> card.isComplete }
+                .map { (attempt, card) ->
+                    attempt.date.atStartOfDay(zoneId).toInstant() to card.total.toFloat()
+                }
+}
 
 data class TrendsUiState(
     val range: TrendsRange = TrendsRange.TWO_WEEKS,
@@ -265,6 +323,42 @@ class TrendsViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
             )
+
+    /**
+     * Every AFT attempt, scored against the profile as it stands right now.
+     *
+     * Deliberately outside [uiState] and outside [TrendsRange]. A record test
+     * happens twice a year, so a 7-to-90-day window would show one attempt or
+     * none -- the question this chart answers is whether the score is moving
+     * across tests, and that span is the attempts themselves.
+     */
+    val aft: StateFlow<AftUiState> =
+        combine(repository.getAftAttempts(), repository.getUserSettings()) { attempts, settings ->
+                AftUiState(
+                    attempts = attempts,
+                    lane = settings?.aftLane ?: AftLane.GENERAL,
+                    ageYears = settings?.ageYears,
+                    sex = settings?.sex ?: Sex.UNSPECIFIED,
+                    zoneId = zoneId,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = AftUiState(zoneId = zoneId),
+            )
+
+    fun addAftAttempt(attempt: AftAttempt) {
+        viewModelScope.launch { repository.addAftAttempt(attempt) }
+    }
+
+    fun updateAftAttempt(attempt: AftAttempt) {
+        viewModelScope.launch { repository.updateAftAttempt(attempt) }
+    }
+
+    fun deleteAftAttempt(attempt: AftAttempt) {
+        viewModelScope.launch { repository.deleteAftAttempt(attempt) }
+    }
 
     fun setRange(selected: TrendsRange) {
         range.value = selected

@@ -1,11 +1,14 @@
 package com.prestondihle.healthtracker
 
+import com.prestondihle.healthtracker.data.AftAttempt
+import com.prestondihle.healthtracker.data.AftLane
 import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.domain.AftEvent
-import com.prestondihle.healthtracker.domain.AftLane
 import com.prestondihle.healthtracker.domain.AftScorecard
 import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.AftTables
+import com.prestondihle.healthtracker.domain.Units
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -289,6 +292,95 @@ class AftScoringTest {
         val seventies = AftEvent.entries.associateWith { 70 }
         assertEquals(350, AftScorecard(AftLane.COMBAT, seventies).total)
         assertEquals(true, AftScorecard(AftLane.COMBAT, seventies).passes)
+    }
+
+    @Test
+    fun `a stored attempt is scored through the profile, deadlift included`() {
+        val attempt =
+            AftAttempt(
+                date = LocalDate.of(2026, 8, 27),
+                deadliftKg = Units.lbsToKg(250f),
+                hrpReps = 37,
+                sdcSeconds = 113,
+                plankSeconds = 150,
+                twoMileSeconds = 1028,
+            )
+
+        val card = AftScoring.scorecard(attempt, ageYears = 24, sex = Sex.MALE)
+
+        // The same five anchors as the mid-scale test, reached through storage:
+        // the deadlift makes a round trip via kilograms on the way.
+        assertEquals(81, card.scores[AftEvent.DEADLIFT])
+        assertEquals(80, card.scores[AftEvent.PUSH_UP])
+        assertEquals(80, card.scores[AftEvent.SPRINT_DRAG_CARRY])
+        assertEquals(80, card.scores[AftEvent.PLANK])
+        assertEquals(81, card.scores[AftEvent.TWO_MILE_RUN])
+        assertEquals(402, card.total)
+        assertEquals(true, card.passes)
+    }
+
+    @Test
+    fun `an event that was not done is absent rather than zero`() {
+        val attempt = AftAttempt(date = LocalDate.of(2026, 8, 27), hrpReps = 37, plankSeconds = 150)
+
+        val card = AftScoring.scorecard(attempt, ageYears = 24, sex = Sex.MALE)
+
+        assertEquals(setOf(AftEvent.PUSH_UP, AftEvent.PLANK), card.scores.keys)
+        // Two events in, so no verdict -- not a failing 160.
+        assertNull(card.passes)
+        assertEquals(160, card.total)
+    }
+
+    /**
+     * The same attempt, two lanes, two different answers.
+     *
+     * This is what makes scoring at read time worth the recomputation: the lane
+     * is a setting, and flipping it has to re-score everything already logged.
+     * A stored score would still be reporting the old lane with nothing on
+     * screen to say so.
+     */
+    @Test
+    fun `flipping the lane re-scores a stored attempt`() {
+        val attempt =
+            AftAttempt(
+                date = LocalDate.of(2026, 8, 27),
+                deadliftKg = Units.lbsToKg(160f),
+                hrpReps = 23,
+                sdcSeconds = mmss(2, 29),
+                plankSeconds = mmss(2, 30),
+                twoMileSeconds = mmss(19, 25),
+            )
+
+        val general = AftScoring.scorecard(attempt, 24, Sex.FEMALE, AftLane.GENERAL)
+        val combat = AftScoring.scorecard(attempt, 24, Sex.FEMALE, AftLane.COMBAT)
+
+        // Female general column: 82 + 80 + 80 + 80 + 80.
+        assertEquals(402, general.total)
+        assertEquals(true, general.passes)
+        // The same performances read against the male column are worth far less,
+        // and 350 is the bar rather than 300.
+        assertTrue("combat should score lower", combat.total < general.total)
+        assertEquals(false, combat.passes)
+    }
+
+    @Test
+    fun `the pass mark for an event is what the sixty-point row asks for`() {
+        // What the entry steppers open on, so it has to be the published minimum
+        // rather than something near it.
+        assertEquals(150, AftScoring.minimumFor(AftEvent.DEADLIFT, 24, Sex.MALE))
+        assertEquals(14, AftScoring.minimumFor(AftEvent.PUSH_UP, 24, Sex.MALE))
+        assertEquals(mmss(2, 31), AftScoring.minimumFor(AftEvent.SPRINT_DRAG_CARRY, 24, Sex.MALE))
+        assertEquals(mmss(1, 25), AftScoring.minimumFor(AftEvent.PLANK, 24, Sex.MALE))
+        assertEquals(mmss(19, 45), AftScoring.minimumFor(AftEvent.TWO_MILE_RUN, 24, Sex.MALE))
+        assertNull(AftScoring.minimumFor(AftEvent.DEADLIFT, null, Sex.MALE))
+    }
+
+    @Test
+    fun `a profile is scoreable on combat without a sex but not on general`() {
+        assertTrue(AftScoring.canScore(24, Sex.MALE, AftLane.GENERAL))
+        assertTrue(AftScoring.canScore(24, Sex.UNSPECIFIED, AftLane.COMBAT))
+        assertEquals(false, AftScoring.canScore(24, Sex.UNSPECIFIED, AftLane.GENERAL))
+        assertEquals(false, AftScoring.canScore(null, Sex.MALE, AftLane.COMBAT))
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.prestondihle.healthtracker.domain
 
+import com.prestondihle.healthtracker.data.AftAttempt
+import com.prestondihle.healthtracker.data.AftLane
 import com.prestondihle.healthtracker.data.Sex
 
 /**
@@ -22,27 +24,6 @@ enum class AftEvent(
     SPRINT_DRAG_CARRY("SDC", "Sprint-drag-carry", higherIsBetter = false, isTimed = true),
     PLANK("PLK", "Plank", higherIsBetter = true, isTimed = true),
     TWO_MILE_RUN("2MR", "Two-mile run", higherIsBetter = false, isTimed = true),
-}
-
-/**
- * Which standard a Soldier is held to.
- *
- * The two lanes share every event table and differ only in the total required,
- * plus who reads which column: the combat standard is sex-neutral, and the
- * column it is neutral to is the male one. See [AftTables].
- */
-enum class AftLane(val label: String, val minimumTotal: Int) {
-    /** Performance-normed by sex and age. Everyone not in a combat specialty. */
-    GENERAL("General", minimumTotal = 300),
-
-    /**
-     * Sex-neutral, still age-normed.
-     *
-     * ATP 7-22.01 lists the areas of concentration and MOSs it applies to: 11A,
-     * 11B, 11C, 11Z, 12A, 12B, 13A, 13F, 18A, 18B, 18C, 18D, 18E, 18F, 18Z, 19A,
-     * 19C, 19D, 19K and 19Z.
-     */
-    COMBAT("Combat", minimumTotal = 350),
 }
 
 /**
@@ -114,6 +95,65 @@ object AftScoring {
             i += 2
         }
         return best
+    }
+
+    /**
+     * The performance this event's 60-point row asks for, or null when the
+     * profile cannot place the Soldier.
+     *
+     * Used to open the entry steppers on the pass mark rather than on zero.
+     * Every timed event runs to hundreds of seconds and the run to over a
+     * thousand, so a stepper starting at zero is a stepper nobody reaches the
+     * useful part of -- and the pass mark is the number the reader is aiming at
+     * anyway.
+     */
+    fun minimumFor(event: AftEvent, ageYears: Int?, sex: Sex, lane: AftLane = AftLane.GENERAL): Int? {
+        val series = seriesFor(event, ageYears ?: return null, sex, lane) ?: return null
+        var i = 0
+        while (i < series.size) {
+            if (series[i] == MINIMUM_EVENT_SCORE) return series[i + 1]
+            i += 2
+        }
+        return null
+    }
+
+    /** Whether this profile can be scored on this lane at all. */
+    fun canScore(ageYears: Int?, sex: Sex, lane: AftLane = AftLane.GENERAL): Boolean =
+        ageYears != null && (lane == AftLane.COMBAT || sex != Sex.UNSPECIFIED)
+
+    /**
+     * Scores a stored attempt, every time it is read and never on the way in.
+     *
+     * Nothing about a score belongs on the row. The reader's age changes, their
+     * sex may be filled in after the fact, and the lane is a setting they can
+     * flip -- so a stored score is a claim about a profile that has since moved
+     * on, and there would be no way to tell a stale one from a fresh one by
+     * looking. Recomputing costs a scan of a few dozen integers.
+     *
+     * Events with nothing logged are simply absent from the result, which is
+     * what keeps an unfinished attempt distinguishable from a failed one.
+     */
+    fun scorecard(
+        attempt: AftAttempt,
+        ageYears: Int?,
+        sex: Sex,
+        lane: AftLane = AftLane.GENERAL,
+    ): AftScorecard {
+        val raw =
+            mapOf(
+                // Pounds, rounded: the table is published in them and the value is
+                // stored in kilograms like every other weight here.
+                AftEvent.DEADLIFT to attempt.deadliftKg?.let { Units.kgToWholeLbs(it) },
+                AftEvent.PUSH_UP to attempt.hrpReps,
+                AftEvent.SPRINT_DRAG_CARRY to attempt.sdcSeconds,
+                AftEvent.PLANK to attempt.plankSeconds,
+                AftEvent.TWO_MILE_RUN to attempt.twoMileSeconds,
+            )
+        val scores =
+            raw.mapNotNull { (event, value) ->
+                value?.let { score(event, it, ageYears, sex, lane)?.let { points -> event to points } }
+            }
+        return AftScorecard(lane, scores.toMap())
     }
 
     /** The row of tables for this event, or null when the general lane has no column to read. */

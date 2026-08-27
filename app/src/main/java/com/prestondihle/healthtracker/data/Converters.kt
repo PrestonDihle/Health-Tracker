@@ -72,4 +72,8 @@ class Converters {
     @TypeConverter fun fromSex(sex: Sex?): String? = sex?.name
 
     @TypeConverter fun toSex(name: String?): Sex? = name?.let { Sex.valueOf(it) }
+
+    @TypeConverter fun fromAftLane(lane: AftLane?): String? = lane?.name
+
+    @TypeConverter fun toAftLane(name: String?): AftLane? = name?.let { AftLane.valueOf(it) }
 }

@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -483,6 +483,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Which AFT standard to score against.
+         *
+         * A `NOT NULL` column with a seeded default, the same shape `sex` and
+         * `smoothGlucose` use -- there is no such thing as being on neither
+         * standard, so a nullable column would invent a state the feature does
+         * not have. `GENERAL` is the safer default of the two: it scores a
+         * combat-MOS Soldier a little generously on the total, where guessing
+         * the other way would tell everyone else they had failed a test they
+         * passed.
+         */
+        internal val migration16To17Statements =
+            listOf("ALTER TABLE `UserSettings` ADD COLUMN `aftLane` TEXT NOT NULL DEFAULT 'GENERAL'")
+
+        private val MIGRATION_16_17 =
+            object : Migration(16, 17) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration16To17Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -512,6 +533,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_13_14,
                                 MIGRATION_14_15,
                                 MIGRATION_15_16,
+                                MIGRATION_16_17,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

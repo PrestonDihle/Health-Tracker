@@ -416,6 +416,9 @@ class MigrationSchemaTest {
             // The profile columns on UserSettings -- three nullable, plus `sex`
             // NOT NULL with a seeded default in the same shape smoothGlucose used.
             AppDatabase.migration13To14Statements.forEach { raw.execSQL(it) }
+            // The AFT lane, the fifth alteration and NOT NULL with its own seeded
+            // default -- there is no such thing as being on neither standard.
+            AppDatabase.migration16To17Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -453,6 +456,7 @@ class MigrationSchemaTest {
             AppDatabase.migration7To8Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration8To9Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration13To14Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration16To17Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
@@ -476,12 +480,15 @@ class MigrationSchemaTest {
                     assertEquals(80, it.getInt(7))
                     assertEquals(480, it.getInt(8))
                 }
-            raw.query("SELECT `smoothGlucose`, `sex` FROM `UserSettings`").use {
+            raw.query("SELECT `smoothGlucose`, `sex`, `aftLane` FROM `UserSettings`").use {
                 it.moveToNext()
                 assertEquals(0, it.getInt(0))
                 // `sex` is NOT NULL, so an existing row needs the seeded default or
                 // the migration fails outright -- the smoothGlucose case again.
                 assertEquals("UNSPECIFIED", it.getString(1))
+                // And the lane, for the same reason: an upgrading user lands on the
+                // general standard rather than on no standard at all.
+                assertEquals("GENERAL", it.getString(2))
             }
         } finally {
             db.close()

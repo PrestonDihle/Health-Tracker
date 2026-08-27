@@ -12,9 +12,9 @@ reps and reading.
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the macro trend |
-| **Activity** | The movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
+| **Activity** | The Army Fitness Test scorecard, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
-| **Settings** | Your profile, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
+| **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
 
 **Cards are grouped by subject, and Log is the exception that proves it.**
 Anything with a subject of its own sits next to what it feeds: the caffeine
@@ -198,6 +198,44 @@ trace each time the chart is drawn. Cached figures would be wrong the moment the
 maximum heart rate is edited, and there would be a table to re-key every time it
 was. A run the watch recorded without a heart-rate trace draws nothing rather
 than drawing a guess.
+
+## Army Fitness Test
+
+Activity carries an AFT scorecard: enter the five raw results — three-rep max
+deadlift, hand-release push-ups, sprint-drag-carry, plank and two-mile run — and
+it scores each out of 100 against the Army's published tables, totals them out of
+500, and says whether that passes.
+
+Scoring comes from HQDA EXORD 218-25 Annex B, effective 1 June 2025. It is a
+**step lookup, never an interpolation**: the tables give a minimum performance
+for each reachable point value and say nothing about the gaps, so 335 lb earns
+what 330 earns. Awarding a 98 the Army has no row for would be worse than useless
+on a figure whose whole purpose is to match a scorecard someone else is holding.
+
+**Which standard applies is a setting**, on the "You" card under Settings. The
+general standard is normed by age and sex and needs 300 overall; the combat
+standard is sex-neutral, still age-normed, and needs 350. There is no third set
+of numbers — every published table has one `M | C` column and one `F` column per
+age band, so "sex-neutral" means a woman in a combat specialty reads the male
+column. The two standards differ in the total required and in which column she
+reads, never in what a given performance is worth.
+
+**Sixty in every event is required either way**, and that is not implied by the
+total: 500 points with a 59 in one event is a failure. The card names the event
+closest to the floor and by how much, since that is the one another session
+actually moves the verdict on.
+
+Nothing about a score is stored — only the five raw results and the date. Every
+point value is recomputed when the card is read, so a birthday, a filled-in
+profile or a change of standard re-scores every past test in place. A stored
+score would be a claim about a profile that has since moved on, and nothing on
+screen could tell that apart from a current one.
+
+A test can be logged as it goes. All five events are optional, and one left out
+stays out: an attempt three events in reads as unfinished rather than as a
+failing 180, and only finished tests are plotted on the trend below. That chart
+spans the tests themselves rather than the tab's 7-to-90-day window, because a
+record test happens about twice a year.
 
 ## Fast adherence
 

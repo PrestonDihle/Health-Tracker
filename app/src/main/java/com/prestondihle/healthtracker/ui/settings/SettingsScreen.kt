@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.prestondihle.healthtracker.data.AftLane
 import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.data.UnitSystemEnum
 import kotlin.math.roundToInt
@@ -87,6 +88,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                 )
                 val settings = state.settings
 
+                // Every figure here shows a sensible number before one is stored, which
+                // makes an unset profile look like a filled one -- and the AFT card
+                // sends the reader to this screen precisely because something is
+                // missing. Saying so under the value is the difference between a
+                // default and a decision.
+                val unset = "not set yet -- nudge to save"
+
                 IntStepper(
                     label = "Max heart rate",
                     value = settings.maxHeartRateBpm ?: 190,
@@ -96,8 +104,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                     range = 100..230,
                     valueFormatter = { "$it bpm" },
                     supportingText =
-                        settings.ageYears?.let { "220 − age ≈ ${220 - it} bpm" }
-                            ?: "what your runs are zoned against",
+                        when {
+                            settings.maxHeartRateBpm == null -> unset
+                            settings.ageYears != null ->
+                                "220 − age ≈ ${220 - settings.ageYears} bpm"
+                            else -> "what your runs are zoned against"
+                        },
                 )
                 HorizontalDivider()
 
@@ -107,6 +119,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                     onValueChange = { viewModel.saveSettings(settings.copy(ageYears = it)) },
                     range = 10..120,
                     valueFormatter = { "$it yr" },
+                    // The Army Fitness Test cannot pick an age band without this, so
+                    // an unset age is the one that actually stops something working.
+                    supportingText = if (settings.ageYears == null) unset else "sets your AFT age band",
                 )
                 HorizontalDivider()
 
@@ -123,6 +138,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                         },
                         range = 36..96,
                         valueFormatter = { "${it / 12}' ${it % 12}\"" },
+                        supportingText = if (settings.heightCm == null) unset else null,
                     )
                 } else {
                     IntStepper(
@@ -133,6 +149,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                         },
                         range = 90..250,
                         valueFormatter = { "$it cm" },
+                        supportingText = if (settings.heightCm == null) unset else null,
                     )
                 }
                 HorizontalDivider()
@@ -151,6 +168,26 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                                 label = { Text(label) },
                             )
                         }
+                }
+
+                HorizontalDivider()
+
+                Text("Fitness test standard", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Combat specialties are scored sex-neutral against the male column " +
+                        "and need 350 rather than 300 overall. Past tests re-score the " +
+                        "moment this changes.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AftLane.entries.forEach { option ->
+                        FilterChip(
+                            selected = settings.aftLane == option,
+                            onClick = { viewModel.saveSettings(settings.copy(aftLane = option)) },
+                            label = { Text(option.label) },
+                        )
+                    }
                 }
             }
                     },

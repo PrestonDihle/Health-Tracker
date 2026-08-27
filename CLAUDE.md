@@ -666,9 +666,44 @@ with itself however wrong both are. One anchor per event at 100, at the 60-point
 -scale, since a table shifted by a row still gets 100 right and one read from the wrong column still
 gets the shape right.
 
+**Nothing about a score is ever stored.** `AftAttempt` holds only the five raw results and the date;
+every point value, total and verdict is recomputed on read by `AftScoring.scorecard`. The profile it
+is scored through moves — a birthday changes the age band, sex may be filled in after the first
+attempt was logged, and the lane is a setting the reader can flip — so a stored score is a claim
+about a profile that has since changed, and nothing on screen could tell a stale one from a current
+one. Flipping the lane in Settings re-scores every past attempt in place, which is the behaviour
+that makes the card worth trusting. The recomputation is a scan of a few dozen integers.
+
+The five raw columns are **all nullable**, because the events are done in order over two hours and a
+test can genuinely stop halfway. That is why `AftScorecard.passes` is a `Boolean?`: an attempt three
+events in is unfinished, not failed, and rendering the two the same would be the card's worst
+possible lie. `isComplete` is what separates them, and only complete attempts are plotted on the
+trend — a part-logged day would otherwise draw as a collapse in fitness.
+
+**The deadlift is stored in kilograms and scored in pounds.** Storage stays metric like every other
+weight here; the table is published in pounds and is entirely in tens of them, so the entry stepper
+moves in 10 lb steps and the kilogram value always converts back to a clean multiple of ten. A
+stepper in kilograms would land between two published rows and quietly score the row below.
+
+**The card is on Activity and its trend ignores `TrendsRange`.** A record test happens about twice a
+year, so a 7-to-90-day window would show one attempt or none; the span the chart needs is the
+attempts themselves, which is why `TrendsViewModel.aft` is its own flow rather than part of
+`uiState`. Its axis floor is 250 rather than 0 for the same reason the glucose plot stops at 180: a
+finished test is five events at 60 or better, so the bottom half of a 0-500 axis is space no point
+ever occupies, and spending it flattens the range that actually moves. The 300 and 350 rules are
+dashed because they are published figures, the same rule that keeps 120/80 dashed and a self-chosen
+glucose reference solid. Both lanes' rules are drawn even though only one applies, since the
+distance to the other is exactly what somebody changing lanes is asking about.
+
+The entry steppers open on **that event's own 60-point requirement** rather than on zero
+(`AftScoring.minimumFor`). The run is over a thousand seconds and the deadlift over a hundred
+pounds, so zero is a long way from anywhere useful, and the pass mark is the figure being aimed at
+anyway. Each stepper shows the points its current value would earn as it moves, which is the only
+question being asked while entering a plank time.
+
 ### Room
 
-Version 16, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 17, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -728,6 +763,14 @@ scoring table are both in pounds, and `Units.kgToWholeLbs` is the one-way door b
 rather than truncates for the reason `mlToWholeOz` does, with more riding on it: 150 lb round-trips
 through `Float` as 149.99999, and truncating would read the pass mark as a failure. `AftAttemptTest`
 walks every ten-pound step of the published table through storage and back to prove it.
+
+`MIGRATION_16_17` adds `UserSettings.aftLane`, the fifth alteration to that table and the third
+`NOT NULL`-with-a-seeded-default on it, after `smoothGlucose` and `sex`. It seeds `'GENERAL'`
+because there is no such thing as being on neither standard, and because that is the safer of the
+two to guess wrong: it scores a combat-MOS Soldier a little generously on the total, where guessing
+the other way would tell everyone else they had failed a test they passed. It joins the UserSettings
+replay in `MigrationSchemaTest` rather than taking a test of its own — that table is altered five
+times now and only the full replay catches a gap.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
