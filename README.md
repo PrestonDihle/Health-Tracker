@@ -16,11 +16,18 @@ reps and reading.
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
 
-**Logging and looking are split down the middle**, which is the arrangement the
-six tabs exist for: everything you type lives on Log, and the trend it feeds
-lives on the tab that reads it. Grip strength is the clearest case — the stepper
-is on Log, the both-hands chart is on Activity — and the split is what stops a
-screen being half a form and half a dashboard, which is what Wellness had become.
+**Cards are grouped by subject, and Log is the exception that proves it.**
+Anything with a subject of its own sits next to what it feeds: the caffeine
+stepper is on Fuel under the curve it moves, the glucose entry is on Wellness
+beside its chart. What was left over is a set of measurements sharing nothing but
+the fact that they are typed by hand — waist, weight, grip, blood pressure,
+vibe/energy/focus, pages, reps — and those are on Log, because they are entered
+in a batch and a batch spread over four tabs is four times the walking.
+
+So grip strength is split: the stepper on Log, the both-hands chart on Activity.
+That is the cost of the arrangement and it is paid deliberately, since the
+alternative is the screen Wellness used to be — half form, half dashboard, and
+too long to find anything on either way.
 
 Two things follow. Log and Wellness share one view model, so a weight typed on
 one is on the other's chart without a sync in between. And the day's totals
