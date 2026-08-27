@@ -553,6 +553,43 @@ class HealthConnectDataSource(
             .onFailure { Log.d(TAG, "mile pace read failed", it) }
             .getOrNull()
 
+    override suspend fun readRuns(from: Instant, to: Instant): List<RunSession> {
+        val active = client ?: return emptyList()
+        return active.runningSessions(from, to)
+    }
+
+    private suspend fun HealthConnectClient.runningSessions(
+        from: Instant,
+        to: Instant,
+    ): List<RunSession> =
+        runCatching {
+                readRecords(
+                        ReadRecordsRequest(
+                            recordType = ExerciseSessionRecord::class,
+                            timeRangeFilter = TimeRangeFilter.between(from, to),
+                        )
+                    )
+                    .records
+                    .filter { it.exerciseType == ExerciseSessionRecord.EXERCISE_TYPE_RUNNING }
+                    .map { session ->
+                        RunSession(
+                            start = session.startTime,
+                            end = session.endTime,
+                            distanceMeters =
+                                aggregateOrNull(
+                                        DistanceRecord.DISTANCE_TOTAL,
+                                        TimeRangeFilter.between(
+                                            session.startTime,
+                                            session.endTime,
+                                        ),
+                                    )
+                                    ?.inMeters,
+                        )
+                    }
+            }
+            .onFailure { Log.d(TAG, "run read failed", it) }
+            .getOrDefault(emptyList())
+
     companion object {
         val PERMISSIONS: Set<String> =
             setOf(

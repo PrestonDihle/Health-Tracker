@@ -14,6 +14,7 @@ import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.WaistEntry
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
+import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.StackedBar
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import java.time.LocalDate
@@ -43,6 +45,9 @@ enum class TrendsRange(val label: String, val days: Long) {
     MONTH("30 days", 30),
     THREE_MONTHS("90 days", 90),
 }
+
+/** Fallback max heart rate when the profile has neither a figure nor an age to derive one from. */
+private const val DEFAULT_MAX_HEART_RATE = 190
 
 data class TrendsUiState(
     val range: TrendsRange = TrendsRange.TWO_WEEKS,
@@ -229,6 +234,36 @@ class TrendsViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = TrendsUiState(),
+            )
+
+    /**
+     * The runs in the selected window, zoned against the profile's max heart rate.
+     *
+     * Kept apart from [uiState] because it is fed by a live Health Connect read
+     * rather than the cached Room flows the rest of the trends draw from, and
+     * re-runs whenever the window or the max heart rate changes -- the latter so
+     * editing the figure in Settings re-colours the bars without a resync.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val runs: StateFlow<List<RunBreakdown>> =
+        combine(range, repository.getUserSettings()) { selected, settings -> selected to settings }
+            .mapLatest { (selected, settings) ->
+                val end = LocalDate.now(zoneId)
+                val start = end.minusDays(selected.days - 1)
+                val maxHeartRate =
+                    settings?.maxHeartRateBpm
+                        ?: settings?.ageYears?.let { 220 - it }
+                        ?: DEFAULT_MAX_HEART_RATE
+                repository.getRunBreakdowns(
+                    from = start.atStartOfDay(zoneId).toInstant(),
+                    to = end.plusDays(1).atStartOfDay(zoneId).toInstant(),
+                    maxHeartRate = maxHeartRate,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
             )
 
     fun setRange(selected: TrendsRange) {

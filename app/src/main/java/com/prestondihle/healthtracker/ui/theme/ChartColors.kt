@@ -44,6 +44,12 @@ data class ChartColors(
     val gripNonDominant: Color,
     /** The hypnogram trace, and the ground the master graph shades asleep hours in. */
     val sleep: Color,
+    // The four run-intensity zones, low to high, as a green-through-red ramp so a
+    // stack reads harder the more of it is warm.
+    val runEasy: Color,
+    val runModerate: Color,
+    val runHard: Color,
+    val runIntense: Color,
 )
 
 /** The palette as it has always been: mid-toned, for the alabaster background. */
@@ -69,6 +75,10 @@ val LightChartColors =
         gripDominant = GripDominantSeries,
         gripNonDominant = GripNonDominantSeries,
         sleep = SleepSeries,
+        runEasy = Color(0xFF5B9A6B),
+        runModerate = Color(0xFF4E86AB),
+        runHard = Color(0xFFE08A3C),
+        runIntense = Color(0xFFC0392B),
     )
 
 /**
@@ -113,6 +123,10 @@ val DarkChartColors =
         // wash at a sixth of its opacity. Lifted far enough that the wash still
         // reads as blue rather than as a slightly paler patch of background.
         sleep = Color(0xFF7FA9C9),
+        runEasy = Color(0xFF7FBF8F),
+        runModerate = Color(0xFF6FA8D0),
+        runHard = Color(0xFFE8A860),
+        runIntense = Color(0xFFE06C6C),
     )
 
 /**

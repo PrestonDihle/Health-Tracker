@@ -35,6 +35,8 @@ import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.GlucoseGaps
 import com.prestondihle.healthtracker.domain.MealDuplicates
+import com.prestondihle.healthtracker.domain.RunBreakdown
+import com.prestondihle.healthtracker.domain.RunZones
 import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.domain.SleepStageInterval
 import com.prestondihle.healthtracker.health.HealthDataSource
@@ -94,6 +96,32 @@ class TrackerRepository(
         dao.getHealthSnapshots(start, end)
 
     fun getBestMileSecondsAllTime(): Flow<Int?> = dao.getBestMileSecondsAllTime()
+
+    /**
+     * The runs in a window, each broken into minutes per intensity zone.
+     *
+     * Read live from Health Connect rather than cached: runs are few, and the
+     * zones depend on a max heart rate that changes in settings -- recomputing on
+     * demand keeps the chart honest with no table to migrate or re-key when that
+     * number moves. A run's heart rate is read over its own span, so a run with
+     * no trace simply comes back empty rather than wrong.
+     */
+    suspend fun getRunBreakdowns(
+        from: Instant,
+        to: Instant,
+        maxHeartRate: Int,
+    ): List<RunBreakdown> {
+        val runs = runCatching { healthDataSource.readRuns(from, to) }.getOrDefault(emptyList())
+        return runs
+            .map { run ->
+                val samples =
+                    runCatching { healthDataSource.readHeartRate(run.start, run.end) }
+                        .getOrDefault(emptyList())
+                        .map { it.time to it.bpm }
+                RunZones.breakdown(run.start, run.end, run.distanceMeters, samples, maxHeartRate)
+            }
+            .sortedBy { it.start }
+    }
 
     // ----- Blood pressure ----------------------------------------------------
 

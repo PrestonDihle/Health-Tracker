@@ -27,6 +27,7 @@ import com.prestondihle.healthtracker.ui.components.MultiLineChart
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val runs by viewModel.runs.collectAsStateWithLifecycle()
     val chartColors = LocalChartColors.current
 
     LazyColumn(
@@ -57,6 +58,11 @@ fun TrendsScreen(viewModel: TrendsViewModel) {
                 )
             }
         }
+
+        // Runs, each bar a session split into its heart-rate zones. Read live
+        // from Health Connect and zoned against the max heart rate in Settings,
+        // so it fills in once there are runs with a heart-rate trace.
+        item { RunsTrendCard(runs) }
 
         // Both hands on one chart, because the comparison between them is the
         // point: a gap that widens over months says something neither line says

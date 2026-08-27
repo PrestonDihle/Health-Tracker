@@ -3,6 +3,8 @@ package com.prestondihle.healthtracker.ui.trends
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
@@ -26,9 +29,11 @@ import com.prestondihle.healthtracker.ui.components.BarChart
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.LineChart
+import com.prestondihle.healthtracker.ui.components.StackedBar
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
+import java.time.ZoneId
 
 // ---------------------------------------------------------------------------
 // Reusable trend cards.
@@ -165,6 +170,48 @@ internal fun SleepTrendCard(state: TrendsUiState) {
             goalLine = state.goals.sleepMinutesGoal?.let { it / 60f },
             modifier = Modifier.fillMaxWidth().height(140.dp),
         )
+    }
+}
+
+/**
+ * One stacked bar per run, as tall as the run is long, split by heart-rate zone.
+ *
+ * Green through red, low effort to high, so a bar reads harder the warmer it is.
+ * The height is minutes rather than distance, which is the choice that lets a
+ * short hard interval and a long easy one look as different as they felt.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun RunsTrendCard(runs: List<RunBreakdown>) {
+    val chartColors = LocalChartColors.current
+    val zone = ZoneId.systemDefault()
+    val legend =
+        listOf(
+            "Easy" to chartColors.runEasy,
+            "Moderate" to chartColors.runModerate,
+            "Hard" to chartColors.runHard,
+            "Intense" to chartColors.runIntense,
+        )
+    TrendCard(title = "Runs", subtitle = "minutes, by heart-rate zone") {
+        StackedBarChart(
+            bars =
+                runs.map { StackedBar(date = it.start.atZone(zone).toLocalDate(), segments = it.segments) },
+            colors = legend.map { it.second },
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            legend.forEach { (label, color) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(modifier = Modifier.size(8.dp)) { drawCircle(color) }
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 

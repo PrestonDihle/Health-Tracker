@@ -42,6 +42,9 @@ data class MealSample(
 /** One heart rate reading at one instant, before bucketing. */
 data class HeartRateSample(val time: Instant, val bpm: Int)
 
+/** One running session, with its distance where the source recorded one. */
+data class RunSession(val start: Instant, val end: Instant, val distanceMeters: Double?)
+
 /**
  * One night as recorded, with the stages it was broken into.
  *
@@ -183,4 +186,13 @@ interface HealthDataSource {
      * boundary the way an aggregate splits it.
      */
     suspend fun readSleepSessions(from: Instant, to: Instant): List<SleepSessionSample>
+
+    /**
+     * Running sessions overlapping a window, newest need not be first.
+     *
+     * Just the session bounds and distance; the heart rate that zones each run is
+     * read separately over the session's own span, so nothing here depends on the
+     * runner's max heart rate and the zones can be recomputed when it changes.
+     */
+    suspend fun readRuns(from: Instant, to: Instant): List<RunSession>
 }
