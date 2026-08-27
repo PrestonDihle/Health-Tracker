@@ -106,9 +106,10 @@ being that two words do not fit a sixth of a phone's width.
 own screen: **Today** the master graph, **Log** every hand-entry control (`LogScreen`), **Fuel**
 fasting with the consumption and macro cards, **Activity** the movement trends
 (`TrendsScreen`), **Wellness** the display cards with the vitals, mood and pages trends
-(`WellnessScreen`), **Settings** the config. Activity is only the *movement* trends — steps, runs,
-grip, pushups, air squats; waist, weight, blood pressure, resting heart rate and sleep went to
-Wellness and macros to Fuel, which is why `TrendsScreen` backs a tab whose name it does not share.
+(`WellnessScreen`), **Settings** the config. Activity is the *movement* trends — steps, runs, grip,
+pushups, air squats — plus the AFT scorecard, which is the one thing there that is a test rather
+than a trend; waist, weight, blood pressure, resting heart rate and sleep went to Wellness and
+macros to Fuel, which is why `TrendsScreen` backs a tab whose name it does not share.
 The cards moved a tab at a time — never unhooked before their replacement existed, on the phone
 holding the only copy of this data — and one still carries a home that outgrew its name (below).
 
@@ -1161,7 +1162,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
-`GlucoseMetricsTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
+`GlucoseMetricsTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
@@ -1278,9 +1279,10 @@ asserted on a screen that does not tick, which is why the glucose smoothing and 
 covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
 
 **That ticker now belongs to `FuelViewModel`**, which followed the fast card off Wellness, and
-Fuel is the longest tab in the app at eleven cards — so it has the problem worse than Wellness ever
-did. (Thirteen until the extended-fast entries moved inside their own card for the reordering; the
-count moved, the problem did not.) Wellness still ticks too, which is what the mood card's direct
+Fuel is the longest tab in the app at twelve cards, tying Settings — so it has the problem worse
+than Wellness ever did. (The count keeps moving: thirteen before the extended-fast entries moved
+inside their own card, eleven after, twelve again with the blood sugar summary. The problem does
+not move, so do not read the figure as the point.) Wellness still ticks too, which is what the mood card's direct
 composition is for. Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master
 graph's suite can scroll and wait on idle at all.
@@ -1304,8 +1306,8 @@ not: the class fails the same way on a commit that had passed all 199 an hour ea
 `git stash push -u`, run, `git stash pop`. Cheap, and it separates "my change did this" from "this
 machine cannot run this suite today" in one go, which neither the failing set nor a re-run can.
 
-When the render suites cannot be trusted, the other **24 classes and 181 tests run in 40 seconds**
-and are unaffected — they render no Compose. Naming them explicitly with repeated `--tests` flags
+When the render suites cannot be trusted, the other **32 classes and 259 tests run in well under a
+minute** and are unaffected — they render no Compose. Naming them explicitly with repeated `--tests` flags
 gives a real gate for everything except whether a screen draws, which no test here was answering
 anyway. Say plainly in the commit which of the two was verified; a test count that quietly means
 something narrower than usual is worse than no count.
