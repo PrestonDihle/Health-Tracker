@@ -69,6 +69,9 @@ import com.prestondihle.healthtracker.ui.components.ScaleDescriptors
 import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.components.TrackerCard
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
+import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
+import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
 import com.prestondihle.healthtracker.ui.trends.BloodPressureTrendCard
@@ -87,6 +90,7 @@ import kotlinx.coroutines.launch
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     trendsViewModel: TrendsViewModel,
+    orderViewModel: CardOrderViewModel,
     snackbarHostState: SnackbarHostState,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -94,6 +98,7 @@ fun DashboardScreen(
     // heart rate, sleep) from the same trends source Activity uses, so they read
     // the same wherever they appear.
     val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
+    val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     val permissionLauncher =
@@ -130,44 +135,43 @@ fun DashboardScreen(
             }
         }
 
-        item { ActivityCard(state = state, onRefresh = viewModel::refreshHealth) }
-
-        // Directly under Activity, which is where the night's duration is
-        // already quoted as a single figure. The two are the same subject at two
-        // resolutions, and putting the breakdown anywhere else on this screen
-        // leaves them disagreeing across a scroll.
-        item { SleepCard(state = state) }
-
-        item {
-            MetabolicCard(
-                state = state,
-                onWindowChange = viewModel::setGlucoseWindow,
-                onSmoothChange = viewModel::setSmoothGlucose,
-                onAddKetone = {
-                    viewModel.addKetone(it)
-                    toast("Logged ${Ketones.format(it)} ${Ketones.UNIT}")
-                },
-                onAddGlucose = {
-                    viewModel.addBloodSugar(it)
-                    toast("Logged $it ${Glucose.UNIT}")
-                },
-            )
-        }
-
-        // Body and vitals trends. The controls that log these (waist, grip, blood
-        // pressure) now live on the Log tab; what stays here is the read of where
-        // they have gone over the last fortnight.
-        item { WaistTrendCard(trends) }
-        item { WeightTrendCard(trends) }
-        item { BloodPressureTrendCard(trends) }
-        item { RestingHeartRateTrendCard(trends) }
-        item { SleepTrendCard(trends) }
-
-        // The mood trend, still fed by the sliders now on the Log tab.
-        item { MoodTrendCard(state = state) }
-
-        // Pages read per day.
-        item { ReadingTrendCard(state = state) }
+        // The body and vitals trends read the last fortnight; the controls that
+        // log them live on the Log tab. Sleep sits under Activity by default,
+        // where the night's duration is already quoted -- the same subject at two
+        // resolutions -- but the reader is free to move any of these.
+        reorderableCards(
+            cards =
+                listOf(
+                    ReorderableCard("activity") {
+                        ActivityCard(state = state, onRefresh = viewModel::refreshHealth)
+                    },
+                    ReorderableCard("sleep") { SleepCard(state = state) },
+                    ReorderableCard("metabolic") {
+                        MetabolicCard(
+                            state = state,
+                            onWindowChange = viewModel::setGlucoseWindow,
+                            onSmoothChange = viewModel::setSmoothGlucose,
+                            onAddKetone = {
+                                viewModel.addKetone(it)
+                                toast("Logged ${Ketones.format(it)} ${Ketones.UNIT}")
+                            },
+                            onAddGlucose = {
+                                viewModel.addBloodSugar(it)
+                                toast("Logged $it ${Glucose.UNIT}")
+                            },
+                        )
+                    },
+                    ReorderableCard("waistTrend") { WaistTrendCard(trends) },
+                    ReorderableCard("weightTrend") { WeightTrendCard(trends) },
+                    ReorderableCard("bloodPressureTrend") { BloodPressureTrendCard(trends) },
+                    ReorderableCard("restingHeartRateTrend") { RestingHeartRateTrendCard(trends) },
+                    ReorderableCard("sleepTrend") { SleepTrendCard(trends) },
+                    ReorderableCard("moodTrend") { MoodTrendCard(state = state) },
+                    ReorderableCard("readingTrend") { ReadingTrendCard(state = state) },
+                ),
+            savedOrder = savedOrder,
+            onMove = orderViewModel::move,
+        )
 
         item { Spacer(Modifier.height(8.dp)) }
     }

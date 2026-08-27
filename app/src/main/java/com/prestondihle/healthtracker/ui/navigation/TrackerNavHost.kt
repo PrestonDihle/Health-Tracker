@@ -57,6 +57,14 @@ import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
  * below so a tab switch does not spin up a second copy -- and, for the dashboard,
  * a second Health Connect sync.
  */
+/** One [CardOrderViewModel] per tab, keyed by route so each tab keeps its own saved order. */
+@Composable
+private fun cardOrderVm(appContainer: AppContainer, route: String): CardOrderViewModel =
+    viewModel(
+        key = "order-$route",
+        factory = CardOrderViewModel.provideFactory(appContainer.trackerRepository, route),
+    )
+
 enum class Screen(val route: String, val label: String, val icon: ImageVector) {
     Today("today", "Today", Icons.Filled.QueryStats),
     Log("log", "Log", Icons.Filled.EditNote),
@@ -118,19 +126,14 @@ fun TrackerNavHost(appContainer: AppContainer) {
                     viewModel(
                         factory = TodayViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                TodayScreen(vm)
+                TodayScreen(vm, cardOrderVm(appContainer, Screen.Today.route))
             }
             composable(Screen.Log.route) {
-                val orderVm: CardOrderViewModel =
-                    viewModel(
-                        key = "order-${Screen.Log.route}",
-                        factory =
-                            CardOrderViewModel.provideFactory(
-                                appContainer.trackerRepository,
-                                Screen.Log.route,
-                            ),
-                    )
-                LogScreen(dashboardViewModel, snackbarHostState, orderVm)
+                LogScreen(
+                    dashboardViewModel,
+                    snackbarHostState,
+                    cardOrderVm(appContainer, Screen.Log.route),
+                )
             }
             // Fuel's own screen: fasting, hydration, caffeine, creatine,
             // supplements, and the macro trend at the foot.
@@ -143,12 +146,19 @@ fun TrackerNavHost(appContainer: AppContainer) {
             }
             // Activity: the movement trends -- steps, grip strength, pushups and
             // air squats.
-            composable(Screen.Activity.route) { TrendsScreen(trendsViewModel) }
+            composable(Screen.Activity.route) {
+                TrendsScreen(trendsViewModel, cardOrderVm(appContainer, Screen.Activity.route))
+            }
             // Wellness: the display cards (activity summary, last night's sleep,
             // glucose and ketones) with the body and vitals trends, the mood
             // trend and the movement log.
             composable(Screen.Wellness.route) {
-                DashboardScreen(dashboardViewModel, trendsViewModel, snackbarHostState)
+                DashboardScreen(
+                    dashboardViewModel,
+                    trendsViewModel,
+                    cardOrderVm(appContainer, Screen.Wellness.route),
+                    snackbarHostState,
+                )
             }
             composable(Screen.Settings.route) {
                 val vm: SettingsViewModel =

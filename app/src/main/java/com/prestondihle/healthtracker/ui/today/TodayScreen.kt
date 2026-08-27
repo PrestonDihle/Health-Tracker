@@ -63,6 +63,9 @@ import com.prestondihle.healthtracker.ui.components.Metric
 import com.prestondihle.healthtracker.ui.components.SeriesKind
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.components.TrackerCard
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
+import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
+import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.ChartColors
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
@@ -79,8 +82,9 @@ private val ChartHeight = 300.dp
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TodayScreen(viewModel: TodayViewModel) {
+fun TodayScreen(viewModel: TodayViewModel, orderViewModel: CardOrderViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = CardGap),
@@ -115,20 +119,27 @@ fun TodayScreen(viewModel: TodayViewModel) {
             }
         }
 
-        item { ActivityCard(state = state, onRefresh = viewModel::refresh) }
-
-        item {
-            CombinedChartCard(
-                state = state,
-                onToggleSeries = viewModel::setSeriesVisible,
-                onToggleAxis = viewModel::toggleLabelledAxis,
-                onPan = viewModel::panBy,
-                onBackToNow = viewModel::backToNow,
-            )
-        }
-
         // "About the food curves" moved to the foot of Settings and the meal
         // list to Log; both are shared from ui.components now.
+        reorderableCards(
+            cards =
+                listOf(
+                    ReorderableCard("activity") {
+                        ActivityCard(state = state, onRefresh = viewModel::refresh)
+                    },
+                    ReorderableCard("chart") {
+                        CombinedChartCard(
+                            state = state,
+                            onToggleSeries = viewModel::setSeriesVisible,
+                            onToggleAxis = viewModel::toggleLabelledAxis,
+                            onPan = viewModel::panBy,
+                            onBackToNow = viewModel::backToNow,
+                        )
+                    },
+                ),
+            savedOrder = savedOrder,
+            onMove = orderViewModel::move,
+        )
     }
 }
 
