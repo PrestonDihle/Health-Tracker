@@ -38,8 +38,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SleepSessionEntry::class,
         SleepStageEntry::class,
         CardOrderEntry::class,
+        AftAttempt::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -450,6 +451,38 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * One row per Army Fitness Test attempt.
+         *
+         * A new table, so the DDL is Room's own and there is no `ALTER TABLE`
+         * default to keep in step. Every event column is nullable because a test
+         * day is logged as it happens and may not finish -- and because a missing
+         * event has to stay distinguishable from a zero, which is a real score.
+         *
+         * The index is on `date` and is deliberately *not* unique: a retest is a
+         * second attempt, not a correction, and a unique index would make the
+         * second one fail to insert on the day it matters most.
+         */
+        internal val migration15To16Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `AftAttempt` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`date` INTEGER NOT NULL, " +
+                    "`deadliftKg` REAL, " +
+                    "`hrpReps` INTEGER, " +
+                    "`sdcSeconds` INTEGER, " +
+                    "`plankSeconds` INTEGER, " +
+                    "`twoMileSeconds` INTEGER)",
+                "CREATE INDEX IF NOT EXISTS `index_AftAttempt_date` ON `AftAttempt` (`date`)",
+            )
+
+        private val MIGRATION_15_16 =
+            object : Migration(15, 16) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration15To16Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -478,6 +511,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_12_13,
                                 MIGRATION_13_14,
                                 MIGRATION_14_15,
+                                MIGRATION_15_16,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

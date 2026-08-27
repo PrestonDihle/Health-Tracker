@@ -1,5 +1,6 @@
 package com.prestondihle.healthtracker.repository
 
+import com.prestondihle.healthtracker.data.AftAttempt
 import com.prestondihle.healthtracker.data.BloodPressureReading
 import com.prestondihle.healthtracker.data.BloodSugarReading
 import com.prestondihle.healthtracker.data.CaffeineIntake
@@ -672,6 +673,27 @@ class TrackerRepository(
     /** Rewrites the whole order for [tab], each id's slot its index in [cardIds]. */
     suspend fun setCardOrder(tab: String, cardIds: List<String>) =
         dao.upsertCardOrder(cardIds.mapIndexed { index, id -> CardOrderEntry(tab, id, index) })
+
+    // ----- Army Fitness Test -------------------------------------------------
+
+    /** Every attempt, oldest first, which is the order the score trend plots. */
+    fun getAftAttempts(): Flow<List<AftAttempt>> = dao.getAftAttempts()
+
+    /** The most recent attempt, or null before the first one is logged. */
+    fun getLatestAftAttempt(): Flow<AftAttempt?> = dao.getLatestAftAttempt()
+
+    /** Returns the stored id so a just-logged attempt can be added to without a re-query. */
+    suspend fun addAftAttempt(attempt: AftAttempt): Long = dao.insertAftAttempt(attempt)
+
+    suspend fun updateAftAttempt(attempt: AftAttempt) = dao.updateAftAttempt(attempt)
+
+    /**
+     * Removes the attempt outright.
+     *
+     * Hand-entered with nothing upstream to re-offer it, so this is a real
+     * delete like hydration's and unlike a synced meal's hidden flag.
+     */
+    suspend fun deleteAftAttempt(attempt: AftAttempt) = dao.deleteAftAttempt(attempt)
 
     // ----- Health Connect sync ----------------------------------------------
 

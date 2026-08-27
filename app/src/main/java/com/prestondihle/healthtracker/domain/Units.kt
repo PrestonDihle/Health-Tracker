@@ -33,6 +33,18 @@ object Units {
 
     fun kgToLbs(kg: Float): Float = (kg / KG_PER_LB).toFloat()
 
+    /**
+     * Kilograms as whole pounds, rounded rather than truncated.
+     *
+     * For the deadlift, whose scoring table is published in pounds and stepped
+     * in tens of them while the value is stored in kilograms like every other
+     * weight here. 150 lb round-trips to 149.99999 in floating point, and a
+     * truncating conversion would read that as 149 and fail a Soldier who hit
+     * the minimum exactly -- the same rounding trap as [mlToWholeOz], with a
+     * pass mark riding on it.
+     */
+    fun kgToWholeLbs(kg: Float): Int = kgToLbs(kg).roundToInt()
+
     fun lbsToKg(lbs: Float): Float = (lbs * KG_PER_LB).toFloat()
 
     /** Snaps to the nearest quarter, so the waist stepper never drifts off its grid. */

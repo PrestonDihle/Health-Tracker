@@ -668,7 +668,7 @@ gets the shape right.
 
 ### Room
 
-Version 15, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 16, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -713,6 +713,21 @@ as an unset profile — no made-up figure on an upgrading user.
 saved card position per tab. New table, so the DDL is Room's own `CREATE TABLE` for the composite
 key — no `ALTER TABLE` default to keep in step. Empty means every tab in its built-in order, so an
 upgrading user sees no change until they move something.
+
+`MIGRATION_15_16` adds `AftAttempt`, one row per Army Fitness Test. New table, so the DDL is Room's
+own. Two things about its shape are decisions rather than defaults. **Every event column is
+nullable**, because a test day is five events over two hours and may be logged as it goes or stopped
+partway — a missing event has to stay distinguishable from a zero, which is a real score. And the
+**index on `date` is deliberately not unique**: a retest is a second attempt rather than a correction
+of the first, so a unique index would refuse the insert on exactly the day it matters. The row is
+keyed on a generated id for the same reason — keyed on the date, a retest would overwrite the
+morning's attempt and a record of progress that overwrites itself is not one.
+
+The deadlift is stored in kilograms like every other weight here even though the event and its
+scoring table are both in pounds, and `Units.kgToWholeLbs` is the one-way door back. It rounds
+rather than truncates for the reason `mlToWholeOz` does, with more riding on it: 150 lb round-trips
+through `Float` as 149.99999, and truncating would read the pass mark as a failure. `AftAttemptTest`
+walks every ten-pound step of the published table through storage and back to prove it.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
@@ -993,7 +1008,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `AftScoringTest` and `CaffeineLastCallTest` are the pure-JVM
-suites. `CsvBackupTest`, `SupplementsTest` and `SleepSyncTest` are Robolectric
+suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
+are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
 thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,

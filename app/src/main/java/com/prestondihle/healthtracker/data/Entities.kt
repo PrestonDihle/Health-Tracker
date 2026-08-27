@@ -261,6 +261,38 @@ data class WeeklyPerformance(
     val maxHexBarDeadliftKg: Float? = null,
 )
 
+/**
+ * One Army Fitness Test, as far as it got.
+ *
+ * **Every event is nullable**, which is the point of the row rather than a
+ * convenience: a test day is five events over two hours and a Soldier may log
+ * them as they finish, or stop after three. A missing event is not a zero -- a
+ * zero is a performance -- so the scorecard reports what it has and declines to
+ * pass or fail an attempt that is not finished.
+ *
+ * Keyed on a generated id rather than on [date], because a retest is a second
+ * attempt and not a correction of the first. Dating it would silently overwrite
+ * whichever came earlier, which is the one thing a record of progress must not
+ * do.
+ *
+ * The deadlift is stored in kilograms like every other weight here, though the
+ * event and its scoring table are both in pounds. Two storage units is how
+ * rounding error gets into a number that has to match a printed scorecard, so
+ * the conversion happens once at the display and scoring boundary through
+ * [com.prestondihle.healthtracker.domain.Units]. The timed events store whole
+ * seconds, which is the resolution the tables are published at.
+ */
+@Entity(indices = [Index("date")])
+data class AftAttempt(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val date: LocalDate,
+    val deadliftKg: Float? = null,
+    val hrpReps: Int? = null,
+    val sdcSeconds: Int? = null,
+    val plankSeconds: Int? = null,
+    val twoMileSeconds: Int? = null,
+)
+
 @Entity(
     indices = [
         Index("timestamp"),

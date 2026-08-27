@@ -217,6 +217,20 @@ class MigrationSchemaTest {
     }
 
     /**
+     * The AFT attempt table added at v16. A new table, so its DDL is diffed
+     * directly -- including the index, which is where this one could go wrong
+     * quietly: made unique, a retest on a day that already has an attempt would
+     * fail to insert, and the day a Soldier retests is the day that matters.
+     */
+    @Test
+    fun `migration builds AftAttempt exactly as Room expects`() {
+        assertEquals(
+            roomSchema("AftAttempt"),
+            migrationSchema("AftAttempt", AppDatabase.migration15To16Statements),
+        )
+    }
+
+    /**
      * The v4 KetoneReading table, as Room built it before the rename.
      *
      * Spelled out here rather than derived, because the point of the test is to

@@ -461,4 +461,19 @@ interface TrackerDao {
     fun getCardOrder(tab: String): Flow<List<CardOrderEntry>>
 
     @Upsert suspend fun upsertCardOrder(entries: List<CardOrderEntry>)
+
+    // ----- Army Fitness Test -------------------------------------------------
+
+    @Query("SELECT * FROM AftAttempt ORDER BY date ASC, id ASC")
+    fun getAftAttempts(): Flow<List<AftAttempt>>
+
+    @Query("SELECT * FROM AftAttempt ORDER BY date DESC, id DESC LIMIT 1")
+    fun getLatestAftAttempt(): Flow<AftAttempt?>
+
+    /** Returns the new row's id, so a freshly logged attempt can be edited without a re-query. */
+    @Insert suspend fun insertAftAttempt(attempt: AftAttempt): Long
+
+    @Update suspend fun updateAftAttempt(attempt: AftAttempt)
+
+    @Delete suspend fun deleteAftAttempt(attempt: AftAttempt)
 }

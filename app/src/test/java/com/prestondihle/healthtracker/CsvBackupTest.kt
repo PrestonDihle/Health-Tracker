@@ -64,6 +64,7 @@ class CsvBackupTest {
                 "MealEntry",
                 "Supplement",
                 "SupplementDose",
+                "AftAttempt",
             )
             .forEach { assertTrue("$it missing from the backup", it in tables) }
 
