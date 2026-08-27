@@ -170,7 +170,7 @@ fun TrackerNavHost(appContainer: AppContainer) {
                     viewModel(
                         factory = SettingsViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                SettingsScreen(vm)
+                SettingsScreen(vm, cardOrderVm(appContainer, Screen.Settings.route))
             }
         }
     }

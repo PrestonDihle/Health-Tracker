@@ -148,78 +148,82 @@ fun FuelScreen(
         verticalArrangement = Arrangement.spacedBy(CardGap),
         contentPadding = PaddingValues(vertical = CardGap),
     ) {
-        // The running fast leads, because it is the only card here that is
-        // counting: everything below it reports a total that will not change
-        // until something is logged.
-        item {
-            FastCard(
-                state = state,
-                onStart = viewModel::startFast,
-                onStop = viewModel::endFast,
-                onSetStart = viewModel::setActiveFastStart,
-                onStopAt = {
-                    viewModel.stopFastAt(it)
-                    toast("Fast ended ${it.asShortDateTime(state)}")
-                },
-                onUpdateLast = { start, end ->
-                    viewModel.updateLastFast(start, end)
-                    toast("Corrected last fast")
-                },
-            )
-        }
-
-        item { AdherenceCard(state) }
-
-        item {
-            TrackerCard(
-                title = "Fasting pattern",
-                subtitle = "Last 14 days. Filled is fasted, blank is eating.",
-            ) {
-                FastingTimeline(days = state.timeline, modifier = Modifier.fillMaxWidth())
-            }
-        }
-
-        item { StatsCard(state.stats) }
-
-        item {
-            TrackerCard(
-                title = "Weekly plan",
-                subtitle = "Times are when eating is allowed. Switch a day off for no eating at all.",
-            ) {
-                state.orderedDays.forEach { day ->
-                    PlanDayRow(
-                        day = day,
-                        onToggle = { viewModel.setHasFeedingWindow(day.dayOfWeek, it) },
-                        onEditStart = {
-                            timeEdit = TimeEdit(day.dayOfWeek, true, day.feedingStart)
-                        },
-                        onEditEnd = { timeEdit = TimeEdit(day.dayOfWeek, false, day.feedingEnd) },
-                    )
-                    HorizontalDivider()
-                }
-            }
-        }
-
-        item {
-            TrackerCard(
-                title = "Extended fasts",
-                subtitle = "These override the weekly plan for the days they cover",
-            ) {
-                TextButton(onClick = { addingFast = true }) { Text("Schedule an extended fast") }
-            }
-        }
-
-        items(state.extendedFasts, key = { it.id }) { fast ->
-            ExtendedFastRow(fast = fast, onDelete = { viewModel.deleteExtendedFast(fast) })
-        }
-
-        // What actually went in, under the plan it was meant to fit -- and the
-        // macro trend at the foot. These reorder among themselves; the fasting
-        // schedule above stays put, since the extended-fast list is pinned to the
-        // card that schedules it. Hydration leads by default as the most-logged.
+        // The whole tab is one reorderable list. The running fast leads by
+        // default, because it is the only card counting: everything below it
+        // reports a total that will not change until something is logged. The
+        // extended-fast list rides inside its own card so it moves as one piece.
         reorderableCards(
             cards =
                 listOf(
+                    ReorderableCard("fast") {
+                        FastCard(
+                            state = state,
+                            onStart = viewModel::startFast,
+                            onStop = viewModel::endFast,
+                            onSetStart = viewModel::setActiveFastStart,
+                            onStopAt = {
+                                viewModel.stopFastAt(it)
+                                toast("Fast ended ${it.asShortDateTime(state)}")
+                            },
+                            onUpdateLast = { start, end ->
+                                viewModel.updateLastFast(start, end)
+                                toast("Corrected last fast")
+                            },
+                        )
+                    },
+                    ReorderableCard("adherence") { AdherenceCard(state) },
+                    ReorderableCard("fastingPattern") {
+                        TrackerCard(
+                            title = "Fasting pattern",
+                            subtitle = "Last 14 days. Filled is fasted, blank is eating.",
+                        ) {
+                            FastingTimeline(days = state.timeline, modifier = Modifier.fillMaxWidth())
+                        }
+                    },
+                    ReorderableCard("stats") { StatsCard(state.stats) },
+                    ReorderableCard("weeklyPlan") {
+                        TrackerCard(
+                            title = "Weekly plan",
+                            subtitle =
+                                "Times are when eating is allowed. Switch a day off for no " +
+                                    "eating at all.",
+                        ) {
+                            state.orderedDays.forEach { day ->
+                                PlanDayRow(
+                                    day = day,
+                                    onToggle = {
+                                        viewModel.setHasFeedingWindow(day.dayOfWeek, it)
+                                    },
+                                    onEditStart = {
+                                        timeEdit = TimeEdit(day.dayOfWeek, true, day.feedingStart)
+                                    },
+                                    onEditEnd = {
+                                        timeEdit = TimeEdit(day.dayOfWeek, false, day.feedingEnd)
+                                    },
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    },
+                    ReorderableCard("extendedFasts") {
+                        TrackerCard(
+                            title = "Extended fasts",
+                            subtitle = "These override the weekly plan for the days they cover",
+                        ) {
+                            TextButton(onClick = { addingFast = true }) {
+                                Text("Schedule an extended fast")
+                            }
+                            // Inside the card rather than as loose cards below it,
+                            // so scheduling control and its list move together.
+                            state.extendedFasts.forEach { fast ->
+                                HorizontalDivider()
+                                ExtendedFastRow(
+                                    fast = fast,
+                                    onDelete = { viewModel.deleteExtendedFast(fast) },
+                                )
+                            }
+                        }
+                    },
                     ReorderableCard("hydration") {
                         HydrationCard(
                             state = state,
@@ -459,30 +463,27 @@ private fun TimeChip(time: LocalTime, onClick: () -> Unit) {
 @Composable
 private fun ExtendedFastRow(fast: PlannedExtendedFast, onDelete: () -> Unit) {
     val zone = ZoneId.systemDefault()
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    // A row inside the Extended fasts card, no longer its own card: the schedule
+    // and its entries are one reorderable unit.
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column {
-                Text(
-                    fast.type.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() },
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Text(
-                    "${DATE_FORMAT.format(fast.startInstant.atZone(zone))} to " +
-                        DATE_FORMAT.format(fast.endInstant.atZone(zone)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "Remove planned fast")
-            }
+        Column {
+            Text(
+                fast.type.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() },
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                "${DATE_FORMAT.format(fast.startInstant.atZone(zone))} to " +
+                    DATE_FORMAT.format(fast.endInstant.atZone(zone)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Filled.Delete, contentDescription = "Remove planned fast")
         }
     }
 }

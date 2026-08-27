@@ -46,6 +46,9 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AbsorptionModelCard
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.Stepper
+import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
+import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
+import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.work.CaffeineLastCallWorker
 import java.io.File
 import java.time.LocalDate
@@ -62,16 +65,20 @@ import java.time.format.DateTimeFormatter
 private const val DEFAULT_BEDTIME_LIMIT_MG = 25
 
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel) {
+fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
-        item {
-            SettingsCard(title = "You") {
+        reorderableCards(
+            cards =
+                listOf(
+                    ReorderableCard("profile") {
+                        SettingsCard(title = "You") {
                 Text(
                     "Max heart rate zones the runs on the Activity tab. The rest are here for " +
                         "the figures that read off them.",
@@ -146,10 +153,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                         }
                 }
             }
-        }
-
-        item {
-            SettingsCard(title = "Units") {
+                    },
+                    ReorderableCard("units") {
+                        SettingsCard(title = "Units") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
                         selected = state.settings.unitSystem == UnitSystemEnum.IMPERIAL,
@@ -177,10 +183,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-
-        item {
-            SettingsCard(title = "Step source") {
+                    },
+                    ReorderableCard("stepSource") {
+                        SettingsCard(title = "Step source") {
                 Text(
                     "Several apps can write steps to Health Connect at once, and their totals " +
                         "get summed — which counts the same walk twice. Pick the one to trust.",
@@ -222,10 +227,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 // here, so this needs to be re-runnable rather than load-once.
                 TextButton(onClick = viewModel::refreshStepSources) { Text("Refresh sources") }
             }
-        }
-
-        item {
-            SettingsCard(title = "Daily goals") {
+                    },
+                    ReorderableCard("dailyGoals") {
+                        SettingsCard(title = "Daily goals") {
                 Text(
                     "Each of these is drawn as a dashed rule across its chart on the Trends " +
                         "screen, so a day can be read against what you were aiming at rather " +
@@ -317,10 +321,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     valueFormatter = { "$it g" },
                 )
             }
-        }
-
-        item {
-            SettingsCard(title = "Blood sugar target") {
+                    },
+                    ReorderableCard("glucoseTarget") {
+                        SettingsCard(title = "Blood sugar target") {
                 Text(
                     "Shaded as a grey band behind the glucose line on the Today and Master " +
                         "screens. A starting range rather than a clinical one — set it to " +
@@ -378,10 +381,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     valueFormatter = { "$it ${Glucose.UNIT}" },
                 )
             }
-        }
-
-        item {
-            SettingsCard(title = "Blood sugar chart") {
+                    },
+                    ReorderableCard("glucoseChart") {
+                        SettingsCard(title = "Blood sugar chart") {
                 Text(
                     "How much of the plot the ordinary range gets. A trace that lives between " +
                         "80 and 120 is a flat line on a wide axis and a legible swing on a " +
@@ -432,10 +434,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     valueFormatter = { "$it ${Glucose.UNIT}" },
                 )
             }
-        }
-
-        item {
-            SettingsCard(title = "Blood pressure reference") {
+                    },
+                    ReorderableCard("bloodPressureReference") {
+                        SettingsCard(title = "Blood pressure reference") {
                 Text(
                     "Two dashed rules across the blood pressure chart on Trends, one per line. " +
                         "Seeded at the published 120/80 — change them if you have been given " +
@@ -470,10 +471,9 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     valueFormatter = { "$it mmHg" },
                 )
             }
-        }
-
-        item {
-            SettingsCard(title = "Body targets") {
+                    },
+                    ReorderableCard("bodyTargets") {
+                        SettingsCard(title = "Body targets") {
                 Stepper(
                     label = "Goal waist",
                     value = Units.cmToInches(state.goals.goalWaistCm ?: 96.52f),
@@ -497,19 +497,18 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     valueFormatter = { "${it.toInt()} lb" },
                 )
             }
-        }
-
-        item {
-            WeightSubGoalsCard(
+                    },
+                    ReorderableCard("weightWaypoints") {
+                        WeightSubGoalsCard(
                 subGoals = state.weightSubGoals,
                 suggestedLbs = state.suggestedWaypointLbs,
                 onAdd = viewModel::addWeightSubGoalLbs,
                 onDelete = viewModel::deleteWeightSubGoal,
             )
-        }
-        item {
-            val context = LocalContext.current
-            SettingsCard(title = "Caffeine last call") {
+                    },
+                    ReorderableCard("caffeineLastCall") {
+                        val context = LocalContext.current
+                        SettingsCard(title = "Caffeine last call") {
                 Text(
                     "Warns when one more cup would leave you over this much " +
                         "caffeine at 9 PM. The warning is about the next dose " +
@@ -552,16 +551,21 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     )
                 }
             }
-        }
-
-        item {
-            BackupCard(isExporting = state.isExporting, onExport = viewModel::exportBackup)
-        }
-
-        // Reference for the food-absorption curves on the Today chart. It explains
-        // a model rather than setting anything, so it sits at the foot of Settings
-        // rather than taking room on the chart it describes.
-        item { AbsorptionModelCard() }
+                    },
+                    ReorderableCard("backup") {
+                        BackupCard(
+                            isExporting = state.isExporting,
+                            onExport = viewModel::exportBackup,
+                        )
+                    },
+                    // Reference for the food-absorption curves on the Today chart.
+                    // It explains a model rather than setting anything, so it sits
+                    // at the foot of Settings by default.
+                    ReorderableCard("foodCurves") { AbsorptionModelCard() },
+                ),
+            savedOrder = savedOrder,
+            onMove = orderViewModel::move,
+        )
     }
 }
 
