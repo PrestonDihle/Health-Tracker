@@ -28,7 +28,7 @@ import kotlinx.coroutines.flow.first
 /**
  * The hour the projection is read against.
  *
- * The same 9 PM the dashboard's "At 9 PM" figure uses. Two different bedtimes
+ * The same 9 PM Fuel's "At 9 PM" figure uses. Two different bedtimes
  * would have the card and the notification disagree about the same evening.
  */
 private val BEDTIME: LocalTime = LocalTime.of(21, 0)

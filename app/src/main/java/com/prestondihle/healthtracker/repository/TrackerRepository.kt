@@ -360,7 +360,7 @@ class TrackerRepository(
 
     // ----- Blood sugar and ketones ------------------------------------------
 
-    /** Readings in the rolling window ending now -- what the dashboard chart shows. */
+    /** Readings in the rolling window ending now -- what the Wellness chart shows. */
     fun getBloodSugarSince(since: Instant): Flow<List<BloodSugarReading>> =
         dao.getBloodSugarReadingsBetween(since.toEpochMilli(), Long.MAX_VALUE)
 

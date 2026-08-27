@@ -300,7 +300,7 @@ data class TodayUiState(
     /**
      * Caffeine in the body across the window, sampled evenly.
      *
-     * Sampled rather than drawn dose to dose for the reason the dashboard does
+     * Sampled rather than drawn dose to dose for the reason Fuel does
      * it: the decay between two doses is exponential, and joining the doses
      * themselves would draw it as a straight ramp. The step follows the window
      * for the same reason the absorption curves' does -- a fixed one is either
@@ -688,7 +688,7 @@ class TodayViewModel(
     // Meals are logged and corrected on the Log tab now, not here: Today only
     // reads them, to place a marker at each and spread it into an absorption
     // curve. The add/edit/delete and the stamped-time correction moved with the
-    // meal list to DashboardViewModel.
+    // meal list to WellnessViewModel.
 
     /**
      * Pulls the window's meals and heart rate from Health Connect.

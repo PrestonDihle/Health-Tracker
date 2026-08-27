@@ -92,7 +92,7 @@ private fun Int.toSleepStage(): SleepStage? =
  *
  * Each metric is fetched independently and failures are swallowed to null. A
  * user may grant step access but deny nutrition; that must degrade to a blank
- * macro card rather than an empty dashboard.
+ * macro card rather than an empty screen.
  */
 class HealthConnectDataSource(
     private val context: Context,

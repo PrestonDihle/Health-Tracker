@@ -48,7 +48,7 @@ data class HistoryUiState(
 }
 
 /**
- * Backfilling and correcting past days. The dashboard covers today; this is for
+ * Backfilling and correcting past days. Wellness covers today; this is for
  * the day you forgot to log.
  */
 class HistoryViewModel(private val repository: TrackerRepository) : ViewModel() {

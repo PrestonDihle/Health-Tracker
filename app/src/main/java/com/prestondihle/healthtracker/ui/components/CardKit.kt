@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 // The panel every card on every tab is built from, and the pieces that go
 // inside one.
 //
-// These lived three times over -- once on the dashboard, once on the master
+// These lived three times over -- once on Wellness, once on the master
 // graph, once on the fasting screen -- and the regrouping into six tabs would
 // have made it five. Three copies had already drifted: the fasting screen's
 // panel had grown a subtitle and lost the action slot, and its padding and

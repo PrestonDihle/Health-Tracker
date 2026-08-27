@@ -23,16 +23,16 @@ import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
-import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
-import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
-import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
-import com.prestondihle.healthtracker.ui.dashboard.MoodTrendCard
-import com.prestondihle.healthtracker.ui.dashboard.SleepCard
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
+import com.prestondihle.healthtracker.ui.wellness.MoodTrendCard
+import com.prestondihle.healthtracker.ui.wellness.SleepCard
+import com.prestondihle.healthtracker.ui.wellness.WellnessScreen
+import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
+import com.prestondihle.healthtracker.ui.wellness.WellnessViewModel
 import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -46,7 +46,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Renders the dashboard and trends screens against a real repository.
+ * Renders the Wellness and Activity screens against a real repository.
  *
  * Both are dense with charts whose arithmetic only runs when something actually
  * lays them out. Composing them for real is what catches an empty-list crash or
@@ -163,7 +163,7 @@ class ScreenRenderTest {
         render {
             MoodTrendCard(
                 state =
-                    DashboardUiState(
+                    WellnessUiState(
                         logHistory = history,
                         historyStart = start,
                         historyEnd = today,
@@ -214,9 +214,9 @@ class ScreenRenderTest {
     }
 
     /**
-     * The dashboard is captured where it opens, without scrolling.
+     * Wellness is captured where it opens, without scrolling.
      *
-     * Not an oversight: `DashboardViewModel` runs a one-second ticker to drive
+     * Not an oversight: `WellnessViewModel` runs a one-second ticker to drive
      * the live fast timer, so the screen never reaches the idle state
      * `performScrollToNode` waits for -- it retries, times out after a minute and
      * throws `AppNotIdleException`. Anything below the fold here has to be
@@ -224,27 +224,27 @@ class ScreenRenderTest {
      * target band are covered on the master graph for exactly that reason.
      */
     @Test
-    fun `dashboard renders`() {
+    fun `wellness renders`() {
         val repo = seededRepository()
-        val vm = DashboardViewModel(repo, zone)
+        val vm = WellnessViewModel(repo, zone)
         render {
-            DashboardScreen(
+            WellnessScreen(
                 vm,
                 TrendsViewModel(repo, zone),
                 CardOrderViewModel(repo, "wellness"),
                 SnackbarHostState(),
             )
         }
-        composeRule.onRoot().captureRoboImage("build/screenshots/dashboard.png")
+        composeRule.onRoot().captureRoboImage("build/screenshots/wellness.png")
     }
 
     /**
-     * The sleep card on its own, because the dashboard cannot reach it.
+     * The sleep card on its own, because Wellness cannot reach it.
      *
      * A LazyColumn composes only what is on screen and this screen cannot be
      * scrolled in a test -- the fast timer's ticker means it never reaches the
      * idle state `performScrollToNode` waits on. The sleep card is the third one
-     * down, so through `DashboardScreen` it is never built at all and the
+     * down, so through `WellnessScreen` it is never built at all and the
      * hypnogram's canvas arithmetic goes unexercised. Composed directly, a
      * divide-by-zero or an empty-list crash in the plot fails here.
      *
@@ -266,7 +266,7 @@ class ScreenRenderTest {
         render {
             SleepCard(
                 state =
-                    DashboardUiState(sleep = night, sleepHeartRate = heartRate, zoneId = zone)
+                    WellnessUiState(sleep = night, sleepHeartRate = heartRate, zoneId = zone)
             )
         }
 

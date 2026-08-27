@@ -133,10 +133,10 @@ private suspend fun readState(repository: TrackerRepository): WidgetState {
 /** A quarter-pint, matching the smaller of the two buttons on the Today card. */
 private const val WIDGET_WATER_ML = 118
 
-/** The same ordinary cup the dashboard's log button starts at. */
+/** The same ordinary cup Fuel's log button starts at. */
 private const val WIDGET_CAFFEINE_MG = 70
 
-/** Fallback when the plan says nothing about today, matching the dashboard's. */
+/** Fallback when the plan says nothing about today, matching Fuel's. */
 private const val WIDGET_DEFAULT_GOAL_MINUTES = 16 * 60
 
 /**

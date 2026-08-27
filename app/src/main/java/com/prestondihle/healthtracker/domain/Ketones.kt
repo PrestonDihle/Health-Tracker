@@ -9,7 +9,7 @@ package com.prestondihle.healthtracker.domain
  * in breath, and the relationship between them is loose and individual. Anything
  * quoting one against the other is comparing two different measurements.
  *
- * Gathered here so the entry stepper, the dashboard chart and the master graph
+ * Gathered here so the entry stepper, the Wellness chart and the master graph
  * cannot drift apart on what the axis means.
  */
 object Ketones {

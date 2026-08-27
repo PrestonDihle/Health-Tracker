@@ -91,7 +91,7 @@ val BalticLight = Color(0xFF9FC6DF)
 val BalticTintDark = Color(0xFF2C4A5E)
 
 // ---------------------------------------------------------------------------
-// Chart series colors. Kept here so the dashboard and trends screens cannot
+// Chart series colors. Kept here so the screens that draw them cannot
 // drift apart on what "glucose" or "ketones" look like.
 //
 // These are the *light* values. A series colour depends on what it is drawn on,
@@ -107,7 +107,7 @@ val ThresholdLine = Inferno
  * Caffeine decay curve.
  *
  * Yale Blue until this, which is a shade of the same blue the glucose trace is
- * drawn in -- fine on the dashboard, where caffeine has a chart to itself, and
+ * drawn in -- fine on Fuel, where caffeine has a chart to itself, and
  * not fine on the master graph, where the two are read against each other and
  * cross constantly. Where they crossed there was nothing but the dash pattern
  * left to tell them apart.

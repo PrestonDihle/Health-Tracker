@@ -296,7 +296,7 @@ class FuelViewModel(
      *
      * This is the flow that stops the tab reaching idle, which is why nothing
      * below the fold here can be asserted on in a render test -- see the
-     * dashboard's note, which this inherited along with the fast card.
+     * Wellness's note, which this inherited along with the fast card.
      */
     private val ticker: Flow<Instant> = flow {
         while (true) {

@@ -319,7 +319,7 @@ private fun TodayUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisS
                 color = axisColorFor(metric, colors),
             )
         // 200 mg is around two strong coffees still in the body at once, which
-        // is where the dashboard's caffeine chart tops out; both plot the same
+        // is where Fuel's caffeine chart tops out; both plot the same
         // quantity and a reader moving between them should not have to re-learn
         // the height of a line.
         AxisMetric.CAFFEINE ->

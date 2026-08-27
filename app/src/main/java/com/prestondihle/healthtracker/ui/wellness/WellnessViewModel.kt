@@ -1,4 +1,4 @@
-package com.prestondihle.healthtracker.ui.dashboard
+package com.prestondihle.healthtracker.ui.wellness
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -133,7 +133,7 @@ private const val LOG_HISTORY_DAYS = 14L
  */
 private const val MEAL_WINDOW_HOURS = 24L
 
-data class DashboardUiState(
+data class WellnessUiState(
     val today: LocalDate = LocalDate.now(),
     val now: Instant = Instant.now(),
     val activeFast: FastingSession? = null,
@@ -471,7 +471,7 @@ private data class MetabolicBundle(
     val settings: UserSettings,
 )
 
-class DashboardViewModel(
+class WellnessViewModel(
     private val repository: TrackerRepository,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
 ) : ViewModel() {
@@ -608,7 +608,7 @@ class DashboardViewModel(
             }
         }
 
-    val uiState: StateFlow<DashboardUiState> =
+    val uiState: StateFlow<WellnessUiState> =
         combine(
                 combine(fasting, ticker) { bundle, now -> bundle to now },
                 todayData,
@@ -628,7 +628,7 @@ class DashboardViewModel(
                 val date = today
                 val (weekStart, weekEnd) = weekBounds(date)
 
-                DashboardUiState(
+                WellnessUiState(
                     today = date,
                     now = now,
                     zoneId = zoneId,
@@ -679,7 +679,7 @@ class DashboardViewModel(
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = DashboardUiState(),
+                initialValue = WellnessUiState(),
             )
 
     init {
@@ -967,7 +967,7 @@ class DashboardViewModel(
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    DashboardViewModel(repository) as T
+                    WellnessViewModel(repository) as T
             }
     }
 }

@@ -42,7 +42,7 @@ data class DailyLog(
  * Daily rollup of everything read from Health Connect.
  *
  * This is a cache, not a source of truth: it is safe to delete and re-sync. It
- * exists so trends and history survive offline and so the dashboard does not
+ * exists so trends and history survive offline and so the screens do not
  * have to re-query Health Connect on every recomposition.
  */
 @Entity
@@ -56,7 +56,7 @@ data class HealthDaySnapshot(
     val activeCalories: Int? = null,
     /**
      * Calories *eaten*, from nutrition records -- not the same number as
-     * [totalCalories], which is energy burned. Kept apart because the dashboard
+     * [totalCalories], which is energy burned. Kept apart because the day's
      * shows this one next to the macros, where a burn figure would misread as
      * intake.
      */

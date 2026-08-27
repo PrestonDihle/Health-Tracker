@@ -29,8 +29,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.prestondihle.healthtracker.di.AppContainer
-import com.prestondihle.healthtracker.ui.dashboard.DashboardScreen
-import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
 import com.prestondihle.healthtracker.ui.fuel.FuelScreen
 import com.prestondihle.healthtracker.ui.fuel.FuelViewModel
 import com.prestondihle.healthtracker.ui.log.LogScreen
@@ -41,6 +39,8 @@ import com.prestondihle.healthtracker.ui.today.TodayScreen
 import com.prestondihle.healthtracker.ui.today.TodayViewModel
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
+import com.prestondihle.healthtracker.ui.wellness.WellnessScreen
+import com.prestondihle.healthtracker.ui.wellness.WellnessViewModel
 
 /**
  * The six tabs, in bar order.
@@ -52,9 +52,9 @@ import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
  * became Fuel and Wellbeing became Wellness rather than being left to truncate.
  *
  * Log holds the hand-entry controls; Wellness the body and vitals trends;
- * Activity the movement trends. Log and Wellness share one [DashboardViewModel]
+ * Activity the movement trends. Log and Wellness share one [WellnessViewModel]
  * and Activity, Wellness and Fuel share one [TrendsViewModel], both hoisted
- * below so a tab switch does not spin up a second copy -- and, for the dashboard,
+ * below so a tab switch does not spin up a second copy -- and, for Wellness,
  * a second Health Connect sync.
  */
 /** One [CardOrderViewModel] per tab, keyed by route so each tab keeps its own saved order. */
@@ -81,9 +81,9 @@ fun TrackerNavHost(appContainer: AppContainer) {
 
     // Hoisted so the tabs that share them get one instance each, not one per tab.
     // Scoped to the host, they outlive individual tab visits, which is what lets
-    // Wellness and Log read the same dashboard state without a second sync.
-    val dashboardViewModel: DashboardViewModel =
-        viewModel(factory = DashboardViewModel.provideFactory(appContainer.trackerRepository))
+    // Wellness and Log read the same state without a second sync.
+    val wellnessViewModel: WellnessViewModel =
+        viewModel(factory = WellnessViewModel.provideFactory(appContainer.trackerRepository))
     val trendsViewModel: TrendsViewModel =
         viewModel(factory = TrendsViewModel.provideFactory(appContainer.trackerRepository))
 
@@ -130,7 +130,7 @@ fun TrackerNavHost(appContainer: AppContainer) {
             }
             composable(Screen.Log.route) {
                 LogScreen(
-                    dashboardViewModel,
+                    wellnessViewModel,
                     snackbarHostState,
                     cardOrderVm(appContainer, Screen.Log.route),
                 )
@@ -158,8 +158,8 @@ fun TrackerNavHost(appContainer: AppContainer) {
             // glucose and ketones) with the body and vitals trends, the mood
             // trend and the movement log.
             composable(Screen.Wellness.route) {
-                DashboardScreen(
-                    dashboardViewModel,
+                WellnessScreen(
+                    wellnessViewModel,
                     trendsViewModel,
                     cardOrderVm(appContainer, Screen.Wellness.route),
                     snackbarHostState,

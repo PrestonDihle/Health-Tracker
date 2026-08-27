@@ -8,7 +8,7 @@ import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.SupplementSlot
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
-import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
+import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.first
@@ -149,7 +149,7 @@ class SupplementsTest {
             )
 
         val uiState =
-            DashboardUiState(supplements = stack, supplementsTaken = setOf(1L, 2L, 99L))
+            WellnessUiState(supplements = stack, supplementsTaken = setOf(1L, 2L, 99L))
 
         assertEquals(2, uiState.supplementsTakenCount)
     }

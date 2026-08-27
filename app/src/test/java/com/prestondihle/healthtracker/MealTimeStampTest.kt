@@ -2,7 +2,7 @@ package com.prestondihle.healthtracker
 
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
-import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
+import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import java.time.Instant
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -36,7 +36,7 @@ class MealTimeStampTest {
      * judged over every loaded meal regardless of the window.
      */
     private fun state(vararg meals: MealEntry) =
-        DashboardUiState(
+        WellnessUiState(
             now = Instant.parse("2026-08-20T18:00:00Z"),
             meals = meals.toList(),
             zoneId = zone,

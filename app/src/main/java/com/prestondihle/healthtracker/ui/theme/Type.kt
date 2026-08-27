@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.sp
 /**
  * A deliberately compact scale, roughly 85% of the Material 3 defaults.
  *
- * The dashboard is a dense read-out of a dozen metrics that all want to be
+ * Wellness is a dense read-out of a dozen metrics that all want to be
  * visible at once, and at stock sizes half of them sat below the fold. Line
  * heights are tightened proportionally -- shrinking the glyphs alone leaves the
  * leading doing the same damage the font size was doing.

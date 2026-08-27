@@ -18,16 +18,16 @@ import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.MealListCard
-import com.prestondihle.healthtracker.ui.dashboard.BloodPressureCard
-import com.prestondihle.healthtracker.ui.dashboard.BodyCard
-import com.prestondihle.healthtracker.ui.dashboard.DashboardViewModel
-import com.prestondihle.healthtracker.ui.dashboard.GripStrengthCard
-import com.prestondihle.healthtracker.ui.dashboard.MoodCard
-import com.prestondihle.healthtracker.ui.dashboard.MovementCard
-import com.prestondihle.healthtracker.ui.dashboard.ReadingCard
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
+import com.prestondihle.healthtracker.ui.wellness.BloodPressureCard
+import com.prestondihle.healthtracker.ui.wellness.BodyCard
+import com.prestondihle.healthtracker.ui.wellness.GripStrengthCard
+import com.prestondihle.healthtracker.ui.wellness.MoodCard
+import com.prestondihle.healthtracker.ui.wellness.MovementCard
+import com.prestondihle.healthtracker.ui.wellness.ReadingCard
+import com.prestondihle.healthtracker.ui.wellness.WellnessViewModel
 import kotlinx.coroutines.launch
 
 /**
@@ -36,11 +36,11 @@ import kotlinx.coroutines.launch
  * These are the controls that used to be scattered down the Wellness screen next
  * to their charts. Wellness now shows the trends; the writing is done here. All
  * of it is manual entry -- nothing on this screen reads Health Connect -- so it
- * shares [DashboardViewModel] but never touches its sync.
+ * shares [WellnessViewModel] but never touches its sync.
  */
 @Composable
 fun LogScreen(
-    viewModel: DashboardViewModel,
+    viewModel: WellnessViewModel,
     snackbarHostState: SnackbarHostState,
     orderViewModel: CardOrderViewModel,
 ) {

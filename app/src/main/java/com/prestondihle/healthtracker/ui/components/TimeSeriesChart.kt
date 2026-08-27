@@ -1098,7 +1098,7 @@ private fun DrawScope.drawChart(
     // Horizontal gridlines and axis labels.
     //
     // The row count follows the height available rather than being fixed: the
-    // dashboard drops its charts to a stub when there is nothing logged, and five
+    // Wellness drops its charts to a stub when there is nothing logged, and five
     // rows of labels in 72dp overprint into an unreadable stack. Two gaps is the
     // floor, which still gives a min, a max and a midpoint.
     // An axis that names its rows overrides the fit: see [AxisSpec.rows].

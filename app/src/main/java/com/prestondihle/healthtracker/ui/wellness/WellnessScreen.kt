@@ -1,4 +1,4 @@
-﻿package com.prestondihle.healthtracker.ui.dashboard
+﻿package com.prestondihle.healthtracker.ui.wellness
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
@@ -87,8 +87,8 @@ import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 @Composable
-fun DashboardScreen(
-    viewModel: DashboardViewModel,
+fun WellnessScreen(
+    viewModel: WellnessViewModel,
     trendsViewModel: TrendsViewModel,
     orderViewModel: CardOrderViewModel,
     snackbarHostState: SnackbarHostState,
@@ -230,7 +230,7 @@ private fun MissingPermissionsPrompt(missing: Set<String>, onGrant: () -> Unit) 
 }
 
 @Composable
-private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
+private fun ActivityCard(state: WellnessUiState, onRefresh: () -> Unit) {
     TrackerCard(
         title = "Activity",
         action = {
@@ -337,7 +337,7 @@ private fun ActivityCard(state: DashboardUiState, onRefresh: () -> Unit) {
 // only runs under a real layout pass, which is exactly the code no pure-JVM test
 // can reach.
 @Composable
-internal fun SleepCard(state: DashboardUiState) {
+internal fun SleepCard(state: WellnessUiState) {
     val chartColors = LocalChartColors.current
     val night = state.sleep
 
@@ -470,7 +470,7 @@ internal fun SleepCard(state: DashboardUiState) {
 }
 
 /** `23:40`. The date is carried by the card, which is always about last night. */
-private fun Instant.asClockTime(state: DashboardUiState): String =
+private fun Instant.asClockTime(state: WellnessUiState): String =
     DateTimeFormatter.ofPattern("h:mm a").format(atZone(state.zoneId))
 
 /** `28%`, or blank where the whole is zero and a share would divide by it. */
@@ -482,7 +482,7 @@ private fun Duration.shareOf(whole: Duration): String? {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MetabolicCard(
-    state: DashboardUiState,
+    state: WellnessUiState,
     onWindowChange: (GlucoseWindow) -> Unit,
     onSmoothChange: (Boolean) -> Unit,
     onAddKetone: (Float) -> Unit,
@@ -639,7 +639,7 @@ private fun MetabolicCard(
 }
 
 @Composable
-internal fun BodyCard(state: DashboardUiState, onWaistChange: (Float) -> Unit) {
+internal fun BodyCard(state: WellnessUiState, onWaistChange: (Float) -> Unit) {
     TrackerCard(title = "Body") {
         // Held locally and written only on Log, so dialling past the target value
         // does not save a string of measurements that were never taken. Re-seeds
@@ -693,7 +693,7 @@ private const val DEFAULT_GRIP_LBS = 90f
  * a couple of presses of the new one.
  */
 @Composable
-internal fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) -> Unit) {
+internal fun GripStrengthCard(state: WellnessUiState, onLog: (Boolean, Float) -> Unit) {
     TrackerCard(title = "Grip strength") {
         var dominant by
             remember(state.latestGrip?.dominantKg) {
@@ -767,7 +767,7 @@ internal fun GripStrengthCard(state: DashboardUiState, onLog: (Boolean, Float) -
 }
 
 @Composable
-internal fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> Unit) {
+internal fun BloodPressureCard(state: WellnessUiState, onSubmit: (Int, Int) -> Unit) {
     TrackerCard(title = "Blood pressure") {
         var systolic by remember { mutableIntStateOf(120) }
         var diastolic by remember { mutableIntStateOf(80) }
@@ -811,7 +811,7 @@ internal fun BloodPressureCard(state: DashboardUiState, onSubmit: (Int, Int) -> 
 }
 
 @Composable
-internal fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit) {
+internal fun MoodCard(state: WellnessUiState, onSubmit: (Int, Int, Int) -> Unit) {
     TrackerCard(title = "How are you?") {
         var vibe by remember(state.dailyLog.vibe) { mutableIntStateOf(state.dailyLog.vibe ?: 5) }
         var energy by
@@ -839,7 +839,7 @@ internal fun MoodCard(state: DashboardUiState, onSubmit: (Int, Int, Int) -> Unit
 // kind of drawing that looks right until one of them stops being distinguishable
 // from the others, and nothing outside a real layout pass would notice.
 @Composable
-internal fun MoodTrendCard(state: DashboardUiState) {
+internal fun MoodTrendCard(state: WellnessUiState) {
     val chartColors = LocalChartColors.current
     TrackerCard(title = "Vibe, energy and focus", subtitle = "1 to 10") {
         MultiLineChart(
@@ -872,7 +872,7 @@ internal fun MoodTrendCard(state: DashboardUiState) {
 }
 
 @Composable
-internal fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) -> Unit) {
+internal fun MovementCard(state: WellnessUiState, onLog: (MovementType, Int) -> Unit) {
     TrackerCard(title = "Movement") {
         var pushups by remember { mutableIntStateOf(20) }
         var squats by remember { mutableIntStateOf(20) }
@@ -913,7 +913,7 @@ internal fun MovementCard(state: DashboardUiState, onLog: (MovementType, Int) ->
 
 @Composable
 internal fun ReadingCard(
-    state: DashboardUiState,
+    state: WellnessUiState,
     onLogPages: (Int) -> Unit,
     onSetPages: (Int) -> Unit,
 ) {
@@ -972,7 +972,7 @@ internal fun ReadingCard(
  * to today's count.
  */
 @Composable
-private fun ReadingTrendCard(state: DashboardUiState) {
+private fun ReadingTrendCard(state: WellnessUiState) {
     TrackerCard(title = "Pages read", subtitle = "per day") {
         BarChart(
             days = state.logSeries { it.bookPagesRead?.toFloat() },

@@ -5,7 +5,7 @@ package com.prestondihle.healthtracker.domain
  *
  * Milligrams per decilitre, which is what the meter and the continuous monitor
  * in use both report. Gathered here for the same reason [Ketones] is: the entry
- * stepper, the dashboard chart, the master graph and the target-range setting
+ * stepper, the Wellness chart, the master graph and the target-range setting
  * all have to mean the same thing by this axis, and four copies of the numbers
  * drift.
  */

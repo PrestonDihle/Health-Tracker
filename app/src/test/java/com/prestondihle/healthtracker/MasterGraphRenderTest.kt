@@ -41,10 +41,10 @@ import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.today.MasterRange
 import com.prestondihle.healthtracker.ui.today.MasterSeries
 import com.prestondihle.healthtracker.ui.components.MealListCard
-import com.prestondihle.healthtracker.ui.dashboard.DashboardUiState
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.today.TodayScreen
 import com.prestondihle.healthtracker.ui.today.TodayViewModel
+import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -229,9 +229,9 @@ class MasterGraphRenderTest {
      * The smoothed line and the target band, on the one screen that can be
      * scrolled and asserted against.
      *
-     * The same two features sit on the dashboard's glucose card, but that screen
+     * The same two features sit on Wellness's glucose card, but that screen
      * runs a one-second ticker for the fast timer and so never reaches the idle
-     * state the test framework waits on -- see `ScreenRenderTest.dashboard
+     * state the test framework waits on -- see `ScreenRenderTest.wellness
      * renders`. The drawing code is shared, so covering it here covers both.
      */
     @Test
@@ -297,9 +297,9 @@ class MasterGraphRenderTest {
      * changing it -- the screen has to say which meals are merely dated, and stop
      * believing a repeated record.
      *
-     * The meal list moved to the Log tab, whose `DashboardViewModel` ticks and so
+     * The meal list moved to the Log tab, whose `WellnessViewModel` ticks and so
      * cannot be scrolled in a test. So `MealListCard` is composed on its own -- the
-     * `SleepCard` pattern -- against a `DashboardUiState` built from the four rows,
+     * `SleepCard` pattern -- against a `WellnessUiState` built from the four rows,
      * which is what runs the collapse and the stamped-time judgement the card then
      * renders. The state-level line between a measured time and a stamped one is
      * pinned separately in `MealTimeStampTest`.
@@ -334,7 +334,7 @@ class MasterGraphRenderTest {
                 )
             }
         val state =
-            DashboardUiState(now = Instant.now(), meals = meals, zoneId = ZoneId.of("UTC"))
+            WellnessUiState(now = Instant.now(), meals = meals, zoneId = ZoneId.of("UTC"))
 
         composeRule.setContent {
             HealthTrackerTheme {

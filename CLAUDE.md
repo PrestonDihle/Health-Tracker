@@ -99,22 +99,21 @@ metric with a daily goal (`DailyLog.bookPagesRead`), so the word already means s
 same collision is why the logging tab is **Log** rather than Log Book, the other half of the reason
 being that two words do not fit a sixth of a phone's width.
 
-**The six-tab move is largely done, but the code still says Dashboard in places.** Each tab opens its
-own screen now: **Today** the master graph, **Log** every hand-entry control (`LogScreen`), **Fuel**
-fasting with the consumption and macro cards, **Activity** the movement and body/vitals trends
+**The six-tab move is done, and the code says what the tabs say.** Each tab opens its
+own screen: **Today** the master graph, **Log** every hand-entry control (`LogScreen`), **Fuel**
+fasting with the consumption and macro cards, **Activity** the movement trends
 (`TrendsScreen`), **Wellness** the display cards with the vitals, mood and pages trends
-(`DashboardScreen`), **Settings** the config. Activity keeps only the *movement* trends — steps,
-runs, grip, pushups, air squats; waist, weight, blood pressure, resting heart rate and sleep went to
-Wellness and macros to Fuel, which is why `TrendsScreen` now backs a tab whose name it does not
-share. The cards moved a tab at a time — never unhooked before
-their replacement existed, on the phone holding the only copy of this data — and a few carry a home
-that outgrew their name (below).
+(`WellnessScreen`), **Settings** the config. Activity is only the *movement* trends — steps, runs,
+grip, pushups, air squats; waist, weight, blood pressure, resting heart rate and sleep went to
+Wellness and macros to Fuel, which is why `TrendsScreen` backs a tab whose name it does not share.
+The cards moved a tab at a time — never unhooked before their replacement existed, on the phone
+holding the only copy of this data — and one still carries a home that outgrew its name (below).
 
 **Two ViewModels are shared across tabs, hoisted in `TrackerNavHost` so a tab switch does not spin up
-a second copy — and, for the dashboard, a second Health Connect sync.** `DashboardViewModel` backs
+a second copy — and, for Wellness, a second Health Connect sync.** `WellnessViewModel` backs
 both Log (its input cards) and Wellness (its display cards); `TrendsViewModel` backs Activity,
 Wellness and Fuel (the trend charts). Log reuses Wellness's card composables directly — `BodyCard`,
-`MoodCard` and the rest are `internal` in `DashboardScreen.kt` for exactly that. The moved trend
+`MoodCard` and the rest are `internal` in `WellnessScreen.kt` for exactly that. The moved trend
 cards live in `ui/trends/TrendCards.kt` and the meal cards in `ui/components/MealCards.kt` so their
 new homes share one copy.
 
@@ -126,9 +125,16 @@ One place where the tab and the code disagree, and it will come up:
   did not become a different chart, and renaming its parts after the tab that happens to host them
   would be the drift this section exists to warn about rather than a cure for it.
 
-`DashboardScreen`, `DashboardViewModel` and `DashboardUiState` still say Dashboard but back
-**Wellness** now, and the same view model backs Log's logging cards. Renaming the trio to Wellness
-would be half a rename, since Log leans on it too — the name is stale, not the wiring.
+**`WellnessScreen`, `WellnessViewModel` and `WellnessUiState` were `Dashboard*` until the tab move
+settled**, and the argument against renaming them was that Log leans on the same view model, so
+Wellness would only ever be half the truth. That argument lost, and it is worth knowing why: a name
+naming *one* of a thing's two users is still better than a name naming neither, and `Dashboard` had
+stopped matching anything on screen at all. Log sharing `WellnessViewModel` is the deliberate part —
+a weight typed on Log is on Wellness's chart with no sync in between — and it is spelled out at the
+hoist in `TrackerNavHost` rather than left for the name to carry. The master graph above is the
+case that went the other way, and the two together are the rule: **rename a thing after what it now
+is, not after the tab that happens to host it.** Wellness was the first; the chart is not the
+second.
 
 The chart words are not interchangeable, and the distinctions are enforced by the drawing code rather
 than by convention — see *Drawing weight, and what gets read as data* for why each exists:
@@ -172,7 +178,7 @@ screen's ViewModel through that ViewModel's own `provideFactory(repository)` com
 Adding a screen means: a `Screen` enum entry, a `composable` block in `TrackerNavHost`, and a
 ViewModel with a `provideFactory`. A ViewModel shared across tabs is instead hoisted to the
 `TrackerNavHost` body (`viewModel()` at that scope is owned by the activity, so both routes get the
-one instance) and handed in as a parameter — that is how Log and Wellness share `DashboardViewModel`.
+one instance) and handed in as a parameter — that is how Log and Wellness share `WellnessViewModel`.
 The bottom bar carries six tabs (Today, Log, Fuel, Activity,
 Wellness, Settings) — Material divides the width evenly and truncates, so **new labels have to be one
 short word**; "Master Graph" rendered as "Master G...". Eight characters is the most that has ever
@@ -181,14 +187,14 @@ truncate.
 
 **ViewModels expose exactly one `StateFlow<...UiState>`**, assembled by `combine` over repository
 flows and `stateIn(SharingStarted.WhileSubscribed(5_000))`. Derived values (fast duration, goal
-fraction) are computed as `get()` properties on the UiState rather than stored. `DashboardViewModel`
+fraction) are computed as `get()` properties on the UiState rather than stored. `WellnessViewModel`
 additionally combines in a one-second `ticker` flow to drive the live fast timer. ViewModels take an
 injectable `ZoneId` defaulting to `systemDefault()`, which is what makes the time maths testable.
 
 **Window and range enums are the single source of a screen's query span.** `MasterRange`
 (3h/6h/12h/24h/48h/7d), `GlucoseWindow` (3h/6h/12h/24h/48h/72h) and `TrendsRange`
 (7/14/30/90 days) each drive both the chips and the query, so adding an entry widens the fetch with
-no second edit — `GLUCOSE_WINDOW_HOURS` is derived as the maximum, and the dashboard queries once at
+no second edit — `GLUCOSE_WINDOW_HOURS` is derived as the maximum, and Wellness queries once at
 that width so switching windows is a redraw rather than a round trip. Six chips no longer fit one row
 of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the widest
 options behind a gesture nobody knows is there.
@@ -259,7 +265,7 @@ three separate meals on one Tuesday — so every absorption curve was anchored t
 in. This is not something the app can compute its way out of; the clock time was never written. Two
 things follow from it:
 
-- `DashboardUiState.hasClockTime` calls a time of day **shared to the second by two different
+- `WellnessUiState.hasClockTime` calls a time of day **shared to the second by two different
   meals** a stamp rather than a measurement. (The meal list is the Log tab's now — its window is a
   fixed last-24-hours, no longer the master graph's; `TodayUiState` keeps only what the graph's meal
   markers need.) Genuine timestamps land on a different second every time; a source that knows only
@@ -361,7 +367,7 @@ prefers the manual entry on any day that has both. A sync must never overwrite a
 `totalCalories`/`activeCalories` are energy burned. They sit together on one row with a signed
 `netCalories` (eaten − burned, green under, red over), which is null unless *both* halves are known —
 substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
-Grouping burn figures next to protein/carbs/fat is what originally made the dashboard read as intake.
+Grouping burn figures next to protein/carbs/fat is what originally made Wellness read as intake.
 
 ### Sleep
 
@@ -402,7 +408,7 @@ explains most of what the other lines are doing.
 written only by `syncTimeSeries`. The Today card was built without that and shipped to the phone
 reading "No sleep recorded yet" while the Activity card directly above it displayed 5h 34m for the
 very night it claimed not to have — every test passed, because every test seeded `syncTimeSeries` by
-hand. `DashboardViewModel.refreshHealth` now calls it over `SLEEP_HEART_RATE_HISTORY`, **the same
+hand. `WellnessViewModel.refreshHealth` now calls it over `SLEEP_HEART_RATE_HISTORY`, **the same
 span the card queries**: syncing a narrower window than the chart reads leaves the early hours of a
 night permanently blank rather than merely late.
 
@@ -524,7 +530,7 @@ would hand the row a new id and silently orphan every tick already logged agains
 
 **Deleting a supplement clears its doses in the repository**, in that order. There are no foreign
 keys anywhere in this schema, so nothing cascades on the app's behalf, and ticks left behind would be
-keyed on an id nothing can resolve. `DashboardUiState.supplementsTakenCount` intersects rather than
+keyed on an id nothing can resolve. `WellnessUiState.supplementsTakenCount` intersects rather than
 counting tick rows for the same reason -- a stray dose must not read as "3 of 2 taken today".
 
 ### Health Connect
@@ -532,7 +538,7 @@ counting tick rows for the same reason -- a stray dose must not read as "3 of 2 
 Read-only. The manifest declares only `READ_*` permissions and no `WRITE_*`, and it must stay that
 way unless explicitly asked. Every field on `HealthDay` is nullable and every metric is fetched
 independently with failures swallowed to null — a user who grants steps but denies nutrition must
-get a blank macro card, not an empty dashboard. `HealthPermissionState.GRANTED` means *at least one*
+get a blank macro card, not an empty screen. `HealthPermissionState.GRANTED` means *at least one*
 requested permission was granted, not all of them.
 
 The manifest also needs the `<queries>` entry for `com.google.android.apps.healthdata` (package
@@ -690,7 +696,7 @@ but presented in exact quarter-inches (`roundToQuarter`, `formatInches` renders 
 strength follows the same rule: kilograms in the database, pounds on every screen.
 
 `domain/Glucose.kt` and `domain/Ketones.kt` own their axes for the same reason: the entry stepper,
-the dashboard chart, the master graph and the settings target all have to agree on what the scale
+the Wellness chart, the master graph and the settings target all have to agree on what the scale
 means, and four copies of the numbers drift. The glucose plot is **60–180 mg/dL**, not 60–200 —
 the top fifth of a 200 ceiling is never reached and spending it flattens the 30 mg/dL swing around a
 meal into a wiggle. Both charts still widen an axis to fit an outlier, so a 210 reading plots; it is
@@ -734,7 +740,7 @@ empty today (checked before the day's fast is logged) but not an empty yesterday
 first-order, so doses decay independently and simply add — which is why an afternoon coffee on top
 of a morning one reads much higher than either alone. `curve()` samples the level every 10 minutes
 rather than plotting one point per dose: the decay between doses is exponential, and joining dose
-points directly would draw it as a straight ramp. The dashboard loads doses from further back than
+points directly would draw it as a straight ramp. Fuel loads doses from further back than
 it plots (`RELEVANT_HISTORY_HOURS`), because a dose from before the window is still decaying inside
 it.
 
@@ -982,7 +988,7 @@ behaviour belongs there. `ExampleUnitTest` and `ExampleRobolectricTest` are scaf
 Awkwardly, the duplicate-collapse cannot be reached through a sync at all any more: the sync rejects
 duplicates on the way in, so a test that needs rows in the state a *previous* version of the app left
 them has to build them itself. `MasterGraphRenderTest` now hands four `MealEntry` rows straight to a
-`DashboardUiState` and composes `MealListCard` on them — the collapse and the stamped-time judgement
+`WellnessUiState` and composes `MealListCard` on them — the collapse and the stamped-time judgement
 both live on the state, so nothing is lost by skipping the repository, and the fake data source that
 used to plant them through the DAO is gone with it. `stampedTime` is what survives and is the part
 worth keeping: a round hour a couple back, **deliberately not midnight**, because midnight has a rule
@@ -1006,17 +1012,17 @@ the test re-scores between syncs. It pins that a re-scored night *replaces* its 
 accumulating them — the case the per-night delete exists for, where the second scoring has fewer
 stretches than the first and an upsert alone leaves the vanished ones on disk to be counted twice.
 
-**The sleep card is composed directly, not through the dashboard.** A `LazyColumn` builds only what
+**The sleep card is composed directly, not through Wellness.** A `LazyColumn` builds only what
 is on screen and this screen cannot be scrolled in a test, so the third card down is never
 constructed at all — the hypnogram's canvas arithmetic would go entirely unexercised while the
-dashboard screenshot still looked fine. `SleepCard` is `internal` for exactly this, and
+Wellness screenshot still looked fine. `SleepCard` is `internal` for exactly this, and
 `ScreenRenderTest` renders it on its own with a night seeded through the real sync.
 
 **This is the pattern the six-tab move keeps needing, and it is now three cards deep.** A card that
 moves onto a ticking screen loses its scroll-to test on arrival — the ticker means the screen never
 reaches idle, so `performScrollToNode` times out rather than finding anything. `MoodTrendCard` came
 off Activity that way and follows `SleepCard`: `internal`, composed on its own in `ScreenRenderTest`
-against a `DashboardUiState` whose `logHistory` is read back out of the seeded repository, so the
+against a `WellnessUiState` whose `logHistory` is read back out of the seeded repository, so the
 state under test is the shape the view model would have assembled. `MealListCard` is the third, in
 `MasterGraphRenderTest`. **Prefer this to widening a scroll timeout** — the timeout is not the
 problem, and a card composed directly is also the only way its own drawing gets a real layout pass.
@@ -1056,10 +1062,11 @@ out after a minute, and throws `AppNotIdleException`. Anything below the fold th
 asserted on a screen that does not tick, which is why the glucose smoothing and target band are
 covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
 
-**That ticker now belongs to `FuelViewModel`**, which followed the fast card off the dashboard, and
-Fuel is the longest tab in the app at eleven cards — so it has the problem worse than the
-dashboard ever did. (Thirteen until the extended-fast entries moved inside their own card for the
-reordering; the count moved, the problem did not.) Today is the screen that gained by the swap: its `minuteTicker` looks like a
+**That ticker now belongs to `FuelViewModel`**, which followed the fast card off Wellness, and
+Fuel is the longest tab in the app at eleven cards — so it has the problem worse than Wellness ever
+did. (Thirteen until the extended-fast entries moved inside their own card for the reordering; the
+count moved, the problem did not.) Wellness still ticks too, which is what the mood card's direct
+composition is for. Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master
 graph's suite can scroll and wait on idle at all.
 
