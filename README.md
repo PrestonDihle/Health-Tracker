@@ -281,8 +281,8 @@ read a tape against beats a number you have to divide. The card names the larges
 waist that still passes at your height: at 6'3" that is 41", because 41½" divides
 to 0.553 and fails.
 
-A ratio of 0.55 or over leads to a body-fat assessment, which this app does not
-calculate — the memorandum gives the limits but not the method.
+The ratio is the whole assessment — there is no tape test or body-fat
+calculation behind it.
 
 ## Fast adherence
 

@@ -720,6 +720,40 @@ pounds, so zero is a long way from anywhere useful, and the pass mark is the fig
 anyway. Each stepper shows the points its current value would earn as it moves, which is the only
 question being asked while entering a plank time.
 
+### CGM summary metrics
+
+`domain/GlucoseMetrics.kt` computes the standard continuous-monitoring figures over a window:
+time in/below/above range, mean, standard deviation, GMI (`3.31 + 0.02392 × mean`) and coefficient
+of variation. All of them are read-time computations over the cached `BloodSugarReading` rows —
+nothing is stored, because nothing here is expensive and a stored summary is one that has to be
+invalidated when the target band moves.
+
+**Every one of these is a proportion, and that is what makes the coverage gate the important part.**
+A fragment of a day produces a perfectly well-formed time-in-range that is simply about a different
+span than the one asked for, and nothing on screen can tell the two apart — a morning of readings
+after a sensor change would otherwise report a figure for the whole day. `GlucoseAnalysis.over`
+returns **null** below `MIN_COVERAGE` (70%, the consensus minimum for calling a summary
+representative), which is ground rule 6 in its most literal form: a day without coverage has no
+time-in-range, and null is not zero.
+
+**Coverage is judged on the span the readings occupy, not on counting them against an assumed
+cadence.** Sensors differ, warm up, and are read by hand as well, so a count-based gate would be a
+gate on owning a particular device. Four fingersticks spread across a day have genuinely sampled it
+and are reported; two hundred readings crammed into one morning are not and are refused.
+
+Two details that decide real numbers. The band's own edges **count as in range** — an exclusive
+comparison would report a reading exactly on target as an excursion. And the standard deviation is
+the **population** one, not the sample: these are all the readings there are for the window, not a
+sample drawn from more of them.
+
+`coefficientOfVariation` is reported beside the mean rather than instead of it because it answers a
+question the mean actively hides. A trace swinging 55 to 165 averages a respectable 110 with a CV of
+fifty per cent and **not one reading in range** — the mean is a number that never occurred. The
+consensus ceiling for a stable trace is 36%, on `GlucoseMetrics.STABLE_CV_PERCENT`.
+
+GMI is an estimate from sensor data and is presented as a model: close enough to plan against, not
+close enough to argue with a lab result about.
+
 ### Body composition
 
 `domain/BodyComposition.kt` is the military body composition screen, and it is **waist over height,
@@ -757,10 +791,9 @@ has to be divided. `maxPassingWaistInches` is the largest half inch strictly und
 `subGoalLine`, hairline and finer-dashed, because the reader's chosen waist goal above it is where
 they are going and this is only where the standard stops.
 
-**A Soldier at or over 0.55 goes on to a body-fat assessment**, capped at 18% for men and 26% for
-women. That is not implemented: the memorandum quoted above gives the limits but not the tape
-formula, and inventing one would produce a confident percentage against a method nobody published.
-Ground rule 11 applies — find the primary source before building it.
+**The ratio is the whole assessment.** Earlier drafts of this section described a body-fat tape test
+following a failed screen; there is no such follow-on, and nothing here should grow one. The screen
+is two measurements and a comparison, start to finish.
 
 ### Room
 
@@ -1111,8 +1144,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
-`SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest` and
-`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
+`SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
+`GlucoseMetricsTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
