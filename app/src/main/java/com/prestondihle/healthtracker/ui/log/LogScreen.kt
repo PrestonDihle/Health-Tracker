@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.mealPresets
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.MealListCard
@@ -84,6 +85,7 @@ fun LogScreen(
                                 viewModel.deleteMeal(it)
                                 toast("Meal deleted")
                             },
+                            mealPresets = state.settings.mealPresets,
                         )
                     },
                     ReorderableCard("body") {

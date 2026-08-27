@@ -29,6 +29,7 @@ import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -92,6 +93,8 @@ internal fun MealListCard(
     onAdd: (calories: Int, protein: Int, carbs: Int, fat: Int, at: Instant) -> Unit,
     onUpdate: (MealEntry, Int, Int, Int, Int, Instant) -> Unit,
     onDelete: (MealEntry) -> Unit,
+    /** The reader's habitual meal times, offered only where the time is stamped. */
+    mealPresets: List<LocalTime> = emptyList(),
 ) {
     var editing by remember { mutableStateOf<MealEntry?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -198,6 +201,12 @@ internal fun MealListCard(
                 editing = null
             },
             isEdit = true,
+            // Only where the time is a stamp. On a meal whose clock time was
+            // genuinely recorded the chips would offer to replace a measurement
+            // with a habit, which is the wrong direction for every other
+            // correction in this app.
+            presets = if (hasClockTime(meal)) emptyList() else mealPresets,
+            now = now,
         )
     }
 
@@ -235,6 +244,9 @@ internal fun MealListCard(
                 onAdd(it.calories, it.proteinGrams, it.carbGrams, it.fatGrams, it.at)
                 adding = false
             },
+            // No presets when logging a new meal: it opens at this moment, which
+            // is already the answer. The chips are a correction, not a shortcut.
+            now = now,
         )
     }
 }

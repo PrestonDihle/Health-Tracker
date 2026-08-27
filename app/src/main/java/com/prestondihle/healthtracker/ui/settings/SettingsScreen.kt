@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,9 +28,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,7 +59,11 @@ import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.work.CaffeineLastCallWorker
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+
+/** The clock face on the meal-time chips, matching the one the meal list prints. */
+private val MEAL_PRESET_FORMAT = DateTimeFormatter.ofPattern("h:mm a")
 
 /**
  * Where the bedtime caffeine limit starts once it is switched on.
@@ -589,6 +599,22 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                 }
             }
                     },
+                    ReorderableCard("mealTimes") {
+                        MealPresetCard(
+                            breakfast = state.settings.mealPresetBreakfast,
+                            lunch = state.settings.mealPresetLunch,
+                            dinner = state.settings.mealPresetDinner,
+                            onChange = { breakfast, lunch, dinner ->
+                                viewModel.saveSettings(
+                                    state.settings.copy(
+                                        mealPresetBreakfast = breakfast,
+                                        mealPresetLunch = lunch,
+                                        mealPresetDinner = dinner,
+                                    )
+                                )
+                            },
+                        )
+                    },
                     ReorderableCard("backup") {
                         BackupCard(
                             isExporting = state.isExporting,
@@ -604,6 +630,118 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
             onMove = orderViewModel::move,
         )
     }
+}
+
+/**
+ * The three times offered as one-tap chips when a stamped meal is corrected.
+ *
+ * Here rather than buried in the meal dialog because the point of the presets is
+ * that they are already right: a reader who has to fix them at the moment they
+ * are using them has been given four taps to save two. Setting them is a rare
+ * act, correcting a stamped meal is a daily one, and the two belong on different
+ * screens for that reason.
+ *
+ * Labelled breakfast/lunch/dinner although nothing downstream reads the names --
+ * the chips on the meal dialog show times alone. The labels are here so the
+ * three fields can be told apart while they are being set, which is the only
+ * place the distinction does any work.
+ */
+@Composable
+private fun MealPresetCard(
+    breakfast: LocalTime,
+    lunch: LocalTime,
+    dinner: LocalTime,
+    onChange: (LocalTime, LocalTime, LocalTime) -> Unit,
+) {
+    // Which of the three is being edited, or null while none is.
+    var editing by remember { mutableStateOf<MealSlot?>(null) }
+
+    SettingsCard(title = "Meal times") {
+        Text(
+            "A nutrition source that records only the date stamps every meal at one time of " +
+                "day. These three are offered as one-tap fixes on such a meal, so set them to " +
+                "when you actually eat.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        MealSlot.entries.forEach { slot ->
+            val time = slot.from(breakfast, lunch, dinner)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(slot.label, style = MaterialTheme.typography.bodyMedium)
+                AssistChip(
+                    onClick = { editing = slot },
+                    label = {
+                        Text(
+                            MEAL_PRESET_FORMAT.format(time),
+                            maxLines = 1,
+                            // "12:00 PM" otherwise breaks after the minutes and
+                            // renders as two stacked lines in a narrow chip.
+                            softWrap = false,
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    editing?.let { slot ->
+        MealPresetDialog(
+            slot = slot,
+            initial = slot.from(breakfast, lunch, dinner),
+            onDismiss = { editing = null },
+            onConfirm = { picked ->
+                onChange(
+                    if (slot == MealSlot.BREAKFAST) picked else breakfast,
+                    if (slot == MealSlot.LUNCH) picked else lunch,
+                    if (slot == MealSlot.DINNER) picked else dinner,
+                )
+                editing = null
+            },
+        )
+    }
+}
+
+/** Which of the three preset fields a row edits. */
+private enum class MealSlot(val label: String) {
+    BREAKFAST("Breakfast"),
+    LUNCH("Lunch"),
+    DINNER("Dinner");
+
+    fun from(breakfast: LocalTime, lunch: LocalTime, dinner: LocalTime): LocalTime =
+        when (this) {
+            BREAKFAST -> breakfast
+            LUNCH -> lunch
+            DINNER -> dinner
+        }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MealPresetDialog(
+    slot: MealSlot,
+    initial: LocalTime,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalTime) -> Unit,
+) {
+    val pickerState =
+        rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(slot.label) },
+        text = { TimePicker(state = pickerState) },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(LocalTime.of(pickerState.hour, pickerState.minute)) }) {
+                Text("Set")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        containerColor = MaterialTheme.colorScheme.surface,
+    )
 }
 
 /**

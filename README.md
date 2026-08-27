@@ -14,7 +14,7 @@ reps and reading.
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary and the macro trend |
 | **Activity** | The Army Fitness Test scorecard, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
-| **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, backup export |
+| **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
 
 **Cards are grouped by subject, and Log is the exception that proves it.**
 Anything with a subject of its own sits next to what it feeds: the caffeine
@@ -358,6 +358,13 @@ clock time that was never written, so instead:
   a plausible-looking time. Real timestamps do not repeat to the second.
 - Meals can be **corrected, deleted, or logged by hand** — the only Health
   Connect cache that is editable at all. Corrections survive re-syncing.
+- Fixing a flagged meal takes **one tap**. Your own breakfast, lunch and dinner
+  times sit above the clock face as chips, and tapping one saves the meal at it;
+  the full picker is still there for a meal eaten at some other hour. A chip for
+  a time that has not come round yet is greyed out rather than quietly logging
+  the meal at this moment. Set the three under **Settings → Meal times** — they
+  start at 6:30, 12:00 and 18:30, and they are only offered on a meal whose time
+  was stamped, never on one that was genuinely recorded.
 - The same source may also write one meal as several records. Records agreeing on
   timestamp, energy, all three macros and name are counted once; anything
   differing at all is kept, so a genuine second helping survives.

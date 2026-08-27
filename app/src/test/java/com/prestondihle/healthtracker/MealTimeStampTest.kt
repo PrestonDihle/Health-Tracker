@@ -2,8 +2,11 @@ package com.prestondihle.healthtracker
 
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
+import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.mealPresets
 import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,5 +108,51 @@ class MealTimeStampTest {
         val b = meal(2, "2026-08-20T12:37:41Z", calories = 700)
 
         assertFalse(state(a, b).hasClockTime(a))
+    }
+
+    /**
+     * The presets offered to fix a stamped meal, in the order they are eaten.
+     *
+     * The three are set in separate fields and nothing stops a night-shift reader
+     * putting "breakfast" after "dinner", so the row is sorted rather than
+     * declared -- a chip row running backwards reads as a bug in the app instead
+     * of a choice in the settings.
+     */
+    @Test
+    fun `the meal presets read through the day whatever order they were set in`() {
+        val settings =
+            UserSettings(
+                mealPresetBreakfast = LocalTime.of(22, 0),
+                mealPresetLunch = LocalTime.of(6, 0),
+                mealPresetDinner = LocalTime.of(14, 0),
+            )
+
+        assertEquals(
+            listOf(LocalTime.of(6, 0), LocalTime.of(14, 0), LocalTime.of(22, 0)),
+            settings.mealPresets,
+        )
+    }
+
+    @Test
+    fun `two presets set to the same time are offered once`() {
+        // Two identical chips are one chip drawn twice, and the second is a tap
+        // that cannot do anything the first did not.
+        val settings =
+            UserSettings(
+                mealPresetBreakfast = LocalTime.of(7, 0),
+                mealPresetLunch = LocalTime.of(7, 0),
+                mealPresetDinner = LocalTime.of(19, 0),
+            )
+
+        assertEquals(listOf(LocalTime.of(7, 0), LocalTime.of(19, 0)), settings.mealPresets)
+    }
+
+    /** The shipped defaults, which are what an upgrading user's migration seeds. */
+    @Test
+    fun `the presets default to breakfast lunch and dinner`() {
+        assertEquals(
+            listOf(LocalTime.of(6, 30), LocalTime.of(12, 0), LocalTime.of(18, 30)),
+            UserSettings().mealPresets,
+        )
     }
 }

@@ -6,6 +6,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -31,6 +33,7 @@ import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.mealPresets
 import com.prestondihle.healthtracker.domain.SleepStage
 import com.prestondihle.healthtracker.domain.SleepStageInterval
 import com.prestondihle.healthtracker.health.HealthDataSource
@@ -47,6 +50,8 @@ import com.prestondihle.healthtracker.ui.today.TodayViewModel
 import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.runBlocking
@@ -369,6 +374,144 @@ class MasterGraphRenderTest {
         assertEquals(2, composeRule.onAllNodesWithText("Meal").fetchSemanticsNodes().size)
 
         composeRule.onRoot().captureRoboImage("build/screenshots/log_undated_meals.png")
+    }
+
+    /**
+     * The whole point of the presets: a stamped meal is corrected in one tap.
+     *
+     * Everything here is pinned to a fixed instant rather than to `now`, and that
+     * is not tidiness. The chips disable themselves for a time that has not
+     * happened yet, so presets hung off the real clock would leave this test
+     * green in the evening and red before breakfast -- the `NightEndedHoursAgo`
+     * failure, arriving from the other direction. A day last May is in the past
+     * at every hour this suite will ever run at.
+     */
+    @Test
+    fun `a preset chip fixes a stamped meal in a single tap`() {
+        val zone = ZoneId.of("UTC")
+        val pinnedNow = Instant.parse("2026-05-14T15:00:00Z")
+        val stamped = stampedTime(pinnedNow)
+
+        // Two meals sharing one time of day, which is what makes the time a stamp
+        // rather than a measurement. A single meal would carry a clock time as far
+        // as the card is concerned and would be offered no chips at all.
+        val meals =
+            listOf(
+                MealEntry(
+                    timestamp = stamped,
+                    calories = 602,
+                    proteinGrams = 30f,
+                    carbGrams = 16.5f,
+                    fatGrams = 20f,
+                    source = DataSourceEnum.HEALTH_CONNECT,
+                    externalId = "stamped-a",
+                ),
+                MealEntry(
+                    timestamp = stamped,
+                    calories = 573,
+                    proteinGrams = 25f,
+                    carbGrams = 9.3f,
+                    fatGrams = 18f,
+                    source = DataSourceEnum.HEALTH_CONNECT,
+                    externalId = "stamped-b",
+                ),
+            )
+        val settings = UserSettings()
+        val state = WellnessUiState(now = pinnedNow, meals = meals, zoneId = zone)
+
+        var savedAt: Instant? = null
+        composeRule.setContent {
+            HealthTrackerTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    MealListCard(
+                        meals = state.mealsInWindow,
+                        undatedMeals = state.undatedMealsInWindow,
+                        duplicatesCollapsed = state.duplicatesCollapsed,
+                        zoneId = state.zoneId,
+                        now = state.now,
+                        hasClockTime = { state.hasClockTime(it) },
+                        onAdd = { _, _, _, _, _ -> },
+                        onUpdate = { _, _, _, _, _, at -> savedAt = at },
+                        onDelete = {},
+                        mealPresets = settings.mealPresets,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Tap one: open the meal whose time is wrong.
+        composeRule.onAllNodesWithText("Meal")[0].performClick()
+        composeRule.waitForIdle()
+
+        // Tap two: the answer. No drag on a clock face, and no separate Save --
+        // which is the difference the card exists to make.
+        composeRule.onNodeWithText("12:00 PM").performClick()
+        composeRule.waitForIdle()
+
+        // Noon on the day the source did record, not noon today: the stamp got
+        // the date right and only the time wrong, and rewriting the date would
+        // move the meal off the day its macros were counted into.
+        assertEquals(
+            LocalDate.of(2026, 5, 14).atTime(LocalTime.NOON).atZone(zone).toInstant(),
+            savedAt,
+        )
+    }
+
+    /**
+     * A preset that has not come round yet is refused rather than quietly moved.
+     *
+     * The clamp on Save turns a future time into this moment, which is right for
+     * a picker the reader has just dragged and wrong for a chip: tapping "6:30 PM"
+     * at lunchtime and getting a meal logged at 12:31 is a wrong write that looks
+     * exactly like a right one -- the hydration-tap failure again, where a
+     * plausible bad row could not be found afterwards.
+     */
+    @Test
+    fun `a preset later than now cannot be tapped`() {
+        val zone = ZoneId.of("UTC")
+        // Pinned early enough in the day that the evening preset is still ahead of
+        // it, and the state's `now` is what the card renders the window against.
+        val pinnedNow = Instant.parse("2026-05-14T09:00:00Z")
+        val stamped = stampedTime(pinnedNow)
+        val meals =
+            listOf("future-a", "future-b").mapIndexed { index, id ->
+                MealEntry(
+                    timestamp = stamped,
+                    calories = 400 + index,
+                    source = DataSourceEnum.HEALTH_CONNECT,
+                    externalId = id,
+                )
+            }
+        val state = WellnessUiState(now = pinnedNow, meals = meals, zoneId = zone)
+
+        composeRule.setContent {
+            HealthTrackerTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    MealListCard(
+                        meals = state.mealsInWindow,
+                        undatedMeals = state.undatedMealsInWindow,
+                        duplicatesCollapsed = state.duplicatesCollapsed,
+                        zoneId = state.zoneId,
+                        now = state.now,
+                        hasClockTime = { state.hasClockTime(it) },
+                        onAdd = { _, _, _, _, _ -> },
+                        onUpdate = { _, _, _, _, _, _ -> },
+                        onDelete = {},
+                        // One preset either side of the pinned moment, so the same
+                        // render answers both halves of the rule.
+                        mealPresets = listOf(LocalTime.of(6, 30), LocalTime.of(18, 30)),
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithText("Meal")[0].performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("6:30 AM").assertIsEnabled()
+        composeRule.onNodeWithText("6:30 PM").assertIsNotEnabled()
     }
 
     @Test

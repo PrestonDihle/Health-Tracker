@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import com.prestondihle.healthtracker.data.AppDatabase
+import java.time.LocalTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -419,6 +420,11 @@ class MigrationSchemaTest {
             // The AFT lane, the fifth alteration and NOT NULL with its own seeded
             // default -- there is no such thing as being on neither standard.
             AppDatabase.migration16To17Statements.forEach { raw.execSQL(it) }
+            // The three meal-time presets, the sixth. Stored as second-of-day by
+            // `Converters`, so they are INTEGER columns rather than the TEXT a
+            // time reads as -- getting that wrong is exactly the mismatch this
+            // replay exists to catch, and it would not fail until the next launch.
+            AppDatabase.migration17To18Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -457,6 +463,7 @@ class MigrationSchemaTest {
             AppDatabase.migration8To9Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration13To14Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration16To17Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration17To18Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
@@ -480,16 +487,26 @@ class MigrationSchemaTest {
                     assertEquals(80, it.getInt(7))
                     assertEquals(480, it.getInt(8))
                 }
-            raw.query("SELECT `smoothGlucose`, `sex`, `aftLane` FROM `UserSettings`").use {
-                it.moveToNext()
-                assertEquals(0, it.getInt(0))
-                // `sex` is NOT NULL, so an existing row needs the seeded default or
-                // the migration fails outright -- the smoothGlucose case again.
-                assertEquals("UNSPECIFIED", it.getString(1))
-                // And the lane, for the same reason: an upgrading user lands on the
-                // general standard rather than on no standard at all.
-                assertEquals("GENERAL", it.getString(2))
-            }
+            raw.query(
+                    "SELECT `smoothGlucose`, `sex`, `aftLane`, `mealPresetBreakfast`, " +
+                        "`mealPresetLunch`, `mealPresetDinner` FROM `UserSettings`"
+                )
+                .use {
+                    it.moveToNext()
+                    assertEquals(0, it.getInt(0))
+                    // `sex` is NOT NULL, so an existing row needs the seeded default or
+                    // the migration fails outright -- the smoothGlucose case again.
+                    assertEquals("UNSPECIFIED", it.getString(1))
+                    // And the lane, for the same reason: an upgrading user lands on the
+                    // general standard rather than on no standard at all.
+                    assertEquals("GENERAL", it.getString(2))
+                    // Seconds of day, because that is how `Converters` stores a
+                    // LocalTime. An upgrading user gets 06:30/12:00/18:30 rather than
+                    // three chips with nothing written on them.
+                    assertEquals(LocalTime.of(6, 30).toSecondOfDay(), it.getInt(3))
+                    assertEquals(LocalTime.of(12, 0).toSecondOfDay(), it.getInt(4))
+                    assertEquals(LocalTime.of(18, 30).toSecondOfDay(), it.getInt(5))
+                }
         } finally {
             db.close()
         }

@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -504,6 +504,38 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The three meal times offered as chips when a stamped meal is corrected.
+         *
+         * `Converters` stores a `LocalTime` as its second of day, so these are
+         * INTEGER columns and the defaults are seconds: 23400 is 06:30, 43200 is
+         * 12:00, 66600 is 18:30.
+         *
+         * They carry SQLite defaults for the `MIGRATION_5_6` reason rather than
+         * the `MIGRATION_11_12` one. This drives something on screen that ships
+         * pre-filled, so a NULL arriving on an upgrading user's row would draw
+         * three chips with no times on them -- a feature that looks broken on
+         * exactly the phones that had data worth migrating. The bedtime caffeine
+         * limit could stay silent because a notification nobody asked for is the
+         * worse failure there; a blank chip is not silent, it is wrong.
+         */
+        internal val migration17To18Statements =
+            listOf(
+                "ALTER TABLE `UserSettings` ADD COLUMN `mealPresetBreakfast` INTEGER NOT NULL " +
+                    "DEFAULT 23400",
+                "ALTER TABLE `UserSettings` ADD COLUMN `mealPresetLunch` INTEGER NOT NULL " +
+                    "DEFAULT 43200",
+                "ALTER TABLE `UserSettings` ADD COLUMN `mealPresetDinner` INTEGER NOT NULL " +
+                    "DEFAULT 66600",
+            )
+
+        private val MIGRATION_17_18 =
+            object : Migration(17, 18) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration17To18Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -534,6 +566,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_14_15,
                                 MIGRATION_15_16,
                                 MIGRATION_16_17,
+                                MIGRATION_17_18,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

@@ -277,6 +277,23 @@ things follow from it:
   exactly `00:00:00` is a date too. The list says "set time" instead of printing a plausible-looking
   clock time. **Do not narrow this back to a midnight check** — that was the first attempt, and the
   phone's 10:00 stamp sails straight past it. The repeat is the signal; the particular hour is not.
+- **A stamped meal is corrected with one tap, from three preset chips.** `UserSettings` holds the
+  reader's own breakfast, lunch and dinner times (`mealPresets` sorts them through the day and drops
+  a repeat), and `MealEntryDialog` offers them **above** the clock face — under a 250dp `TimePicker`
+  they would be below the fold of the dialog, which is where the series switches were when the
+  legend briefly replaced them. A chip **saves as well as sets**: the meal was opened because its
+  time is wrong, and a chip that only moved the clock hands would leave the reader a Save button
+  away from the thing they had already said.
+
+  Two rules keep it from being a shortcut to a wrong answer. The chips appear **only where
+  `hasClockTime` is false** — on a meal whose time was genuinely recorded they would offer to
+  replace a measurement with a habit, which is the wrong direction for every correction here. And a
+  preset later than now is **disabled rather than clamped**: Save quietly pulls a future time back to
+  this moment, which is right for a picker somebody just dragged and wrong for a chip, where tapping
+  "6:30 PM" at lunchtime would log a meal at 12:31 — a wrong write that looks exactly like a right
+  one, which is the hydration-tap failure again. `MealEntryDialog` therefore takes `now` as a
+  parameter, injected like the view models' `ZoneId` and for the same reason: a dialog reading the
+  wall clock can only be tested at the hours it happens to agree with.
 - Meals are **editable and deletable**, uniquely among the Health Connect caches — and a meal can be
   logged by hand outright. A source that stamps the wrong time, writes a meal twice, or records one
   that was never eaten cannot be argued with, so the curves are only worth reading if the meals
@@ -814,7 +831,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 17, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 18, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -882,6 +899,20 @@ two to guess wrong: it scores a combat-MOS Soldier a little generously on the to
 the other way would tell everyone else they had failed a test they passed. It joins the UserSettings
 replay in `MigrationSchemaTest` rather than taking a test of its own — that table is altered five
 times now and only the full replay catches a gap.
+
+`MIGRATION_17_18` adds the three meal-time presets to `UserSettings`, the sixth alteration to that
+table. They are **INTEGER columns, not TEXT**: `Converters` stores a `LocalTime` as its second of
+day, so the seeded defaults are `23400`, `43200` and `66600` rather than anything that reads as a
+clock time. Writing them as TEXT is the exact mismatch the schema replay exists to catch, and it
+would not fail a build — it would throw on the next launch for anyone upgrading.
+
+They carry SQLite defaults for the `MIGRATION_5_6` reason rather than the `MIGRATION_11_12` one, and
+the pair is worth holding together because the two look identical from the migration alone. The
+bedtime caffeine limit could arrive NULL because it drives a *notification*, and a default there
+means interrupting an upgrading user with something never asked for. These drive something drawn on
+screen that ships pre-filled, so a NULL would render three chips with no times on them — a feature
+that looks broken on exactly the phones with data worth migrating. **Ask what a NULL would do on
+screen, not whether the column is new.**
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
@@ -1178,7 +1209,19 @@ overshoot beyond the readings' own range, no lag on a rise, and isolated reading
 Duplicates pins the line between one meal written twice and two similar meals, in both directions,
 and `MealTimeStampTest` pins the one between a measured meal time and a stamped one — including that
 three copies of a single meal must *not* make its own timestamp look invented, which only holds
-because the collapse runs first.
+because the collapse runs first. It also pins the meal presets, which are ordinary enough to look
+untestable: that they read through the day whatever order the three fields were set in, that two set
+alike are offered once, and what the shipped defaults are — the last being the figure
+`MIGRATION_17_18` seeds, so the two cannot drift apart silently.
+
+**The preset tests pin their clock rather than reading it, and they have to.** A chip disables itself
+for a time that has not come round yet, so a fixture hung off `Instant.now()` would pass in the
+evening and fail before breakfast — the `NightEndedHoursAgo` problem arriving from the other
+direction. `MasterGraphRenderTest` pins both `WellnessUiState.now` and the dialog's own `now` to a
+fixed afternoon last May, which puts one preset either side of that moment, so a single render
+answers both halves of the rule: the earlier chip is tappable and saves noon *on the day the source
+recorded* — not noon today, since the stamp got the date right and only the time wrong — and the
+later one cannot be tapped at all.
 `GlucoseGapsTest` pins both failure modes of the backfill at once — missing a real hole leaves the
 chart permanently wrong about hours that *were* recorded, and finding one in every sensor stutter
 spends a query on every refresh forever — which is why it carries a fixture for an ordinary
@@ -1279,9 +1322,10 @@ asserted on a screen that does not tick, which is why the glucose smoothing and 
 covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
 
 **That ticker now belongs to `FuelViewModel`**, which followed the fast card off Wellness, and
-Fuel is the longest tab in the app at twelve cards, tying Settings — so it has the problem worse
+Fuel is the longest *ticking* tab in the app at twelve cards — so it has the problem worse
 than Wellness ever did. (The count keeps moving: thirteen before the extended-fast entries moved
-inside their own card, eleven after, twelve again with the blood sugar summary. The problem does
+inside their own card, eleven after, twelve again with the blood sugar summary. Settings is longer
+still at thirteen with the meal times, and does not tick. The problem does
 not move, so do not read the figure as the point.) Wellness still ticks too, which is what the mood card's direct
 composition is for. Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master

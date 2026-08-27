@@ -679,4 +679,37 @@ data class UserSettings(
      * because there is no such thing as being on neither standard.
      */
     val aftLane: AftLane = AftLane.GENERAL,
+    /**
+     * The three times offered as one-tap chips when a stamped meal is given a
+     * real one.
+     *
+     * A nutrition source that records only the date stamps every meal at one
+     * fixed time of day, and the correction is nearly always the same shape:
+     * this was breakfast, this was lunch, this was dinner. Naming those three
+     * turns the fix into a single tap, where the clock face costs a drag and a
+     * confirm to say something the reader knew before they opened it.
+     *
+     * Editable because they are the reader's own meal times rather than a
+     * universal 0630/1200/1830. A preset that is never the right answer is
+     * worse than no preset: it still has to be read before it can be rejected.
+     *
+     * `NOT NULL` with seeded defaults, the shape `sex` and `aftLane` use. No
+     * state here means "no preset" -- the chips are the whole feature, and a
+     * null would draw one with no time on it.
+     */
+    val mealPresetBreakfast: LocalTime = LocalTime.of(6, 30),
+    val mealPresetLunch: LocalTime = LocalTime.of(12, 0),
+    val mealPresetDinner: LocalTime = LocalTime.of(18, 30),
 )
+
+/**
+ * The three meal presets as a chip row: through the day, and each time once.
+ *
+ * An extension rather than a property on the entity, so Room has no column to
+ * ask about. Sorted because the three are edited in separate fields and nothing
+ * stops a night-shift reader putting "breakfast" at 22:00 -- a row running
+ * backwards would be read as a mistake in the app rather than in the settings.
+ * Distinct because two chips at the same time are one chip drawn twice.
+ */
+val UserSettings.mealPresets: List<LocalTime>
+    get() = listOf(mealPresetBreakfast, mealPresetLunch, mealPresetDinner).distinct().sorted()

@@ -2,11 +2,14 @@ package com.prestondihle.healthtracker.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +34,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private val DAY_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
+private val PRESET_FORMAT = DateTimeFormatter.ofPattern("h:mm a")
 
 /** Atwater factors: the energy a gram of each macro carries. */
 private const val KCAL_PER_PROTEIN_GRAM = 4
@@ -59,7 +63,7 @@ data class MealDraft(
  * yesterday, and a nested dialog to say so would cost more taps than the whole
  * entry is worth.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MealEntryDialog(
     initial: MealDraft,
@@ -69,6 +73,21 @@ fun MealEntryDialog(
     /** Supplied when correcting an existing meal; absent when logging a new one. */
     /** Titles the dialog "Edit meal" rather than "Log meal"; deleting lives on the row. */
     isEdit: Boolean = false,
+    /**
+     * The reader's habitual meal times, offered as one-tap chips above the clock.
+     *
+     * Empty for every meal whose time is already a measurement -- the chips are
+     * a correction for a stamped time, and on a meal that has a real one they
+     * would offer to overwrite it with a guess.
+     */
+    presets: List<LocalTime> = emptyList(),
+    /**
+     * This moment, injected for the same reason the view models take a `ZoneId`:
+     * it is what decides which presets are still ahead of the reader, and a
+     * dialog reading the wall clock can only be tested at the hours it happens
+     * to agree with. The caller's is live -- the meal list ticks once a second.
+     */
+    now: Instant = Instant.now(),
 ) {
     val initialLocal = remember(initial.at, zoneId) { LocalDateTime.ofInstant(initial.at, zoneId) }
 
@@ -84,9 +103,29 @@ fun MealEntryDialog(
             is24Hour = false,
         )
 
-    val today = remember(zoneId) { LocalDate.now(zoneId) }
+    // `atZone().toLocalDate()`, never `LocalDate.ofInstant` -- that one is API 34
+    // against a minSdk of 26 and is the crash task 0.2 removed from this tree.
+    val today = remember(now, zoneId) { now.atZone(zoneId).toLocalDate() }
     val fromMacros =
         protein * KCAL_PER_PROTEIN_GRAM + carbs * KCAL_PER_CARB_GRAM + fat * KCAL_PER_FAT_GRAM
+
+    // Shared by the Save button and the preset chips, so a chip writes exactly
+    // what saving at that time would have written -- including the future clamp.
+    val confirmAt: (LocalTime) -> Unit = { time ->
+        val at = date.atTime(time).atZone(zoneId).toInstant()
+        onConfirm(
+            MealDraft(
+                calories = calories,
+                proteinGrams = protein,
+                carbGrams = carbs,
+                fatGrams = fat,
+                // Clamped for the same reason the picker's forward button stops:
+                // a meal in the future would start an absorption curve that has
+                // not happened.
+                at = minOf(at, now),
+            )
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -155,31 +194,53 @@ fun MealEntryDialog(
                     }
                 }
 
+                // Above the clock rather than below it. A stamped meal is opened
+                // *because* the time is wrong, so the one-tap answer has to be
+                // the first thing in reach; under a 250dp clock face it would be
+                // below the fold of the dialog, which is where the series
+                // switches were when the legend briefly replaced them.
+                if (presets.isNotEmpty()) {
+                    Text(
+                        "Ate it at",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        presets.forEach { preset ->
+                            // A preset landing after now is disabled rather than
+                            // silently clamped back to this moment. Tapping
+                            // "6:30 PM" at two in the afternoon and getting a meal
+                            // logged at 14:00 is a wrong write that looks like a
+                            // right one -- the same failure as the mistyped
+                            // hydration row, and the reason the date's forward
+                            // button stops at today rather than correcting itself.
+                            val notYet =
+                                date.atTime(preset).atZone(zoneId).toInstant().isAfter(now)
+                            AssistChip(
+                                onClick = { confirmAt(preset) },
+                                enabled = !notYet,
+                                label = {
+                                    Text(
+                                        PRESET_FORMAT.format(preset),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    Text(
+                        "One tap saves the meal at that time. The clock below sets any other.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 TimePicker(state = timeState, modifier = Modifier.fillMaxWidth())
 
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    val at =
-                        date.atTime(LocalTime.of(timeState.hour, timeState.minute))
-                            .atZone(zoneId)
-                            .toInstant()
-                    onConfirm(
-                        MealDraft(
-                            calories = calories,
-                            proteinGrams = protein,
-                            carbGrams = carbs,
-                            fatGrams = fat,
-                            // Clamped for the same reason the picker's forward
-                            // button stops: a meal in the future would start an
-                            // absorption curve that has not happened.
-                            at = minOf(at, Instant.now()),
-                        )
-                    )
-                }
-            ) {
+            TextButton(onClick = { confirmAt(LocalTime.of(timeState.hour, timeState.minute)) }) {
                 Text("Save")
             }
         },
