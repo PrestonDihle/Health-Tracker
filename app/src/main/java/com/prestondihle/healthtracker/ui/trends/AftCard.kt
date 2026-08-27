@@ -91,9 +91,15 @@ internal fun AftCard(
         val card = state.latestScorecard
         val latest = state.latest
         if (latest != null && card != null) {
-            ScoreSummary(date = latest.date, card = card)
-            HorizontalDivider()
-            EventScores(attempt = latest, card = card, state = state)
+            // Tappable like the earlier ones below. The latest attempt is spelled
+            // out rather than listed, and for a while that left it as the one
+            // test on the card with no way to correct or remove it -- which on a
+            // card whose first entry is usually its only one meant no way at all.
+            Column(modifier = Modifier.fillMaxWidth().clickable { editing = latest }) {
+                ScoreSummary(date = latest.date, card = card)
+                HorizontalDivider()
+                EventScores(attempt = latest, card = card, state = state)
+            }
         } else {
             Text(
                 "No test logged yet.",
