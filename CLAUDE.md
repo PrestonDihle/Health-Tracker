@@ -621,6 +621,51 @@ Monday morning. The rules that the tests pin down:
 - A `PlannedExtendedFast` overrides the daily windows for the span it covers.
 - A `score` of `null` means nothing was planned; `0` means planned and entirely missed.
 
+### Army Fitness Test
+
+`domain/AftScoring.kt` scores the five AFT events against the Army's published conversion tables, and
+`domain/AftTables.kt` is those tables. Source is HQDA EXORD 218-25 (CC) Annex B, effective 1 June
+2025, mirrored on goarmy.com — `army.mil` serves the same PDF but blocks everything that is not a
+browser, so the goarmy copy is the fetchable one. ATP 7-22.01 carries the standards and the combat
+MOS list but explicitly *not* the tables.
+
+**There is no separate combat table, because the published scales do not have one.** Every table has
+one `M | C` column and one `F` column per age band: the combat standard is sex-neutral, and the
+column it is neutral *to* is the male one. The two lanes therefore differ in exactly two things —
+the total required (350 against 300) and which column a woman reads — and never in what a given
+performance is worth. Anyone looking for a third set of numbers will not find one.
+
+**It is a step lookup and must never interpolate.** The tables list a minimum performance for each
+reachable point value and say nothing about what falls between two steps, so 335 lb earns what 330
+earns. Interpolating would award scores the Army has no row for and no scorecard could be checked
+against. `higherIsBetter` is per event and genuinely splits both ways — more weight and more reps
+are better, a faster sprint-drag-carry and run are better, and a *longer* plank is better even
+though it is timed, so reading the direction off the unit gets the plank backwards.
+
+**Two rows of the published run tables are out of order**, and the lookup takes the *highest* point
+value a performance qualifies for rather than the first row it matches. Female 47-51 lists 21:45 at
+71 points against 21:40 at 70; female 52-56 lists 24:01 at 61 against 24:00 at 60. Both look like an
+adjacent pair transposed at the source. Scanning for the best qualifying row is the only reading
+that cannot take points away from someone for running faster — and the second erratum straddles the
+pass mark, so 24:01 scores 61 and passes. That is what the table says; correcting it here would fail
+a Soldier the Army's own scorecard passes. `AftScoringTest` pins both, so a reissued table is
+noticed rather than absorbed.
+
+**A null score means the profile cannot place the Soldier, not that they scored nothing.** The
+general lane needs a sex and there is no column without one; the combat lane is sex-neutral and
+scores an unset profile fine. Age is required either way. Bands clamp at both ends — the table
+starts at 17 and its top band is open at 62.
+
+The tables are **split one object per column** because all ten in one initialiser is roughly 13,000
+pushed integers and the JVM caps `<clinit>` at 64KB like any other method. Kotlin reports that as
+"Method too large" with nothing to say the data caused it.
+
+`AftScoringTest`'s anchors are transcribed **by hand** from the published scale, deliberately not
+generated alongside the tables: a test built from the same extraction as the thing it checks agrees
+with itself however wrong both are. One anchor per event at 100, at the 60-point pass mark, and mid
+-scale, since a table shifted by a row still gets 100 right and one read from the wrong column still
+gets the shape right.
+
 ### Room
 
 Version 15, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
@@ -947,7 +992,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
-`SleepTest`, `CsvTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest` and `SleepSyncTest` are Robolectric
+`SleepTest`, `CsvTest`, `RunZonesTest`, `AftScoringTest` and `CaffeineLastCallTest` are the pure-JVM
+suites. `CsvBackupTest`, `SupplementsTest` and `SleepSyncTest` are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
 thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,
