@@ -34,6 +34,7 @@ import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.MealResponse
 import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.SleepNight
+import com.prestondihle.healthtracker.domain.UsualIntake
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.components.DayPoint
@@ -156,6 +157,14 @@ private const val MEAL_WINDOW_HOURS = 24L
  * duplicate count printed under it.
  */
 private const val MEAL_STAMP_HISTORY_DAYS = 14L
+
+/**
+ * What Log's usual row can offer, or nulls where there is no habit to read.
+ *
+ * Both are allowed to be absent, and separately: a reader who drinks water and
+ * not coffee gets one button, not a broken pair.
+ */
+data class UsualIntakeState(val lastCaffeineMg: Int? = null, val usualWaterMl: Int? = null)
 
 data class WellnessUiState(
     val today: LocalDate = LocalDate.now(),
@@ -334,6 +343,25 @@ data class WellnessUiState(
      */
     val supplementsTakenCount: Int
         get() = supplements.count { it.id in supplementsTaken }
+
+    /**
+     * The slot the clock is currently in, so the usual row offers today's next
+     * handful rather than always the morning's.
+     */
+    val currentSupplementSlot: SupplementSlot
+        get() = UsualIntake.slotAt(now.atZone(zoneId).toLocalTime())
+
+    /**
+     * What is left to take in [currentSupplementSlot].
+     *
+     * Intersected against the standing list rather than counted off the tick
+     * rows, the rule [supplementsTakenCount] already follows: a dose orphaned by
+     * a deleted supplement must not make the row disappear as though the slot
+     * were done.
+     */
+    val outstandingInSlot: List<Supplement>
+        get() =
+            supplements.filter { it.slot == currentSupplementSlot && it.id !in supplementsTaken }
 
     /**
      * Calories eaten so far today. Nothing logged means nothing eaten.
@@ -736,6 +764,45 @@ class WellnessViewModel(
                 initialValue = WellnessUiState(),
             )
 
+    /**
+     * The one-tap suggestions on Log, derived from a month of recent entries.
+     *
+     * Its own flow rather than two more sources on [uiState], for two reasons.
+     * That combine is already at its typed limit, and -- more to the point -- the
+     * windows are wrong: [uiState] loads caffeine over a few hours because the
+     * decay curve needs no more, and a habit read from that window would vanish
+     * the moment the reader had not had a coffee since breakfast. This is the
+     * load-wider-than-you-display rule with the two spans genuinely far apart.
+     *
+     * Hydration is read only here. Nothing else on Log or Wellness draws it --
+     * the card and its correction list are on Fuel -- so this is the whole reason
+     * the table is queried on this screen at all.
+     */
+    val usual: StateFlow<UsualIntakeState> =
+        combine(
+                repository.getCaffeineSince(
+                    Instant.now().minus(Duration.ofDays(UsualIntake.HISTORY_DAYS))
+                ),
+                repository.getHydrationBetween(
+                    LocalDate.now(zoneId).minusDays(UsualIntake.HISTORY_DAYS - 1),
+                    LocalDate.now(zoneId),
+                ),
+            ) { caffeine, hydration ->
+                UsualIntakeState(
+                    lastCaffeineMg =
+                        UsualIntake.lastDose(caffeine.map { it.timestamp to it.milligrams }),
+                    usualWaterMl =
+                        UsualIntake.usualVolume(
+                            hydration.map { it.timestamp to it.milliliters }
+                        ),
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = UsualIntakeState(),
+            )
+
     init {
         seedPlanIfMissing()
         refreshHealth()
@@ -844,6 +911,28 @@ class WellnessViewModel(
     fun logCaffeine(milligrams: Int, at: Instant = Instant.now()) {
         if (milligrams <= 0) return
         viewModelScope.launch { repository.addCaffeine(milligrams, at) }
+    }
+
+    /**
+     * Logs a drink. Only Log's usual row writes hydration from this view model.
+     *
+     * A second writer of the same table alongside `FuelViewModel`, which is safe
+     * for the reason the repository exists: both go through the one entry point,
+     * so the flows behind Fuel's card and its correction list update either way.
+     * The alternative was hoisting `FuelViewModel` so Log could share it, and
+     * that would have carried its one-second fast ticker onto Log -- which is the
+     * thing that makes a screen unscrollable in tests, three cards deep already.
+     */
+    fun logHydration(milliliters: Int, at: Instant = Instant.now()) {
+        if (milliliters <= 0) return
+        viewModelScope.launch { repository.addHydration(milliliters, at) }
+    }
+
+    /** Ticks everything still outstanding in one slot, in one write per supplement. */
+    fun takeSlot(supplements: List<Supplement>, date: LocalDate = LocalDate.now(zoneId)) {
+        viewModelScope.launch {
+            supplements.forEach { repository.setSupplementTaken(it, date, true) }
+        }
     }
 
     /** Corrects a logged dose. A zero amount deletes it, which is the only way to undo a mistake. */

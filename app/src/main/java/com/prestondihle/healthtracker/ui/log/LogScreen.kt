@@ -1,13 +1,18 @@
 package com.prestondihle.healthtracker.ui.log
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -15,10 +20,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.mealPresets
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.MealListCard
+import com.prestondihle.healthtracker.ui.components.TrackerCard
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
@@ -28,6 +35,8 @@ import com.prestondihle.healthtracker.ui.wellness.GripStrengthCard
 import com.prestondihle.healthtracker.ui.wellness.MoodCard
 import com.prestondihle.healthtracker.ui.wellness.MovementCard
 import com.prestondihle.healthtracker.ui.wellness.ReadingCard
+import com.prestondihle.healthtracker.ui.wellness.UsualIntakeState
+import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import com.prestondihle.healthtracker.ui.wellness.WellnessViewModel
 import kotlinx.coroutines.launch
 
@@ -46,6 +55,7 @@ fun LogScreen(
     orderViewModel: CardOrderViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val usual by viewModel.usual.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
@@ -65,6 +75,34 @@ fun LogScreen(
         reorderableCards(
             cards =
                 listOf(
+                    // First by default, and it is the only card here that is
+                    // purely a shortcut: everything below writes something this
+                    // screen alone can write, while this row repeats what the
+                    // reader has already been doing. The widget makes the case --
+                    // water, caffeine and the stack are the entries made while
+                    // doing something else, and Log should not be slower than a
+                    // home screen for them.
+                    ReorderableCard("usual") {
+                        UsualCard(
+                            state = state,
+                            usual = usual,
+                            onWater = {
+                                viewModel.logHydration(it)
+                                toast("Logged ${Units.mlToWholeOz(it)} oz")
+                            },
+                            onCaffeine = {
+                                viewModel.logCaffeine(it)
+                                toast("Logged $it mg caffeine")
+                            },
+                            onSlot = { supplements ->
+                                viewModel.takeSlot(supplements)
+                                toast(
+                                    if (supplements.size == 1) "Took ${supplements.first().name}"
+                                    else "Took ${supplements.size} supplements"
+                                )
+                            },
+                        )
+                    },
                     ReorderableCard("meals") {
                         // Hoisted out of the row lambda: scoring walks the whole
                         // trace, and read per row it would be walked once per meal
@@ -152,5 +190,67 @@ fun LogScreen(
         )
 
         item { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+/**
+ * One tap for each of the things done most often, or nothing where there is no
+ * habit to repeat.
+ *
+ * Every chip here is derived from rows already on disk -- no favourite is stored,
+ * so there is nothing to set up and nothing to go stale. A chip whose suggestion
+ * cannot be read simply does not appear, and when none of them can the card says
+ * so in a sentence rather than showing an empty row. That matters on a first run:
+ * a strip of dead buttons is a feature that looks broken, where a sentence is a
+ * feature that has not started yet.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun UsualCard(
+    state: WellnessUiState,
+    usual: UsualIntakeState,
+    onWater: (Int) -> Unit,
+    onCaffeine: (Int) -> Unit,
+    onSlot: (List<Supplement>) -> Unit,
+) {
+    val outstanding = state.outstandingInSlot
+    TrackerCard(title = "Usual", subtitle = "one tap for what you log most") {
+        if (usual.usualWaterMl == null && usual.lastCaffeineMg == null && outstanding.isEmpty()) {
+            Text(
+                // Three separate reasons collapse into one sentence deliberately:
+                // the reader does not need to be told which of them applies, only
+                // that the row fills itself in.
+                "Nothing to repeat yet. Log a drink, a coffee or a supplement and " +
+                    "the shortcuts appear here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@TrackerCard
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            usual.usualWaterMl?.let { ml ->
+                AssistChip(
+                    onClick = { onWater(ml) },
+                    label = { Text("${Units.mlToWholeOz(ml)} oz water") },
+                )
+            }
+            usual.lastCaffeineMg?.let { mg ->
+                AssistChip(onClick = { onCaffeine(mg) }, label = { Text("$mg mg caffeine") })
+            }
+            if (outstanding.isNotEmpty()) {
+                AssistChip(
+                    onClick = { onSlot(outstanding) },
+                    // Names the slot and the count, because this is the one chip
+                    // that writes several rows at once and the reader should know
+                    // how many before tapping rather than after.
+                    label = {
+                        Text(
+                            "${state.currentSupplementSlot.label} stack " +
+                                "(${outstanding.size})"
+                        )
+                    },
+                )
+            }
+        }
     }
 }

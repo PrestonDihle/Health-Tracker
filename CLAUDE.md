@@ -310,6 +310,43 @@ run of deficit days scaled to themselves puts every point below a zero clipped o
 `ChartBoundsTest`'s failure on the one chart whose reference is the difference between losing weight
 and gaining it.
 
+### The usual row on Log
+
+`domain/UsualIntake.kt` derives Log's one-tap shortcuts — repeat the last caffeine dose, log the usual
+water volume, take what is left of the current supplement slot. **Nothing is stored**: no favourite to
+set up, none to go stale, and the row fills itself in from rows already on disk.
+
+**The two intakes read their history differently and that is the substance of it.** Caffeine takes the
+*last* dose, because it is drunk in whatever the current cup is — somebody who has moved from a 95 mg
+cup to a 150 mg one wants the new one on the second day, not once the tally catches up. Water takes
+the *mode*, because a bottle is a bottle and one odd glass should not become the suggestion just for
+being most recent. A mean is never offered either way: the mean of a 500 ml bottle and a 250 ml glass
+is 375 ml, a quantity with no container behind it, and the point is a button that matches something
+real. Ties on the mode go to whichever volume was used more recently, since two volumes used equally
+often are a habit mid-change.
+
+`slotAt` follows the clock rather than always offering the morning — a row proposing the morning's
+pills at nine at night is a row nobody taps. Boundaries are noon and five, where the words stop being
+true rather than at thirds of a day.
+
+**`usual` is its own `StateFlow` on `WellnessViewModel`, not two more sources on `uiState`**, and the
+reason is the window rather than the combine's arity: `uiState` loads caffeine over a few hours
+because the decay curve needs no more, and a habit read from that window would vanish whenever the
+reader had not had a coffee since breakfast. `UsualIntake.HISTORY_DAYS` is 30. Load wider than you
+display, with the two spans further apart here than anywhere else in the app.
+
+**`WellnessViewModel` gained `logHydration`, making it a second writer of that table** alongside
+`FuelViewModel`. That is safe for the reason `TrackerRepository` exists — both go through the one
+entry point, so Fuel's card and its correction list update either way. The alternative was hoisting
+`FuelViewModel` so Log could share it, which would have carried **its one-second fast ticker onto
+Log**, and a ticking screen is one that cannot be scrolled in a test. That cost is already three
+cards deep; do not add a fourth by hoisting a ticking view model onto a still tab.
+
+`outstandingInSlot` intersects against the standing list rather than counting tick rows, the rule
+`supplementsTakenCount` already follows, so a dose orphaned by a deleted supplement cannot make the
+slot look finished. The chip names the count because it is the one control here that writes several
+rows on one tap, and the reader should know how many before rather than after.
+
 ### The goal ETA
 
 `domain/GoalProjection.kt` fits a straight line through the last 30 days of merged weight and runs it
@@ -1617,7 +1654,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
 `GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
 `TrendsBucketsTest`, `MovingAverageTest`, `StreaksTest`, `PersonalRecordsTest`,
-`GoalProjectionTest` and
+`GoalProjectionTest`, `UsualIntakeTest` and
 `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
@@ -1692,6 +1729,10 @@ instead of five, a crawl that arrives in the next decade — plus the one that c
 too much history: a steep loss last winter followed by a flat month must produce *nothing*, not the
 winter's rate. It also pins that the segment leaves from the fitted value rather than from a morning
 that happened to be high.
+`UsualIntakeTest` pins the asymmetry between the two intakes in both directions — caffeine following
+the newer cup while the count still favours the old one, water holding to the bottle when the last
+entry was a glass — because either rule looks reasonable applied to the wrong one, and a wrong
+suggestion here writes into live data on a single tap with no dialog in between.
 `SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
 card: counting waking time as sleep, which flatters every night by however long was spent staring at
 the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement

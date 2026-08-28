@@ -10,7 +10,7 @@ reps and reading.
 | Screen | What it does |
 | --- | --- |
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
-| **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
+| **Log** | Every logging control in one place, so several things can be entered without changing tabs: one-tap repeats of what you log most, the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, the macro trend and net calories |
 | **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, personal records and streaks, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | This morning against your own baseline, the day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, blood oxygen, sleep, vibe/energy/focus and pages read |
@@ -82,6 +82,28 @@ numbers, not because the reader is free to decide what normal is. That is also
 why they stay dashed while the glucose reference line is solid: one is a
 published figure, the other is wherever you decided to put it, and the two should
 not look alike.
+
+## The usual, in one tap
+
+At the top of Log: a chip for your usual glass of water, one for your last
+caffeine dose, and one for whatever is left of the current supplement slot. The
+widget made the case — water, caffeine and the stack are the things logged while
+doing something else, and Log should not be slower than a home screen for them.
+
+Nothing is set up and nothing is stored. The chips are read from what you have
+actually been logging over the last month, so they follow your habits without
+being told about them, and a chip with no habit behind it simply is not there.
+
+The two are guessed differently on purpose. **Caffeine repeats your last dose**,
+because coffee is drunk in whatever the current cup is — change cup and the chip
+changes with you the next day. **Water offers the volume you log most often**,
+because a bottle is a bottle and one odd glass should not become the suggestion
+just for being the most recent. Neither ever offers an average: the average of a
+bottle and a glass is a quantity you own no container for.
+
+The supplement chip follows the clock rather than always offering the morning,
+and says how many it will tick — it is the one button here that writes several
+rows at once.
 
 ## Records and streaks
 
