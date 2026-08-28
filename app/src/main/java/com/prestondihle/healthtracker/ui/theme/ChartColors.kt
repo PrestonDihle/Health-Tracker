@@ -32,6 +32,15 @@ data class ChartColors(
     val fatStack: Color,
     val systolic: Color,
     val diastolic: Color,
+    /**
+     * Sodium, which shares the blood pressure plot with the two above.
+     *
+     * Its own entry rather than a borrowed one, and that is not tidiness: reusing
+     * `carbStack` drew it in **exactly** `diastolic`'s colour in the dark scheme,
+     * where the two are the same hex. Two series on one plot in one colour, with
+     * a legend claiming they were different things.
+     */
+    val sodium: Color,
     val vibe: Color,
     val energy: Color,
     val focus: Color,
@@ -64,6 +73,9 @@ val LightChartColors =
         fatStack = FatSeries,
         systolic = SystolicSeries,
         diastolic = DiastolicSeries,
+        // The stretch of the wheel neither pressure line occupies, so the third
+        // series on that plot is separable from both at a glance.
+        sodium = Color(0xFF8E6BA8),
         vibe = VibeSeries,
         energy = EnergySeries,
         focus = FocusSeries,
@@ -108,6 +120,9 @@ val DarkChartColors =
         fatStack = Color(0xFF4E86AB),
         systolic = Color(0xFF6FA8D0),
         diastolic = Color(0xFFB9A96A),
+        // Same hue as the light set, lifted for a dark ground like every other
+        // value here -- and clear of both pressure lines, which is the point.
+        sodium = Color(0xFFA292D8),
         vibe = Color(0xFF6FA8D0),
         energy = Color(0xFFB9A96A),
         focus = Color(0xFF4E86AB),

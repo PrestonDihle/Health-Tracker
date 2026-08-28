@@ -109,6 +109,23 @@ data class HealthDaySnapshot(
      * it, which is most of them.
      */
     val spo2Percent: Float? = null,
+    /**
+     * The finer nutrition figures, where the logging app recorded them.
+     *
+     * **Fiber and sugar are parts of [carbGrams], and saturated fat is part of
+     * [fatGrams]** -- they are not a fourth and fifth macro and must never be
+     * added to the other three or stacked beside them on a chart, which would
+     * count the same grams twice. They are here to be read against the totals,
+     * not summed with them.
+     *
+     * Sodium is stored in milligrams because that is the unit every label and
+     * every guideline uses; grams would put every real figure between 0.002 and
+     * 0.004 and make the column unreadable in a CSV export.
+     */
+    val fiberGrams: Float? = null,
+    val sugarGrams: Float? = null,
+    val saturatedFatGrams: Float? = null,
+    val sodiumMg: Float? = null,
     val syncedAt: Instant,
 )
 
@@ -391,6 +408,21 @@ data class MealEntry(
     val proteinGrams: Float? = null,
     val carbGrams: Float? = null,
     val fatGrams: Float? = null,
+    /**
+     * The finer nutrition figures for this one meal.
+     *
+     * Per-meal as well as per-day, which is not redundancy: a daily fiber total
+     * cannot say *which* meal carried it, and the question this exists for is
+     * whether the meals with fiber in them are the ones with the flatter glucose
+     * response. That comparison needs both numbers on the same row.
+     *
+     * Parts of [carbGrams] and [fatGrams] rather than additions to them -- see
+     * the note on `HealthDaySnapshot`.
+     */
+    val fiberGrams: Float? = null,
+    val sugarGrams: Float? = null,
+    val saturatedFatGrams: Float? = null,
+    val sodiumMg: Float? = null,
     /** Whatever the writing app called it, when it named the meal at all. */
     val name: String? = null,
     val source: DataSourceEnum,

@@ -199,6 +199,27 @@ maximum heart rate is edited, and there would be a table to re-key every time it
 was. A run the watch recorded without a heart-rate trace draws nothing rather
 than drawing a guess.
 
+### Fiber, sugar, saturated fat and sodium
+
+Where the logging app records them, the day's macro row gains a second line:
+fiber, sugar, saturated fat and sodium. They are also stored per meal, so a
+later question — do the meals with fiber in them settle faster? — has both
+numbers on the same row to compare.
+
+**These are parts of the macros above, not extra ones.** Fiber and sugar are
+inside the carbohydrate figure and saturated fat is inside the fat, so the app
+labels them *of carbs* and *of fat* and never adds them to the total. On the
+first real day of data that was 8 g of fiber and 37 g of sugar within 91 g of
+carbohydrate — adding them would have reported a day that ate more than it ate.
+
+Sodium also appears on the blood pressure chart, on a scale of its own, as
+context rather than as a cause: it is a daily total set against readings taken
+at a moment, and one day's salt does not move one morning's pressure.
+
+Days recorded before the app read these stay blank rather than being filled with
+zeroes, and per-meal figures appear on meals synced from now on — the ones
+already stored are not rewritten.
+
 ### This morning: two facts, not a score
 
 Wellness opens the day with two statements and deliberately no readiness number:

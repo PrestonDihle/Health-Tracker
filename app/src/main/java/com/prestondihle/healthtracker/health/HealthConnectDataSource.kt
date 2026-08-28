@@ -147,6 +147,10 @@ class HealthConnectDataSource(
         val protein = active.aggregateOrNull(NutritionRecord.PROTEIN_TOTAL, range)
         val carbs = active.aggregateOrNull(NutritionRecord.TOTAL_CARBOHYDRATE_TOTAL, range)
         val fat = active.aggregateOrNull(NutritionRecord.TOTAL_FAT_TOTAL, range)
+        val fiber = active.aggregateOrNull(NutritionRecord.DIETARY_FIBER_TOTAL, range)
+        val sugar = active.aggregateOrNull(NutritionRecord.SUGAR_TOTAL, range)
+        val saturatedFat = active.aggregateOrNull(NutritionRecord.SATURATED_FAT_TOTAL, range)
+        val sodium = active.aggregateOrNull(NutritionRecord.SODIUM_TOTAL, range)
 
         return HealthDay(
             date = date,
@@ -164,6 +168,10 @@ class HealthConnectDataSource(
             bestMileSeconds = active.readBestMileSeconds(start, end),
             glucoseSamples = active.readGlucose(range),
             spo2Percent = active.readMeanSpo2(range),
+            fiberGrams = fiber?.inGrams?.toFloat(),
+            sugarGrams = sugar?.inGrams?.toFloat(),
+            saturatedFatGrams = saturatedFat?.inGrams?.toFloat(),
+            sodiumMg = sodium?.inMilligrams?.toFloat(),
         )
     }
 
@@ -285,6 +293,10 @@ class HealthConnectDataSource(
                     proteinGrams = record.protein?.inGrams?.toFloat(),
                     carbGrams = record.totalCarbohydrate?.inGrams?.toFloat(),
                     fatGrams = record.totalFat?.inGrams?.toFloat(),
+                    fiberGrams = record.dietaryFiber?.inGrams?.toFloat(),
+                    sugarGrams = record.sugar?.inGrams?.toFloat(),
+                    saturatedFatGrams = record.saturatedFat?.inGrams?.toFloat(),
+                    sodiumMg = record.sodium?.inMilligrams?.toFloat(),
                     name = record.name,
                     externalId = record.metadata.id.takeIf { it.isNotBlank() },
                 )

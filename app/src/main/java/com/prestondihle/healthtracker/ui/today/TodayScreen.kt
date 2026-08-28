@@ -46,6 +46,7 @@ import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.health.HealthPermissionState
+import com.prestondihle.healthtracker.ui.wellness.MacroDetailRow
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.CardGap
@@ -236,6 +237,10 @@ private fun ActivityCard(state: TodayUiState, onRefresh: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+
+        // The same row Wellness shows, from the one copy: two screens printing
+        // the day's macros must not disagree about what is in them.
+        MacroDetailRow(snapshot)
     }
 }
 

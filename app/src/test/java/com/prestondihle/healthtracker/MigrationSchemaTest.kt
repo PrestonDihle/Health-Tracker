@@ -115,6 +115,13 @@ class MigrationSchemaTest {
                 .filter { it.contains("MealEntry") }
                 .forEach { raw.execSQL(it) }
             AppDatabase.migration6To7Statements.forEach { raw.execSQL(it) }
+            // The third alteration: fiber, sugar, saturated fat and sodium per
+            // meal. A table built by one migration and altered by later ones has
+            // to be replayed across all of them or the gap only shows on a
+            // reader's phone.
+            AppDatabase.migration19To20Statements
+                .filter { it.contains("MealEntry") }
+                .forEach { raw.execSQL(it) }
 
             assertEquals(expectedColumns, columnsOf(raw, "MealEntry"))
             assertEquals(
@@ -321,17 +328,19 @@ class MigrationSchemaTest {
     }
 
     /**
-     * The SpO2 column lands on the shape Room builds.
+     * The snapshot's added columns land on the shape Room builds.
      *
-     * Built from a hand-written v18 snapshot table rather than replayed from v2,
-     * because this column's own migration is the thing under test and the older
-     * alterations to this table are inline in `MIGRATION_2_3` rather than in a
-     * `val` a test can reach. What would break on an upgrading phone is the type:
-     * declared INTEGER here against Room's REAL, this passes every other test in
-     * the suite and throws on the next launch.
+     * Built from a hand-written v18 table rather than replayed from v2, because
+     * the older alterations to this table are inline in `MIGRATION_2_3` rather
+     * than in a `val` a test can reach. Both later migrations are replayed in
+     * order, so the chain is the one an upgrading phone actually walks.
+     *
+     * What would break there is the column *type*: any of these declared INTEGER
+     * against Room's REAL passes every other test in the suite and throws on the
+     * next launch.
      */
     @Test
-    fun `the SpO2 column lands on the shape Room expects`() {
+    fun `the added snapshot columns land on the shape Room expects`() {
         val expected = roomColumns("HealthDaySnapshot")
 
         val db =
@@ -343,6 +352,9 @@ class MigrationSchemaTest {
             raw.execSQL("DROP TABLE IF EXISTS `HealthDaySnapshot`")
             raw.execSQL(snapshotV18)
             AppDatabase.migration18To19Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration19To20Statements
+                .filter { it.contains("HealthDaySnapshot") }
+                .forEach { raw.execSQL(it) }
 
             assertEquals(expected, columnsOf(raw, "HealthDaySnapshot"))
         } finally {
@@ -370,12 +382,27 @@ class MigrationSchemaTest {
             )
 
             AppDatabase.migration18To19Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration19To20Statements
+                .filter { it.contains("HealthDaySnapshot") }
+                .forEach { raw.execSQL(it) }
 
-            raw.query("SELECT `steps`, `spo2Percent` FROM `HealthDaySnapshot`").use {
-                it.moveToNext()
-                assertEquals(8_500, it.getInt(0))
-                assertTrue("spo2 should be null on an already-synced day", it.isNull(1))
-            }
+            raw.query(
+                    "SELECT `steps`, `spo2Percent`, `fiberGrams`, `sugarGrams`, " +
+                        "`saturatedFatGrams`, `sodiumMg` FROM `HealthDaySnapshot`"
+                )
+                .use {
+                    it.moveToNext()
+                    assertEquals(8_500, it.getInt(0))
+                    assertTrue("spo2 should be null on an already-synced day", it.isNull(1))
+                    // The same argument for all four nutrition figures: a zero
+                    // would claim the food contained none of them, which is a
+                    // different statement from "this was synced before we read
+                    // it" and would average into any window figure computed later.
+                    assertTrue("fiber should be null", it.isNull(2))
+                    assertTrue("sugar should be null", it.isNull(3))
+                    assertTrue("saturated fat should be null", it.isNull(4))
+                    assertTrue("sodium should be null", it.isNull(5))
+                }
         } finally {
             db.close()
         }
@@ -644,14 +671,21 @@ class MigrationSchemaTest {
             )
 
             AppDatabase.migration6To7Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration19To20Statements
+                .filter { it.contains("MealEntry") }
+                .forEach { raw.execSQL(it) }
 
             assertEquals(expected, columnsOf(raw, "MealEntry"))
             // Nothing has been deleted yet, so every meal already logged has to
             // come through the migration still visible.
-            raw.query("SELECT `calories`, `hidden` FROM `MealEntry`").use {
+            raw.query("SELECT `calories`, `hidden`, `fiberGrams` FROM `MealEntry`").use {
                 it.moveToNext()
                 assertEquals(602, it.getInt(0))
                 assertEquals(0, it.getInt(1))
+                // `hidden` was seeded to 0 because a meal already logged has not
+                // been deleted; fiber is left NULL because nobody measured it.
+                // The two defaults differ on purpose and this is where that shows.
+                assertTrue("fiber should be null on a meal synced before it was read", it.isNull(2))
             }
         } finally {
             db.close()

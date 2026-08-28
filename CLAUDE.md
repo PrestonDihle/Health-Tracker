@@ -872,6 +872,49 @@ would have claimed credit for merges the reader cannot see.
 two copies would eventually disagree — and the disagreement would look like a scoring bug rather than
 a definition drifting.
 
+### The finer nutrition figures
+
+Fiber, sugar, saturated fat and sodium are read from `NutritionRecord` onto **both**
+`HealthDaySnapshot` (day totals) and `MealEntry` (per meal). Per-meal as well as per-day is not
+redundancy, and it is the same argument `MealEntry`'s macros already make: a daily fiber total cannot
+say *which* meal carried it, and the question this exists for is whether the meals with fiber in them
+are the ones with the flatter response — a comparison that needs both numbers on one row.
+
+**They are components of the macros, not additions to them.** Fiber and sugar are part of
+`carbGrams`; saturated fat is part of `fatGrams`. Never sum them with the three and never stack them
+beside them on a chart — either counts the same grams twice. The author's own first day of real data
+is the check: fiber 8.4 g plus sugar 37.0 g against 91.8 g of carbohydrate, and saturated fat 37.3 g
+inside 105.5 g of fat. Both fit, and a design that added them would have reported a day that ate more
+carbohydrate than it ate. The screen says so out loud — the sugar and saturated-fat cells are
+captioned *of carbs* and *of fat*, because a reader who has just read "Carbs 91g" will otherwise add
+them.
+
+Sodium is stored in **milligrams**, not grams: every label and every guideline uses mg, and grams
+would put every real figure between 0.002 and 0.004 and make the column unreadable in a CSV export.
+
+`MIGRATION_19_20` adds all eight columns in one migration across two tables, like `MIGRATION_5_6`.
+They are the same four figures read from the same record in the same sync, and splitting them across
+two versions would leave a release where a meal knows its fiber and the day does not. **None carries
+a default** — the `MIGRATION_11_12` shape — because every row already on disk was synced before these
+were read, so NULL is the true statement about all of them. A zero would claim the food contained
+none, which is a different thing and would average into any window figure computed later.
+
+One consequence worth knowing: **the per-meal columns fill in going forward, not retroactively.**
+Meals are only ever inserted, never updated, so the meals already on disk keep their NULLs and only
+newly synced ones carry the new figures. The day totals have no such limit — the snapshot is a cache
+and is rewritten on every sync, so today's row gained all four the moment the build landed.
+
+**Sodium rides the blood-pressure chart on a scale of its own**, and the caption says it is context
+rather than a cause: it is a daily total against readings taken at a moment, and one day's salt does
+not move one morning's pressure. Days with no figure are dropped rather than plotted at zero — a day
+nobody logged food on did not contain no salt.
+
+That series is also where a colour bug got caught on the phone. It was first drawn in
+`chartColors.carbStack`, which in the **dark scheme is the same hex as `diastolic`** — two series on
+one plot in one colour, with a legend claiming they were different things. `ChartColors` now carries
+its own `sodium`. **Reusing a series colour is only safe if you have checked both schemes**, since
+the dark set collapses several hues the light set keeps apart.
+
 ### Morning readiness, and blood oxygen
 
 `domain/Readiness.kt` is **two facts, never a score**, and the refusal is the design. Every wearable
@@ -976,7 +1019,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 19, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 20, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -1065,6 +1108,13 @@ alteration to `HealthDaySnapshot` since `MIGRATION_2_3`**, whose statements are 
 a `val`, so its schema test builds a hand-written v18 version of that table and replays 18-to-19
 against it rather than replaying from v2. What that pins is the column *type*: declared INTEGER
 against Room's REAL, it passes every other test in the suite and throws on the next launch.
+
+`MIGRATION_19_20` adds the four finer nutrition figures to `HealthDaySnapshot` *and* `MealEntry` — see
+*The finer nutrition figures*. Because it alters `MealEntry`, **both** of that table's schema tests
+had to gain it: the column diff and the `hidden`-column test each rebuild the table from its own
+starting point and replay forward, and a migration missing from either is a gap that only shows on a
+reader's phone. The second now also asserts that `hidden` arrives seeded to 0 while `fiberGrams`
+arrives NULL, which is the two default policies sitting side by side in one row.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.

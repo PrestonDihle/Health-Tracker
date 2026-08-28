@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -561,6 +561,42 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Fiber, sugar, saturated fat and sodium, on the daily snapshot *and* on
+         * each meal.
+         *
+         * One migration across two tables, like `MIGRATION_5_6`. They are the
+         * same four figures read from the same record in the same sync, and
+         * splitting them across two versions would leave a release where a meal
+         * knows its fiber and the day does not.
+         *
+         * All eight nullable and none carrying a default, the `MIGRATION_11_12`
+         * shape: every row already on disk was synced before these were read, so
+         * NULL is the true statement about all of them. A zero would be a claim
+         * that the food contained none, which is a different thing entirely and
+         * would quietly average into any figure computed over the window.
+         *
+         * Sodium is REAL milligrams rather than grams -- see the entity note.
+         */
+        internal val migration19To20Statements =
+            listOf(
+                "ALTER TABLE `HealthDaySnapshot` ADD COLUMN `fiberGrams` REAL",
+                "ALTER TABLE `HealthDaySnapshot` ADD COLUMN `sugarGrams` REAL",
+                "ALTER TABLE `HealthDaySnapshot` ADD COLUMN `saturatedFatGrams` REAL",
+                "ALTER TABLE `HealthDaySnapshot` ADD COLUMN `sodiumMg` REAL",
+                "ALTER TABLE `MealEntry` ADD COLUMN `fiberGrams` REAL",
+                "ALTER TABLE `MealEntry` ADD COLUMN `sugarGrams` REAL",
+                "ALTER TABLE `MealEntry` ADD COLUMN `saturatedFatGrams` REAL",
+                "ALTER TABLE `MealEntry` ADD COLUMN `sodiumMg` REAL",
+            )
+
+        private val MIGRATION_19_20 =
+            object : Migration(19, 20) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration19To20Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -593,6 +629,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_16_17,
                                 MIGRATION_17_18,
                                 MIGRATION_18_19,
+                                MIGRATION_19_20,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

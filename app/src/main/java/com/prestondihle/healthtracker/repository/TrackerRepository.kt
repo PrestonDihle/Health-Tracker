@@ -595,6 +595,10 @@ class TrackerRepository(
                             proteinGrams = it.proteinGrams,
                             carbGrams = it.carbGrams,
                             fatGrams = it.fatGrams,
+                            fiberGrams = it.fiberGrams,
+                            sugarGrams = it.sugarGrams,
+                            saturatedFatGrams = it.saturatedFatGrams,
+                            sodiumMg = it.sodiumMg,
                             name = it.name,
                             source = DataSourceEnum.HEALTH_CONNECT,
                             externalId = it.externalId,
@@ -790,6 +794,10 @@ class TrackerRepository(
                 bestMileSeconds = day.bestMileSeconds,
                 weightKg = day.weightKg,
                 spo2Percent = day.spo2Percent,
+                fiberGrams = day.fiberGrams,
+                sugarGrams = day.sugarGrams,
+                saturatedFatGrams = day.saturatedFatGrams,
+                sodiumMg = day.sodiumMg,
                 syncedAt = Instant.now(),
             )
         )

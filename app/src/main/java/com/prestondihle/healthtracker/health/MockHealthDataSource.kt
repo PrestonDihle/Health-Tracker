@@ -80,6 +80,10 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
             // A tight band, because a real overnight SpO2 sits in one: seeding it
             // across 80-100 would make the trend chart look like a sensor fault.
             spo2Percent = 94f + random.nextInt(0, 41) / 10f,
+            fiberGrams = random.nextInt(12, 40).toFloat(),
+            sugarGrams = random.nextInt(20, 90).toFloat(),
+            saturatedFatGrams = random.nextInt(10, 40).toFloat(),
+            sodiumMg = random.nextInt(1_500, 4_200).toFloat(),
             bestMileSeconds = random.nextInt(7 * 60, 11 * 60),
             glucoseSamples = samples,
         )
@@ -110,6 +114,13 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
                         proteinGrams = protein,
                         carbGrams = carbs,
                         fatGrams = fat,
+                        // Fractions of the macros above rather than figures of
+                        // their own, so a fixture can never imply more fiber than
+                        // there was carbohydrate to hold it.
+                        fiberGrams = carbs * 0.12f,
+                        sugarGrams = carbs * 0.35f,
+                        saturatedFatGrams = fat * 0.3f,
+                        sodiumMg = 400f + carbs * 4f,
                         name = label,
                         externalId = "mock-meal-$date-$hour",
                     )

@@ -115,6 +115,19 @@ internal fun WeightTrendCard(state: TrendsUiState) {
 @Composable
 internal fun BloodPressureTrendCard(state: TrendsUiState) {
     val chartColors = LocalChartColors.current
+    // Daily sodium, plotted at midday of each day it was recorded. Optional in the
+    // literal sense: absent entirely on a source that does not report it, and on
+    // every day synced before the app read it, so the chart is unchanged for
+    // anyone it has nothing to say to.
+    val sodium =
+        state.snapshotSeries { it.sodiumMg }
+            .mapNotNull { point ->
+                // Days with no figure are dropped rather than plotted at zero: a
+                // day nobody logged food on did not contain no salt.
+                point.value?.let {
+                    TimePoint(point.date.atTime(12, 0).atZone(state.zoneId).toInstant(), it)
+                }
+            }
     TrendCard(title = "Blood pressure", subtitle = "mmHg") {
         // Plotted against real timestamps rather than an index: readings are taken
         // irregularly, and evenly spacing them would imply a cadence not there.
@@ -140,7 +153,23 @@ internal fun BloodPressureTrendCard(state: TrendsUiState) {
                             },
                         color = chartColors.diastolic,
                     ),
-                ),
+                ) +
+                    // Its own scale rather than the mmHg axis: milligrams of salt
+                    // and millimetres of mercury share nothing but a chart, and
+                    // drawing sodium against the pressure gutter would put a
+                    // 2,400 mg day somewhere off the top of the plot.
+                    listOfNotNull(
+                        sodium
+                            .takeIf { it.isNotEmpty() }
+                            ?.let {
+                                ChartSeries(
+                                    label = "Sodium (mg)",
+                                    points = it,
+                                    color = chartColors.sodium,
+                                    scale = AxisSpec(min = 0f, max = 4_000f, label = "mg"),
+                                )
+                            }
+                    ),
             // A rule per line. One alone left the diastolic trace with nothing to
             // be read against, which is half the reading. Dashed, because 120/80 is
             // a published figure rather than one invented here -- adjustable in
@@ -163,6 +192,14 @@ internal fun BloodPressureTrendCard(state: TrendsUiState) {
                 ),
             modifier = Modifier.fillMaxWidth().height(160.dp),
         )
+        if (sodium.isNotEmpty()) {
+            Text(
+                "Sodium is drawn as context, not as a cause: it is a daily total against readings " +
+                    "taken at a moment, and one day's salt does not move one morning's pressure.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

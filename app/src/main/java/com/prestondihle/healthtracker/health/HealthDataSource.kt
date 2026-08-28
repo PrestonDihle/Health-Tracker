@@ -36,6 +36,11 @@ data class MealSample(
     val proteinGrams: Float? = null,
     val carbGrams: Float? = null,
     val fatGrams: Float? = null,
+    /** Components of the carbohydrate and fat above, never additions to them. */
+    val fiberGrams: Float? = null,
+    val sugarGrams: Float? = null,
+    val saturatedFatGrams: Float? = null,
+    val sodiumMg: Float? = null,
     val name: String? = null,
     val externalId: String? = null,
 )
@@ -118,6 +123,11 @@ data class HealthDay(
     val glucoseSamples: List<GlucoseSample> = emptyList(),
     /** Mean blood oxygen saturation across the day, where the watch reported any. */
     val spo2Percent: Float? = null,
+    /** Day totals for the finer nutrition figures; parts of the macros above. */
+    val fiberGrams: Float? = null,
+    val sugarGrams: Float? = null,
+    val saturatedFatGrams: Float? = null,
+    val sodiumMg: Float? = null,
 )
 
 interface HealthDataSource {

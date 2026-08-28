@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.BodyComposition
 import com.prestondihle.healthtracker.domain.Glucose
@@ -325,6 +326,63 @@ private fun ActivityCard(state: WellnessUiState, onRefresh: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+
+        // A second row rather than two more cells in the first, which already
+        // carries six. Shown only when the logging app recorded any of them: on a
+        // source that does not, an extra row of dashes says nothing every day for
+        // ever, and every historical day is null by design.
+        MacroDetailRow(snapshot)
+    }
+}
+
+/**
+ * Fiber, sugar, saturated fat and sodium, under the macros they are part of.
+ *
+ * **Not a fourth, fifth and sixth macro.** Fiber and sugar are components of the
+ * carbohydrate figure above and saturated fat is part of the fat, so they sit on
+ * their own row and are never summed with the three or stacked beside them --
+ * doing either counts the same grams twice.
+ *
+ * The whole row disappears when nothing recorded any of it, rather than showing
+ * four dashes. Every day synced before these were read is null, and on a
+ * nutrition source that does not report them it always will be.
+ */
+@Composable
+internal fun MacroDetailRow(snapshot: HealthDaySnapshot?) {
+    if (snapshot == null) return
+    val hasAny =
+        snapshot.fiberGrams != null ||
+            snapshot.sugarGrams != null ||
+            snapshot.saturatedFatGrams != null ||
+            snapshot.sodiumMg != null
+    if (!hasAny) return
+
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Metric(
+            label = "Fiber",
+            value = snapshot.fiberGrams?.let { "${it.toInt()}g" } ?: "--",
+            modifier = Modifier.weight(1f),
+        )
+        Metric(
+            label = "Sugar",
+            value = snapshot.sugarGrams?.let { "${it.toInt()}g" } ?: "--",
+            // Said out loud, because a reader who has just read "Carbs 180g" will
+            // otherwise add these together.
+            supporting = "of carbs",
+            modifier = Modifier.weight(1f),
+        )
+        Metric(
+            label = "Sat fat",
+            value = snapshot.saturatedFatGrams?.let { "${it.toInt()}g" } ?: "--",
+            supporting = "of fat",
+            modifier = Modifier.weight(1f),
+        )
+        Metric(
+            label = "Sodium",
+            value = snapshot.sodiumMg?.let { "${it.toInt()}" } ?: "--",
+            supporting = "mg",
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
