@@ -12,7 +12,7 @@ reps and reading.
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, and the macro trend |
-| **Activity** | The Army Fitness Test scorecard, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
+| **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
 
@@ -198,6 +198,27 @@ trace each time the chart is drawn. Cached figures would be wrong the moment the
 maximum heart rate is edited, and there would be a table to re-key every time it
 was. A run the watch recorded without a heart-rate trace draws nothing rather
 than drawing a guess.
+
+### Training this week
+
+Running is not the only thing the watch records, and until recently it was the
+only thing this app read — an hour under a loaded pack arrived as nothing at all
+while a twenty-minute jog got its own bar on the chart. **Training this week**
+now lists every session by kind: runs, rucks, walks, strength, cycling, swimming,
+HIIT and anything else, with the sessions and minutes for each and a distance
+where the watch recorded one. The week starts on the day set in Settings and ends
+at now, so the figure is what has been done rather than what a full week holds.
+
+Rucks are the reason it exists. The watch has no rucking activity, so a ruck is
+logged as a hike — the app calls that row **Rucks** because that is what these
+are, not because the source said so, and it cannot know whether weight was
+carried.
+
+A pace is shown only for things done on foot. Minutes per mile is how walking,
+running and rucking compare; a cycling "pace" in the same unit reads like a very
+fast run, and a pool distance makes it wrong twice over. Those still show their
+distance. Strength sessions show none at all rather than `0.0 mi` — no distance
+was recorded, and a zero next to real figures is a measurement nobody made.
 
 ## Army Fitness Test
 
@@ -735,6 +756,7 @@ crashes on nobody's device but a user's. Lint is the only check that looks.
 The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
 per-meal glucose response and the four ways it refuses to score one,
+weekly training volume and the exercise-type mapping behind it,
 series gap-splitting, axis selection, gap backfill, gridline spacing, axis range,
 heart-rate zone boundaries, where the waypoint stepper opens, and the panned
 window's own arithmetic -- whether the curves stop at the right edge, and whether

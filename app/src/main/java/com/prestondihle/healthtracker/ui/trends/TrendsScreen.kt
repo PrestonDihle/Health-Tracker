@@ -32,6 +32,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val runs by viewModel.runs.collectAsStateWithLifecycle()
     val aft by viewModel.aft.collectAsStateWithLifecycle()
+    val training by viewModel.training.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val chartColors = LocalChartColors.current
 
@@ -73,6 +74,10 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                     // Runs, each bar a session split by heart-rate zone; read live
                     // and zoned against the max heart rate in Settings.
                     ReorderableCard("runs") { RunsTrendCard(runs) },
+                    // Everything else the watch recorded. Above the runs chart it
+                    // would push the trends down; below it, it answers the
+                    // question the runs chart raises -- what else was the week.
+                    ReorderableCard("training") { TrainingVolumeCard(training) },
                     // The AFT sits on Activity because it is the one thing here
                     // that is a test rather than a trend -- and its score moves
                     // on the same training the rest of this tab plots.

@@ -220,7 +220,8 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
             .toList()
     }
 
-    override suspend fun readRuns(from: Instant, to: Instant): List<RunSession> = emptyList()
+    override suspend fun readExerciseSessions(from: Instant, to: Instant): List<ExerciseSession> =
+        emptyList()
 
     /** Two sources that disagree, which is the situation the picker exists to resolve. */
     override suspend fun readStepSources(date: LocalDate): List<StepSource> {

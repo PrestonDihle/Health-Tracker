@@ -35,6 +35,7 @@ import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 // ---------------------------------------------------------------------------
 // Reusable trend cards.
@@ -259,3 +260,79 @@ internal fun MacrosTrendCard(state: TrendsUiState) {
         }
     }
 }
+
+/**
+ * This week's training so far, one row per kind.
+ *
+ * Sessions and minutes for everything; distance only where the source recorded
+ * one, and a pace only where the activity travels on foot. A strength session
+ * genuinely has no distance, so a row reading "0.0 mi" would be a measurement
+ * nobody made -- the figure is simply absent instead.
+ *
+ * Rucks are the reason this card exists. They were previously invisible: the
+ * session read filtered to running, so an hour under a loaded pack reached the
+ * app as nothing at all while a twenty-minute jog got its own bar on the chart
+ * above.
+ */
+@Composable
+internal fun TrainingVolumeCard(state: TrainingWeekState) {
+    TrendCard(
+        title = "Training this week",
+        subtitle = "since ${WEEK_START_FORMAT.format(state.weekStart)}",
+    ) {
+        if (state.volumes.isEmpty()) {
+            Text(
+                "No sessions recorded yet this week.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@TrendCard
+        }
+
+        state.volumes.forEach { volume ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        volume.type.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        "${volume.sessions} session${if (volume.sessions == 1) "" else "s"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        Units.formatMinutes(volume.totalMinutes),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    val detail = buildList {
+                        volume.totalMeters?.let {
+                            add("%.1f mi".format(Units.metresToMiles(it)))
+                        }
+                        volume.paceSecondsPerMile?.let {
+                            add("${Units.formatPace(it)}/mi")
+                        }
+                    }
+                    if (detail.isNotEmpty()) {
+                        Text(
+                            detail.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** `Mon 24 Aug`, naming the week's first day without spending a line on it. */
+private val WEEK_START_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")

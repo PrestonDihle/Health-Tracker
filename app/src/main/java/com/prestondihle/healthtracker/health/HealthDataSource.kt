@@ -1,6 +1,7 @@
 package com.prestondihle.healthtracker.health
 
 import com.prestondihle.healthtracker.domain.SleepStageInterval
+import com.prestondihle.healthtracker.domain.TrainingType
 import java.time.Instant
 import java.time.LocalDate
 
@@ -42,8 +43,22 @@ data class MealSample(
 /** One heart rate reading at one instant, before bucketing. */
 data class HeartRateSample(val time: Instant, val bpm: Int)
 
-/** One running session, with its distance where the source recorded one. */
-data class RunSession(val start: Instant, val end: Instant, val distanceMeters: Double?)
+/**
+ * One recorded exercise session, with its distance where the source had one.
+ *
+ * Was `RunSession` and read only running. Widened rather than joined by a second
+ * read: the watch writes strength, hiking, walking, cycling and the rest through
+ * the same record type, so filtering to one of them at the source meant the app
+ * could not see training it was already being told about. The run-specific
+ * callers now filter on [type], which is a line of code where a second query
+ * would have been a second round trip and a second thing to keep in step.
+ */
+data class ExerciseSession(
+    val start: Instant,
+    val end: Instant,
+    val type: TrainingType,
+    val distanceMeters: Double?,
+)
 
 /**
  * One night as recorded, with the stages it was broken into.
@@ -188,11 +203,12 @@ interface HealthDataSource {
     suspend fun readSleepSessions(from: Instant, to: Instant): List<SleepSessionSample>
 
     /**
-     * Running sessions overlapping a window, newest need not be first.
+     * Exercise sessions overlapping a window, newest need not be first.
      *
-     * Just the session bounds and distance; the heart rate that zones each run is
-     * read separately over the session's own span, so nothing here depends on the
-     * runner's max heart rate and the zones can be recomputed when it changes.
+     * Just the session bounds, kind and distance; the heart rate that zones each
+     * run is read separately over the session's own span, so nothing here depends
+     * on the runner's max heart rate and the zones can be recomputed when it
+     * changes.
      */
-    suspend fun readRuns(from: Instant, to: Instant): List<RunSession>
+    suspend fun readExerciseSessions(from: Instant, to: Instant): List<ExerciseSession>
 }

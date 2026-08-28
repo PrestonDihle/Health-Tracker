@@ -605,6 +605,41 @@ until the next one, capped at three minutes so a watch paused at a light does no
 stopped in; a run with no heart-rate trace simply comes back empty rather than wrong. Max HR falls
 back to 220-age, then to 190, when the profile has set none.
 
+**The session read is no longer filtered to running, and that filter was hiding training.** It used
+to select `EXERCISE_TYPE_RUNNING` at the source, so an hour under a loaded pack reached the app as
+*nothing at all* while a twenty-minute jog got its own bar on the chart. `readExerciseSessions`
+(was `readRuns`) now returns every session with its kind, and the two run-specific callers —
+`getRunBreakdowns` and `getBestTwoMileSeconds` — filter on `TrainingType.RUN` themselves. One read
+rather than two: the alternative was a second query over the same records, and a second thing to keep
+in step.
+
+`domain/TrainingVolume.kt` groups a week of them for the Activity card, and
+`health/ExerciseTypeMapping.kt` is the Health Connect type to `TrainingType` mapping. The mapping
+lives in `health/` because it is the one part that has to know Health Connect's constants and the
+domain package is deliberately free of `androidx` imports; it is still a plain function over an `Int`,
+so it is unit-tested without a device. **A mis-mapped type is invisible on screen** — the session
+still appears, with a correct duration, under the wrong heading, and the row it belonged on is quietly
+short. That is why the mapping has a test at all.
+
+**Hiking is rucking here, and the app does not pretend to know that.** Health Connect has no rucking
+type and nothing on the record says whether weight was carried, so a ruck arrives as a hike and the
+label `Rucks` is the author's reading of their own data rather than something the source said.
+Anything unmapped falls through to `OTHER` rather than being dropped: an hour of training that
+happened and is not shown is a worse error than an hour shown under a vague heading.
+
+Three rules the card depends on. **Distance is null, never zero, when nothing in a group recorded
+one** — a strength session genuinely has no distance, and `0.0 mi` beside real figures is a
+measurement nobody made; a group is likewise not credited with a distance because one of its five
+sessions had a GPS lock. **Pace is the group's whole time over its whole distance**, not a mean of
+per-session paces, or a twenty-minute stroll would weigh as much as a two-hour ruck in the figure
+meant to describe the ruck. And **pace is withheld off foot**: minutes per mile is how walking,
+running and rucking are compared, but quoting it for cycling invites reading a 4:00 "pace" as a run
+and for swimming the unit is wrong twice over. Those types still show distance — only the derived
+figure is withheld.
+
+Rows are sorted by time and types with no sessions are absent, because the question is "where did
+this week go" and eight rows of nothing would bury the three that happened.
+
 **Glucose is cached a calendar day at a time and only *today* is ever re-read**, which is right for a
 finished day and wrong for one that was never finished properly: a monitor out of Bluetooth range
 writes its readings to Health Connect hours late, by which time nothing asks about the day they
@@ -1242,7 +1277,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
-`GlucoseMetricsTest`, `MealResponseTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
+`GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest` and `CaffeineLastCallTest` are the
+pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same

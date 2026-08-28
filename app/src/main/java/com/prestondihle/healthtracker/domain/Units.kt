@@ -79,4 +79,13 @@ object Units {
     /** `6h 20m` from a minute count, for sleep. */
     fun formatMinutes(minutes: Int): String =
         if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
+
+    /**
+     * Metres to miles, for the session distances Health Connect records in metres.
+     *
+     * Here rather than at the point of use for the reason every other conversion
+     * is: the storage unit is metric and the display unit is not, and a division
+     * written inline is a second place for the constant to be wrong.
+     */
+    fun metresToMiles(metres: Double): Double = metres / RunPace.METRES_PER_MILE
 }

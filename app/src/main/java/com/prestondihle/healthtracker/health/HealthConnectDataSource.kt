@@ -553,15 +553,15 @@ class HealthConnectDataSource(
             .onFailure { Log.d(TAG, "mile pace read failed", it) }
             .getOrNull()
 
-    override suspend fun readRuns(from: Instant, to: Instant): List<RunSession> {
+    override suspend fun readExerciseSessions(from: Instant, to: Instant): List<ExerciseSession> {
         val active = client ?: return emptyList()
-        return active.runningSessions(from, to)
+        return active.exerciseSessions(from, to)
     }
 
-    private suspend fun HealthConnectClient.runningSessions(
+    private suspend fun HealthConnectClient.exerciseSessions(
         from: Instant,
         to: Instant,
-    ): List<RunSession> =
+    ): List<ExerciseSession> =
         runCatching {
                 readRecords(
                         ReadRecordsRequest(
@@ -570,11 +570,15 @@ class HealthConnectDataSource(
                         )
                     )
                     .records
-                    .filter { it.exerciseType == ExerciseSessionRecord.EXERCISE_TYPE_RUNNING }
                     .map { session ->
-                        RunSession(
+                        ExerciseSession(
                             start = session.startTime,
                             end = session.endTime,
+                            type = trainingTypeOf(session.exerciseType),
+                            // Asked for every session rather than only the ones
+                            // expected to travel: a strength session comes back
+                            // null and costs one aggregate, where guessing from
+                            // the type would hide a distance the watch did record.
                             distanceMeters =
                                 aggregateOrNull(
                                         DistanceRecord.DISTANCE_TOTAL,
@@ -587,7 +591,7 @@ class HealthConnectDataSource(
                         )
                     }
             }
-            .onFailure { Log.d(TAG, "run read failed", it) }
+            .onFailure { Log.d(TAG, "exercise session read failed", it) }
             .getOrDefault(emptyList())
 
     companion object {

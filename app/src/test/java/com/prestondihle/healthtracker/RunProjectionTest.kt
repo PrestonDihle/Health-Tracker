@@ -6,7 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.MockHealthDataSource
-import com.prestondihle.healthtracker.health.RunSession
+import com.prestondihle.healthtracker.domain.TrainingType
+import com.prestondihle.healthtracker.health.ExerciseSession
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import java.time.Duration
 import java.time.Instant
@@ -39,14 +40,18 @@ class RunProjectionTest {
     private val context: Context
         get() = ApplicationProvider.getApplicationContext()
 
-    /** A source with a fixed set of runs and everything else delegated. */
-    private class Runs(private val delegate: MockHealthDataSource, private val runs: List<RunSession>) :
-        HealthDataSource by delegate {
-        override suspend fun readRuns(from: Instant, to: Instant): List<RunSession> =
-            runs.filter { !it.start.isBefore(from) && !it.end.isAfter(to) }
+    /** A source with a fixed set of sessions and everything else delegated. */
+    private class Runs(
+        private val delegate: MockHealthDataSource,
+        private val runs: List<ExerciseSession>,
+    ) : HealthDataSource by delegate {
+        override suspend fun readExerciseSessions(
+            from: Instant,
+            to: Instant,
+        ): List<ExerciseSession> = runs.filter { !it.start.isBefore(from) && !it.end.isAfter(to) }
     }
 
-    private fun repository(runs: List<RunSession>): TrackerRepository {
+    private fun repository(runs: List<ExerciseSession>): TrackerRepository {
         val db =
             Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
                 .allowMainThreadQueries()
@@ -55,9 +60,10 @@ class RunProjectionTest {
     }
 
     private fun run(startedHoursAgo: Long, minutes: Long, metres: Double?) =
-        RunSession(
+        ExerciseSession(
             start = now.minus(Duration.ofHours(startedHoursAgo)),
             end = now.minus(Duration.ofHours(startedHoursAgo)).plus(Duration.ofMinutes(minutes)),
+            type = TrainingType.RUN,
             distanceMeters = metres,
         )
 

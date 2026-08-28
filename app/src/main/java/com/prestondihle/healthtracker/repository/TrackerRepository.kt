@@ -42,6 +42,11 @@ import com.prestondihle.healthtracker.domain.RunPace
 import com.prestondihle.healthtracker.domain.RunZones
 import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.domain.SleepStageInterval
+import com.prestondihle.healthtracker.domain.TrainingSession
+import com.prestondihle.healthtracker.domain.TrainingType
+import com.prestondihle.healthtracker.domain.TrainingVolume
+import com.prestondihle.healthtracker.domain.TrainingVolumes
+import com.prestondihle.healthtracker.health.ExerciseSession
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.health.HeartRateSample
@@ -114,7 +119,10 @@ class TrackerRepository(
         to: Instant,
         maxHeartRate: Int,
     ): List<RunBreakdown> {
-        val runs = runCatching { healthDataSource.readRuns(from, to) }.getOrDefault(emptyList())
+        // Filtered here rather than at the source: the session read is now the
+        // one place every kind of training comes from, and the zone chart is
+        // about running specifically.
+        val runs = readRuns(from, to)
         return runs
             .map { run ->
                 val samples =
@@ -138,11 +146,40 @@ class TrackerRepository(
      * right trade.
      */
     suspend fun getBestTwoMileSeconds(from: Instant, to: Instant): Int? {
-        val runs = runCatching { healthDataSource.readRuns(from, to) }.getOrDefault(emptyList())
+        val runs = readRuns(from, to)
         return RunPace.bestNormalizedSeconds(
             runs.map { it.distanceMeters to Duration.between(it.start, it.end).seconds }
         )
     }
+
+    /** Every exercise session in a window, whatever kind it was. */
+    private suspend fun readSessions(from: Instant, to: Instant): List<ExerciseSession> =
+        runCatching { healthDataSource.readExerciseSessions(from, to) }
+            .getOrDefault(emptyList())
+
+    /** Just the runs, for the two figures that are about running and not training. */
+    private suspend fun readRuns(from: Instant, to: Instant): List<ExerciseSession> =
+        readSessions(from, to).filter { it.type == TrainingType.RUN }
+
+    /**
+     * This week's training, grouped by kind.
+     *
+     * Read live rather than cached, for the reason the runs chart is: sessions
+     * are few, the window is bounded, and a table here would be one more cache to
+     * keep in step with a source that revises itself. Nothing about a volume is
+     * expensive enough to be worth storing.
+     */
+    suspend fun getTrainingVolume(from: Instant, to: Instant): List<TrainingVolume> =
+        TrainingVolumes.over(
+            readSessions(from, to).map {
+                TrainingSession(
+                    type = it.type,
+                    start = it.start,
+                    end = it.end,
+                    distanceMeters = it.distanceMeters,
+                )
+            }
+        )
 
     // ----- Blood pressure ----------------------------------------------------
 

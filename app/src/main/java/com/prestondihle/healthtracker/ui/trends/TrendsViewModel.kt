@@ -26,6 +26,7 @@ import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.ScoredMeal
+import com.prestondihle.healthtracker.domain.TrainingVolume
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.StackedBar
@@ -39,11 +40,13 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.prestondihle.healthtracker.repository.TrackerRepository
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
 
 /**
  * How far back the trends charts reach.
@@ -91,6 +94,19 @@ private const val RANKED_MEALS = 5
  * readings both present, but none of them lined up well enough to score" want
  * three different sentences, and only one of them is something to fix.
  */
+/**
+ * This week's training so far, grouped by kind.
+ *
+ * An empty [volumes] on its own cannot say whether nothing was trained or
+ * nothing was granted, and the card does not try to guess -- it says the week
+ * has nothing in it yet, which is true either way and is the only claim the data
+ * supports.
+ */
+data class TrainingWeekState(
+    val volumes: List<TrainingVolume> = emptyList(),
+    val weekStart: LocalDate = LocalDate.now(),
+)
+
 data class MealResponseState(
     val ranked: List<ScoredMeal> = emptyList(),
     val mealCount: Int = 0,
@@ -470,6 +486,46 @@ class TrendsViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = MealResponseState(zoneId = zoneId),
+            )
+
+    /**
+     * This week's training, grouped by kind.
+     *
+     * A week rather than [TrendsRange], and outside [uiState] like `aft` for a
+     * related reason: the question is "have I trained enough *this week*", which
+     * a 90-day window answers by burying. The week's first day comes from
+     * `UserSettings.weekStartsOn`, the same setting the blood sugar summary reads,
+     * so the two cards never disagree about when the week began.
+     *
+     * Ends at *now* rather than at the end of the week, so the figure is what has
+     * been done rather than what a full week would hold -- the same choice the CGM
+     * windows make, and for the same reason.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val training: StateFlow<TrainingWeekState> =
+        repository
+            .getUserSettings()
+            .mapLatest { settings ->
+                val weekStart =
+                    LocalDate.now(zoneId)
+                        .with(
+                            TemporalAdjusters.previousOrSame(
+                                settings?.weekStartsOn ?: DayOfWeek.MONDAY
+                            )
+                        )
+                TrainingWeekState(
+                    volumes =
+                        repository.getTrainingVolume(
+                            from = weekStart.atStartOfDay(zoneId).toInstant(),
+                            to = Instant.now(),
+                        ),
+                    weekStart = weekStart,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = TrainingWeekState(),
             )
 
     fun addAftAttempt(attempt: AftAttempt) {
