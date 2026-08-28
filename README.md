@@ -240,13 +240,20 @@ against something too thin to mean anything.
 None of it costs a sync. It is read from days already stored, so the line is
 there the moment the tab opens.
 
-### Blood oxygen
+### Blood oxygen (read, but dormant)
 
-Where the watch records overnight SpO2, Wellness charts the nightly average.
-Garmin syncs this one; HRV status, Body Battery, stress and training load do not
-reach Health Connect at all, so the app does not pretend to show them.
+Wellness will chart the nightly average where a watch records overnight SpO2 —
+and on the setup this was built against, none arrives. Garmin Connect does not
+write blood oxygen to Health Connect: its permission list asks for two vitals,
+heart rate and resting heart rate, and Health Connect has no oxygen-saturation
+data at all. Turning Pulse Ox on at the watch does not change that, because the
+gap is in what Garmin exports rather than in what the watch measures.
 
-It needs its own Health Connect permission, and because it arrived in a later
+So SpO2 sits with HRV status, Body Battery, stress and training load: things this
+app would happily show and cannot get. The chart simply does not draw, and will
+start on its own if that ever changes.
+
+It has its own Health Connect permission, and because it arrived in a later
 version the app asks for it again rather than assuming — Wellness shows
 "Not yet allowed to read: oxygen saturation" with a Grant button until you do.
 Days recorded before it was granted stay blank rather than being backfilled with

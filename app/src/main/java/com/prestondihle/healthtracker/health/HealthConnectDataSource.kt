@@ -637,9 +637,14 @@ class HealthConnectDataSource(
                 HealthPermission.getReadPermission(StepsRecord::class),
                 HealthPermission.getReadPermission(HeartRateRecord::class),
                 HealthPermission.getReadPermission(RestingHeartRateRecord::class),
-                // Garmin syncs this one. HRV status, Body Battery, stress and
-                // VO2 max do not reach Health Connect at all, so there is nothing
-                // here to add for them and no workaround worth attempting.
+                // Requested, granted, and never delivered on the phone this was
+                // built against: Garmin Connect does not write blood oxygen to
+                // Health Connect -- its vitals write set is heart rate and
+                // resting heart rate, and nothing else on the device writes SpO2
+                // either. Kept because it costs nothing while the column is NULL
+                // and starts working by itself if that changes. HRV status, Body
+                // Battery, stress and VO2 max do not reach Health Connect at all,
+                // and this turned out to belong with them.
                 HealthPermission.getReadPermission(OxygenSaturationRecord::class),
                 HealthPermission.getReadPermission(SleepSessionRecord::class),
                 HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),

@@ -954,11 +954,26 @@ confirmed by the real data: a session running 00:45 to 06:41 lands wholly on tha
 `sleepByDay[today]` is last night. Only the post-midnight portion of a night that starts before
 midnight counts toward the earlier day, and it never dominates.
 
-**SpO2 is the one Garmin metric worth adding and the last one.** HRV status, Body Battery, stress and
-VO2 max do not reach Health Connect at all — there is nothing to add for them and no workaround worth
-attempting. `readMeanSpo2` reads raw records and averages them because Health Connect defines **no
-aggregate metric** for `OxygenSaturationRecord`, unlike heart rate or steps; that is cheap in practice
-since a watch writes a handful of spot readings a night rather than a sample every few seconds.
+**SpO2 is read, and on this phone it never arrives. Do not spend time trying to make it.** The read
+was added on the belief that Garmin syncs blood oxygen where it does not sync HRV status, Body
+Battery, stress or VO2 max. That belief was wrong and was checked properly only after the code
+landed: Health Connect's own data browser has **no oxygen-saturation type at all**, and Garmin
+Connect's write permissions read *Vitals: 2 of 2 selected* — everything it asks for is granted, and
+blood oxygen is not among what it asks for. Those two agree, so SpO2 belongs on the same list as Body
+Battery rather than apart from it.
+
+**Enabling Pulse Ox on the watch does not fix it**, which is the trap worth writing down: even with
+the watch recording, Garmin Connect would still have to request the Health Connect write permission,
+and it does not. There is nothing on this side of the boundary to change.
+
+The code stays because it costs nothing while the column is NULL — the chart simply does not draw,
+and it will light up on its own if Garmin ever adds the permission. Treat it as dormant rather than
+broken, and **do not "fix" it by seeding a default or by inventing a fallback source.**
+
+`readMeanSpo2` reads raw records and averages them because Health Connect defines **no aggregate
+metric** for `OxygenSaturationRecord`, unlike heart rate or steps. That would have been cheap in
+practice, since a watch writes a handful of spot readings a night rather than a sample every few
+seconds.
 
 `MIGRATION_18_19` adds `HealthDaySnapshot.spo2Percent` with **no SQLite default** — the
 `MIGRATION_11_12` shape, not the `MIGRATION_5_6` one. A default would write a health measurement
@@ -974,7 +989,8 @@ space no point occupies.
 read: oxygen saturation. Those metrics stay blank until granted"* with a Grant button on Wellness —
 which is the whole point of tracking missing permissions separately from `GRANTED`, since the app was
 already connected and would otherwise have reported itself healthy while the column stayed empty for
-ever.
+ever. Granting it cleared the banner immediately, so that half is verified — **a granted permission
+and an arriving metric are two different things, and this is the case that separates them.**
 
 ### Body composition
 
