@@ -51,18 +51,42 @@ import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 /**
- * How far back the trends charts reach.
+ * How far back the trends charts reach, and how wide one slot is once they do.
  *
  * A week is what a change made on Monday has actually had time to show up in; a
  * quarter is where a body measurement's real slope separates from the noise of
  * daily weighing. The two in between exist because most questions asked here are
  * neither.
+ *
+ * The two long ranges are [weekly] because a day has stopped being a slot worth
+ * drawing at that width: 365 bars across a phone are a third of a pixel each,
+ * and a year of daily weights is a band of noise with the trend somewhere inside
+ * it. Aggregating there is not a compromise made for the renderer -- it is the
+ * only reading the width supports.
  */
-enum class TrendsRange(val label: String, val days: Long) {
+enum class TrendsRange(val label: String, val days: Long, val weekly: Boolean = false) {
     WEEK("7 days", 7),
     TWO_WEEKS("14 days", 14),
     MONTH("30 days", 30),
     THREE_MONTHS("90 days", 90),
+    SIX_MONTHS("180 days", 180, weekly = true),
+    YEAR("365 days", 365, weekly = true),
+    ;
+
+    /** How far back the two live-read cards go, which is not always [days]. */
+    val cappedDays: Long
+        get() = days.coerceAtMost(LIVE_READ_MAX_DAYS)
+
+    /**
+     * What one of those cards should call its own window.
+     *
+     * A card drawing ninety days under a chip that says 365 has to print the
+     * ninety. Left with the chip's label it would claim a year it never read,
+     * and a chart that simply stops short of the others reads as a card that
+     * failed rather than one that was capped on purpose.
+     */
+    val effectiveLabel: String
+        get() = if (cappedDays < days) "$cappedDays days" else label
 }
 
 /** Fallback max heart rate when the profile has neither a figure nor an age to derive one from. */
@@ -71,12 +95,33 @@ private const val DEFAULT_MAX_HEART_RATE = 190
 /**
  * How far back the two-mile projection looks for a qualifying run.
  *
- * A quarter, matching the widest trend window. Long enough that somebody who
- * races rarely still has something to project from, short enough that the figure
- * is about the shape they are in now -- a best from a year ago is not a
- * projection of anything, and would sit on the card looking exactly like one.
+ * A quarter. Long enough that somebody who races rarely still has something to
+ * project from, short enough that the figure is about the shape they are in now
+ * -- a best from a year ago is not a projection of anything, and would sit on
+ * the card looking exactly like one.
  */
 private const val PROJECTION_WINDOW_DAYS = 90L
+
+/**
+ * The widest window the two live-read cards will open, however wide a range is
+ * chosen.
+ *
+ * A quarter, which is exactly the widest range that existed before 180 and 365
+ * were added -- so both cards behave at every old chip precisely as they did,
+ * and the two new ones simply do not reach them.
+ *
+ * They are capped for two different reasons that happen to land on one figure.
+ * The runs chart costs a raw heart-rate read *per session* ([getRunBreakdowns]),
+ * so a year of running is a hundred and fifty paginated round trips to draw a
+ * hundred and fifty bars on a chart a phone is four hundred pixels wide -- the
+ * same argument `HEART_RATE_SYNC_HORIZON` already makes about raw samples, and
+ * unreadable even if it were free. The meal ranking is cheap per row but reads
+ * every glucose sample in its window, which at CGM resolution is a hundred
+ * thousand rows pulled into memory to print five lines. And a dinner from last
+ * spring is not something to act on, which is the [PROJECTION_WINDOW_DAYS]
+ * argument arriving at a different card.
+ */
+private const val LIVE_READ_MAX_DAYS = 90L
 
 /**
  * How many meals the biggest-responses ranking lists.
@@ -214,6 +259,67 @@ data class TrendsUiState(
     val days: List<LocalDate>
         get() = (0..ChronoUnit.DAYS.between(startDate, endDate)).map { startDate.plusDays(it) }
 
+    /** The week a date belongs to, named by its first day. */
+    private fun weekStartOf(date: LocalDate): LocalDate =
+        date.with(TemporalAdjusters.previousOrSame(settings.weekStartsOn))
+
+    /**
+     * The slots the charts actually draw: one per day, or one per week when
+     * [TrendsRange.weekly].
+     *
+     * Keyed on `UserSettings.weekStartsOn`, the same setting the blood sugar
+     * summary and the training card already read, so every week in the app
+     * starts on the same morning.
+     *
+     * The weeks at both ends are partial -- the range is a count of days back
+     * from today and lands wherever it lands -- and that is survivable only
+     * because every bucket below is a *mean*. Summed, the newest bucket would
+     * shrink through the week and reset every Monday, drawing the reader a
+     * collapse on a chart whose whole job is showing whether anything is
+     * actually moving.
+     */
+    val buckets: List<LocalDate>
+        get() = if (!range.weekly) days else days.map(::weekStartOf).distinct()
+
+    /**
+     * A chart's subtitle, saying what one slot is once it has stopped being a day.
+     *
+     * Every trend subtitle here already carries the unit, and at these ranges the
+     * unit has genuinely changed -- a point is no longer Tuesday's weight but the
+     * mean of the week Tuesday was in. Left unsaid, a reader comparing a bar
+     * against the goal line beside it would be reading an average as a day, and
+     * the chart gives them nothing to notice the difference by.
+     */
+    fun subtitle(base: String): String = if (range.weekly) "$base, weekly average" else base
+
+    /**
+     * Folds one point per day into one point per slot, averaging the week.
+     *
+     * A week's value is the mean of the days in it that hold one, and that
+     * single rule is doing two jobs. For anything with a daily goal -- steps,
+     * sleep, calories -- a mean per day is on the same scale the goal line is
+     * drawn at, so the existing reference lines stay honest without a second
+     * axis or a seven-times-larger target; a weekly *sum* would put the bars a
+     * decimal place above their own goal. For anything merely measured --
+     * weight, waist, resting heart rate -- the mean is simply what the week
+     * weighed, over the mornings somebody stepped on the scale.
+     *
+     * Days with no reading are left out of the divisor rather than counted as
+     * zero, which is ground rule 6 arriving at the arithmetic: a week the watch
+     * synced on three days holds three days of evidence, and dividing it by
+     * seven would draw a fortnight of illness. A week with nothing at all in it
+     * is null for the same reason, and breaks the line rather than touching the
+     * floor.
+     */
+    private fun bucketed(daily: List<DayPoint>): List<DayPoint> {
+        if (!range.weekly) return daily
+        val byWeek = daily.groupBy { weekStartOf(it.date) }
+        return buckets.map { start ->
+            val measured = byWeek[start].orEmpty().mapNotNull { it.value }
+            DayPoint(start, measured.takeIf { it.isNotEmpty() }?.average()?.toFloat())
+        }
+    }
+
     /**
      * One point per day, null on days the row is missing or the field unset.
      *
@@ -227,7 +333,7 @@ data class TrendsUiState(
         valueOf: (T) -> Float?,
     ): List<DayPoint> {
         val byDate = rows.associate { dateOf(it) to valueOf(it) }
-        return days.map { DayPoint(it, byDate[it]) }
+        return bucketed(days.map { DayPoint(it, byDate[it]) })
     }
 
     fun snapshotSeries(valueOf: (HealthDaySnapshot) -> Float?): List<DayPoint> =
@@ -260,7 +366,10 @@ data class TrendsUiState(
      * Daily rep totals for one movement, zero on a day with no logged sets.
      *
      * Zero rather than null because a set is only ever recorded by logging it: no
-     * rows for a day means none were done, not that the count is unknown.
+     * rows for a day means none were done, not that the count is unknown. Those
+     * zeroes are readings and count into a weekly mean, which is what makes the
+     * bucket "reps per day" rather than "reps per day trained" -- a week with one
+     * hard session in it did not average that session's count.
      */
     fun repSeries(movement: MovementType): List<DayPoint> {
         val byDate =
@@ -268,11 +377,11 @@ data class TrendsUiState(
                 .filter { it.movement == movement }
                 .groupBy { it.timestamp.atZone(zoneId).toLocalDate() }
                 .mapValues { (_, sets) -> sets.sumOf { it.reps }.toFloat() }
-        return days.map { DayPoint(it, byDate[it] ?: 0f) }
+        return bucketed(days.map { DayPoint(it, byDate[it] ?: 0f) })
     }
 
     /**
-     * Macro calories per day as protein / carbs / fat stacks, one bar per day.
+     * Macro calories per slot as protein / carbs / fat stacks.
      *
      * Converted from grams at 4/4/9 kcal so the stack height is total energy and
      * each band is its real share -- fat is barely a third of the grams but
@@ -281,16 +390,38 @@ data class TrendsUiState(
     val macroBars: List<StackedBar>
         get() {
             val byDate = snapshots.associateBy { it.date }
-            return days.map { date ->
+            fun segmentsOn(date: LocalDate): List<Float> {
                 val snapshot = byDate[date]
+                return listOf(
+                    (snapshot?.proteinGrams ?: 0f) * 4f,
+                    (snapshot?.carbGrams ?: 0f) * 4f,
+                    (snapshot?.fatGrams ?: 0f) * 9f,
+                )
+            }
+            if (!range.weekly) return days.map { StackedBar(it, segmentsOn(it)) }
+
+            // Averaged over the days that recorded food, not over the seven. A
+            // day with no nutrition on its snapshot is a day nothing was read
+            // from, and it draws as an empty bar daily where that is plainly
+            // what it is -- folded into a week at a seventh of its weight it
+            // would instead report eating that never stopped and calories that
+            // halved, which is the one shape a macro chart must not invent.
+            val eaten =
+                days
+                    .filter { date ->
+                        val snapshot = byDate[date]
+                        snapshot?.proteinGrams != null ||
+                            snapshot?.carbGrams != null ||
+                            snapshot?.fatGrams != null
+                    }
+                    .groupBy(::weekStartOf)
+            return buckets.map { start ->
+                val dates = eaten[start].orEmpty()
+                if (dates.isEmpty()) return@map StackedBar(start, listOf(0f, 0f, 0f))
+                val stacks = dates.map(::segmentsOn)
                 StackedBar(
-                    date = date,
-                    segments =
-                        listOf(
-                            (snapshot?.proteinGrams ?: 0f) * 4f,
-                            (snapshot?.carbGrams ?: 0f) * 4f,
-                            (snapshot?.fatGrams ?: 0f) * 9f,
-                        ),
+                    date = start,
+                    segments = List(3) { band -> stacks.sumOf { it[band].toDouble() }.toFloat() / dates.size },
                 )
             }
         }
@@ -391,7 +522,7 @@ class TrendsViewModel(
         combine(range, repository.getUserSettings()) { selected, settings -> selected to settings }
             .mapLatest { (selected, settings) ->
                 val end = LocalDate.now(zoneId)
-                val start = end.minusDays(selected.days - 1)
+                val start = end.minusDays(selected.cappedDays - 1)
                 val maxHeartRate =
                     settings?.maxHeartRateBpm
                         ?: settings?.ageYears?.let { 220 - it }
@@ -460,7 +591,7 @@ class TrendsViewModel(
         range
             .flatMapLatest { selected ->
                 val end = LocalDate.now(zoneId)
-                val start = end.minusDays(selected.days - 1)
+                val start = end.minusDays(selected.cappedDays - 1)
                 combine(
                     repository.getMealsSince(start.atStartOfDay(zoneId).toInstant()),
                     repository.getBloodSugarBetween(start, end),

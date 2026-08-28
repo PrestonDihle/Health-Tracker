@@ -197,11 +197,59 @@ injectable `ZoneId` defaulting to `systemDefault()`, which is what makes the tim
 
 **Window and range enums are the single source of a screen's query span.** `MasterRange`
 (3h/6h/12h/24h/48h/7d), `GlucoseWindow` (3h/6h/12h/24h/48h/72h) and `TrendsRange`
-(7/14/30/90 days) each drive both the chips and the query, so adding an entry widens the fetch with
-no second edit — `GLUCOSE_WINDOW_HOURS` is derived as the maximum, and Wellness queries once at
-that width so switching windows is a redraw rather than a round trip. Six chips no longer fit one row
-of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the widest
-options behind a gesture nobody knows is there.
+(7/14/30/90/180/365 days) each drive both the chips and the query, so adding an entry widens the
+fetch with no second edit — `GLUCOSE_WINDOW_HOURS` is derived as the maximum, and Wellness queries
+once at that width so switching windows is a redraw rather than a round trip. Six chips no longer fit
+one row of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the
+widest options behind a gesture nobody knows is there.
+
+**"No second edit" held for the cached day-indexed charts and for nothing else**, which is worth
+knowing before adding a seventh entry. Two cards on `TrendsRange` are not fed by a Room flow over
+daily rows: the Runs chart costs a raw heart-rate read *per session*, so a year of running is around
+a hundred and fifty paginated Health Connect round trips to draw a hundred and fifty bars on a
+four-hundred-pixel plot, and the biggest-responses ranking reads every glucose sample in its window,
+which at CGM resolution is six figures of rows pulled into memory to print five lines. Both stop at
+`LIVE_READ_MAX_DAYS` (90) — deliberately the widest range that existed before 180 and 365, so every
+older chip behaves exactly as it did — and both print `TrendsRange.effectiveLabel` rather than
+`label`, because a card drawing ninety days under a chip that says 365 is claiming a year it never
+read.
+
+### Weekly buckets on the long ranges
+
+**180 and 365 days aggregate to weekly buckets**, keyed on `UserSettings.weekStartsOn` like the CGM
+week and the training card, so every week in the app starts on the same morning. A day has stopped
+being a slot worth drawing at that width — 365 bars across a phone are a third of a pixel each, and a
+year of daily weights is a band of noise with the trend somewhere inside it. `TrendsRange.weekly`
+carries the flag, `TrendsUiState.buckets` is the x-slots the charts draw, and `bucketed` is the fold.
+
+**A bucket is a mean, never a sum, and the one rule is doing two jobs.** For anything with a daily
+goal — steps, sleep, calories — a mean per day is on the same scale the reference line is drawn at,
+so the existing goal lines stay honest with no second axis and no seven-times-larger target; summed,
+the bars would sit a decimal place above their own goal. For anything merely measured — weight,
+waist, resting heart rate — the mean is what the week weighed. The two categories read as different
+requirements and collapse to the same arithmetic.
+
+**The weeks at both ends are partial, and only a mean survives that.** The range is a count of days
+back from today and lands mid-week whatever day it is run on, so a summed newest bucket would shrink
+through the week and reset every Monday — a year view opening on a cliff at its right-hand edge every
+day except one, which is the edge being read. `TrendsBucketsTest` pins it from both directions: a
+week walked at the same rate as the one before it draws at the same height even when only three days
+of it have happened.
+
+**Days with no reading are left out of the divisor rather than counted as zero**, which is ground
+rule 6 arriving at the arithmetic — a week the watch synced on three days holds three days of
+evidence, and dividing it by seven would draw a fortnight of illness. A week with nothing in it at
+all is null and breaks the line. The distinction is already carried by whether `series()` yields null
+or `0f`, so `repSeries`' deliberate zeroes average in correctly for free: a week's pushups are reps
+per day, not reps per day trained. `macroBars` is the one that needed its own denominator, since it
+substitutes `0f` for a missing figure at the point of use — it averages over the days that recorded
+food, because a day nothing was read from draws plainly as an empty bar daily but folded into a week
+at a seventh of its weight would report eating that never stopped and calories that halved.
+
+Every day-indexed subtitle runs through `TrendsUiState.subtitle`, which appends *weekly average* at
+these ranges. The subtitle already carried the unit and the unit has genuinely changed: a point is no
+longer Tuesday's weight but the mean of the week Tuesday was in, and a reader comparing it against
+the goal line beside it has nothing else to notice the difference by.
 
 **The master graph's window is no longer anchored to now.** `TodayUiState.panOffset` is how
 far back a horizontal drag has pulled the right edge, and `windowEnd` is `now - panOffset`.
@@ -1411,7 +1459,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
-`GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest` and
+`GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
+`TrendsBucketsTest` and
 `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
@@ -1457,6 +1506,15 @@ divides a day evenly (otherwise the rules drift through the day), that the densi
 screen and not the clock, and that a spring-forward day keeps every rule on the hour.
 `ChartBoundsTest` pins the silent failure: a goal outside the readings is clipped rather than drawn
 small, so a chart missing its goal looks exactly like a chart that has none.
+`TrendsBucketsTest` pins what a slot means once it has stopped being a day. A sum and a mean look
+equally plausible in a screenshot and disagree by a factor of seven, in the one place a daily goal
+line is drawn alongside for comparison — so the wrong one does not look wrong, it looks like a week
+of extraordinary effort above a target that has quietly stopped meaning anything. The cases worth
+most are the partial weeks at either end, which summed would open the year view on a cliff at its
+right-hand edge every day but one. `ScreenRenderTest` carries the drawing half: a year of weight
+composed on its own, with the goal eighteen pounds below anything weighed and four waypoints between
+them, so `chartBounds` has to hold all five rules inside an axis scaled to weekly means or the
+picture loses them silently.
 `SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
 card: counting waking time as sleep, which flatters every night by however long was spent staring at
 the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement

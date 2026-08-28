@@ -83,6 +83,40 @@ why they stay dashed while the glucose reference line is solid: one is a
 published figure, the other is wherever you decided to put it, and the two should
 not look alike.
 
+## How far back the trends reach
+
+Chips above the charts pick the window: **7, 14, 30, 90, 180 or 365 days**. A
+week is what a change made on Monday has had time to show up in; a quarter is
+where a body measurement's real slope separates from the noise of weighing
+yourself every morning.
+
+**At 180 and 365 days a point is a week, not a day.** A year of daily weights is
+a band of noise with the trend somewhere inside it, and 365 bars across a phone
+are a third of a pixel each — so those two ranges average each week into one
+point, on the week start you chose in Settings. Every subtitle says *weekly
+average* while they do, because the number under your finger has changed meaning:
+it is no longer Tuesday's weight but the mean of the week Tuesday was in.
+
+**A week is an average, not a total**, which is what lets the goal lines keep
+working. Your step goal is a daily figure, so a weekly bar has to be a daily
+figure too — totalled, a good week would draw seven times above its own target
+and the line would stop telling you anything. It also keeps the newest bar
+honest: a year always ends partway through a week, and a total would shrink every
+Monday and climb back by Sunday, drawing you a collapse at the very edge of the
+chart you are actually reading.
+
+Days you did not record are left out of the average rather than counted as zero.
+A week the watch synced on three days is the average of those three — dividing it
+by seven would draw four days of illness that never happened. A week with nothing
+in it at all breaks the line instead of touching the floor.
+
+**Two cards stop at 90 days whatever chip you pick**, and say so in their own
+subtitle. The runs chart reads the heart-rate trace of every session separately,
+so a year of running is a few minutes of waiting to draw a hundred and fifty bars
+too thin to tell apart; the biggest-responses ranking reads every blood sugar
+sample in its window, which over a year is a six-figure number of readings to
+print five lines. A dinner from last spring is also not a thing to act on.
+
 ## Health Connect
 
 The app is **read-only** against Health Connect. It never writes, so no

@@ -22,15 +22,21 @@ import com.prestondihle.healthtracker.data.AftAttempt
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.Sex
+import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.WeightEntry
+import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Units
+import com.prestondihle.healthtracker.ui.components.chartBounds
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
+import com.prestondihle.healthtracker.ui.trends.TrendsUiState
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
+import com.prestondihle.healthtracker.ui.trends.WeightTrendCard
 import com.prestondihle.healthtracker.ui.wellness.MoodTrendCard
 import com.prestondihle.healthtracker.ui.wellness.SleepCard
 import com.prestondihle.healthtracker.ui.wellness.WellnessScreen
@@ -39,6 +45,7 @@ import com.prestondihle.healthtracker.ui.wellness.WellnessViewModel
 import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -137,6 +144,71 @@ class ScreenRenderTest {
         val vm = TrendsViewModel(repo, zone)
         render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
         composeRule.onRoot().captureRoboImage("build/screenshots/trends.png")
+    }
+
+    /**
+     * A year of weight, with the goal and the whole waypoint ladder on it.
+     *
+     * Composed directly rather than scrolled to on Wellness, which ticks -- the
+     * `SleepCard` pattern, and here it also buys the thing that makes the test
+     * worth having: a real layout pass over the widest range the app draws.
+     *
+     * A year is where this card has the most to get wrong at once. Fifty-odd
+     * weekly buckets share the plot with a goal and four waypoints, and
+     * `chartBounds` has to hold every one of those rules inside the axis or it
+     * is not drawn small -- it is clipped, and a chart missing its goal looks
+     * exactly like a chart that never had one. That is the failure this seeds
+     * for deliberately: the goal sits eighteen pounds below anything actually
+     * weighed, so an axis scaled to the readings alone would lose it.
+     */
+    @Test
+    fun `a year of weight keeps its goal and waypoints on the plot`() {
+        val today = java.time.LocalDate.now(zone)
+        // A year of weighing, drifting down from about 208 lb to about 196, with
+        // gaps: real weeks are not weighed on every day of them.
+        val weights =
+            (0L until 365L)
+                .filter { it % 3L != 0L }
+                .map { back ->
+                    val day = today.minusDays(back)
+                    val lbs = 196f + (back / 365f) * 12f + ((back % 7) - 3) * 0.4f
+                    WeightEntry(date = day, weightKg = Units.lbsToKg(lbs))
+                }
+        val goalKg = Units.lbsToKg(178f)
+        val ladder = listOf(200f, 195f, 190f, 185f).map { WeightSubGoal(kg = Units.lbsToKg(it)) }
+
+        val state =
+            TrendsUiState(
+                range = TrendsRange.YEAR,
+                startDate = today.minusDays(TrendsRange.YEAR.days - 1),
+                endDate = today,
+                weights = weights,
+                goals = UserGoals(goalWeightKg = goalKg),
+                weightSubGoals = ladder,
+                settings = UserSettings(),
+                zoneId = zone,
+            )
+
+        // The fold happened at all, and did not leave a year drawn as 365 slots.
+        assertEquals(53, state.buckets.size)
+        val drawn = state.weightSeries(Units::kgToLbs).mapNotNull { it.value }
+        assertTrue(drawn.size in 50..53)
+
+        // Every rule the card is about is inside the axis the readings imply,
+        // which is the arithmetic the picture below is evidence for.
+        val bounds =
+            chartBounds(drawn, marks = listOf(Units.kgToLbs(goalKg)) + ladder.map { Units.kgToLbs(it.kg) })
+        assertTrue(bounds.start <= Units.kgToLbs(goalKg))
+        assertTrue(bounds.endInclusive >= drawn.max())
+
+        render { WeightTrendCard(state) }
+
+        composeRule.onNodeWithText("Weight").assertIsDisplayed()
+        // Says a slot is a week, on the card rather than only by the chip: a
+        // reader comparing a point against the goal line beside it is otherwise
+        // reading an average as a morning.
+        composeRule.onNodeWithText("pounds, Health Connect and manual, weekly average").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/weight-year.png")
     }
 
     /**
@@ -248,7 +320,10 @@ class ScreenRenderTest {
 
         // Seven days is narrower than the seeded fortnight and ninety is wider
         // than it, so between them these cover both the cropping and the
-        // mostly-empty ends of every chart's day-slot arithmetic.
+        // mostly-empty ends of every chart's day-slot arithmetic. The two long
+        // ranges add the case where a slot is no longer a day at all: 365 days
+        // of a seeded fortnight is fifty-odd weekly buckets with readings in two
+        // of them, which is every empty-bucket branch of the fold at once.
         TrendsRange.entries.forEach { option ->
             composeRule.onNodeWithText(option.label).performClick()
             // The range drives a database query, so waiting on the chip coming up

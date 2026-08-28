@@ -84,9 +84,11 @@ internal fun WaistTrendCard(state: TrendsUiState) {
     val screenLimit = BodyComposition.maxPassingWaistInches(state.settings.heightCm)
     TrendCard(
         title = "Waist",
-        subtitle = if (screenLimit == null) "inches" else "inches, limit ${
-            Units.formatInches(screenLimit.toFloat())
-        }",
+        subtitle = state.subtitle(
+            if (screenLimit == null) "inches" else "inches, limit ${
+                Units.formatInches(screenLimit.toFloat())
+            }"
+        ),
     ) {
         LineChart(
             days = state.waistSeries(Units::cmToInches),
@@ -99,7 +101,7 @@ internal fun WaistTrendCard(state: TrendsUiState) {
 
 @Composable
 internal fun WeightTrendCard(state: TrendsUiState) {
-    TrendCard(title = "Weight", subtitle = "pounds, Health Connect and manual") {
+    TrendCard(title = "Weight", subtitle = state.subtitle("pounds, Health Connect and manual")) {
         LineChart(
             days = state.weightSeries(Units::kgToLbs),
             goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
@@ -205,7 +207,7 @@ internal fun BloodPressureTrendCard(state: TrendsUiState) {
 
 @Composable
 internal fun RestingHeartRateTrendCard(state: TrendsUiState) {
-    TrendCard(title = "Resting heart rate", subtitle = "bpm") {
+    TrendCard(title = "Resting heart rate", subtitle = state.subtitle("bpm")) {
         LineChart(
             days = state.snapshotSeries { it.restingHeartRateBpm?.toFloat() },
             modifier = Modifier.fillMaxWidth().height(140.dp),
@@ -215,7 +217,7 @@ internal fun RestingHeartRateTrendCard(state: TrendsUiState) {
 
 @Composable
 internal fun SleepTrendCard(state: TrendsUiState) {
-    TrendCard(title = "Sleep", subtitle = "hours") {
+    TrendCard(title = "Sleep", subtitle = state.subtitle("hours")) {
         BarChart(
             days = state.snapshotSeries { snap -> snap.sleepMinutes?.let { it / 60f } },
             // In hours, because that is what the bars are. The target is stored in
@@ -236,7 +238,7 @@ internal fun SleepTrendCard(state: TrendsUiState) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun RunsTrendCard(runs: List<RunBreakdown>) {
+internal fun RunsTrendCard(runs: List<RunBreakdown>, range: TrendsRange) {
     val chartColors = LocalChartColors.current
     val zone = ZoneId.systemDefault()
     val legend =
@@ -246,7 +248,14 @@ internal fun RunsTrendCard(runs: List<RunBreakdown>) {
             "Hard" to chartColors.runHard,
             "Intense" to chartColors.runIntense,
         )
-    TrendCard(title = "Runs", subtitle = "minutes, by heart-rate zone") {
+    // Never bucketed and never widened past a quarter: a bar here is one session
+    // rather than one day, so there is nothing to average into a week, and the
+    // window is stated because at the two long chips it is narrower than the one
+    // the reader tapped.
+    TrendCard(
+        title = "Runs",
+        subtitle = "minutes, by heart-rate zone, last ${range.effectiveLabel}",
+    ) {
         StackedBarChart(
             bars =
                 runs.map { StackedBar(date = it.start.atZone(zone).toLocalDate(), segments = it.segments) },
@@ -272,7 +281,10 @@ internal fun RunsTrendCard(runs: List<RunBreakdown>) {
 @Composable
 internal fun MacrosTrendCard(state: TrendsUiState) {
     val chartColors = LocalChartColors.current
-    TrendCard(title = "Macros", subtitle = "calories from protein, carbs and fat") {
+    TrendCard(
+        title = "Macros",
+        subtitle = state.subtitle("calories from protein, carbs and fat"),
+    ) {
         StackedBarChart(
             bars = state.macroBars,
             colors = listOf(chartColors.proteinStack, chartColors.carbStack, chartColors.fatStack),
@@ -387,7 +399,7 @@ private val WEEK_START_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
  */
 @Composable
 internal fun Spo2TrendCard(state: TrendsUiState) {
-    TrendCard(title = "Blood oxygen", subtitle = "% saturation, overnight average") {
+    TrendCard(title = "Blood oxygen", subtitle = state.subtitle("% saturation, overnight average")) {
         LineChart(
             days = state.snapshotSeries { it.spo2Percent },
             modifier = Modifier.fillMaxWidth().height(140.dp),

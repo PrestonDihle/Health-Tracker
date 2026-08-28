@@ -771,7 +771,8 @@ private val RESPONSE_MEAL_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM, h:mm 
 private fun MealResponseCard(state: MealResponseState) {
     TrackerCard(
         title = "Biggest responses",
-        subtitle = "last ${state.range.label}",
+        // The window it actually read, which past ninety days is not the chip's.
+        subtitle = "last ${state.range.effectiveLabel}",
     ) {
         if (state.ranked.isEmpty()) {
             Text(

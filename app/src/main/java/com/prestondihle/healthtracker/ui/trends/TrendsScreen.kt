@@ -42,7 +42,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
         item {
-            // Four spelled-out labels overrun a phone's width; wrapping keeps
+            // Six spelled-out labels overrun a phone's width; wrapping keeps
             // them all visible rather than clipping the longest.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TrendsRange.entries.forEach { option ->
@@ -63,7 +63,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
             cards =
                 listOf(
                     ReorderableCard("steps") {
-                        TrendCard(title = "Steps", subtitle = "from Health Connect") {
+                        TrendCard(title = "Steps", subtitle = state.subtitle("from Health Connect")) {
                             BarChart(
                                 days = state.snapshotSeries { it.steps?.toFloat() },
                                 goalLine = state.goals.dailyStepGoal?.toFloat(),
@@ -73,7 +73,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                     },
                     // Runs, each bar a session split by heart-rate zone; read live
                     // and zoned against the max heart rate in Settings.
-                    ReorderableCard("runs") { RunsTrendCard(runs) },
+                    ReorderableCard("runs") { RunsTrendCard(runs, state.range) },
                     // Everything else the watch recorded. Above the runs chart it
                     // would push the trends down; below it, it answers the
                     // question the runs chart raises -- what else was the week.
@@ -95,7 +95,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                     // is the point: a gap that widens over months says something
                     // neither line says on its own.
                     ReorderableCard("grip") {
-                        TrendCard(title = "Grip strength", subtitle = "pounds") {
+                        TrendCard(title = "Grip strength", subtitle = state.subtitle("pounds")) {
                             MultiLineChart(
                                 series =
                                     listOf(
@@ -117,7 +117,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                         }
                     },
                     ReorderableCard("pushups") {
-                        TrendCard(title = "Pushups", subtitle = "reps per day") {
+                        TrendCard(title = "Pushups", subtitle = state.subtitle("reps per day")) {
                             BarChart(
                                 days = state.repSeries(MovementType.PUSHUP),
                                 goalLine = state.goals.dailyPushupGoal?.toFloat(),
@@ -126,7 +126,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                         }
                     },
                     ReorderableCard("airSquats") {
-                        TrendCard(title = "Air squats", subtitle = "reps per day") {
+                        TrendCard(title = "Air squats", subtitle = state.subtitle("reps per day")) {
                             BarChart(
                                 days = state.repSeries(MovementType.AIR_SQUAT),
                                 goalLine = state.goals.dailySquatGoal?.toFloat(),
