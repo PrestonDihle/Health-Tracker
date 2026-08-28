@@ -33,6 +33,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
     val runs by viewModel.runs.collectAsStateWithLifecycle()
     val aft by viewModel.aft.collectAsStateWithLifecycle()
     val training by viewModel.training.collectAsStateWithLifecycle()
+    val records by viewModel.records.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val chartColors = LocalChartColors.current
 
@@ -78,6 +79,12 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                     // would push the trends down; below it, it answers the
                     // question the runs chart raises -- what else was the week.
                     ReorderableCard("training") { TrainingVolumeCard(training) },
+                    // Directly under the training volume, and above the AFT: the
+                    // week's work, then what it has added up to, then the test
+                    // that measures it. Like the AFT card it ignores the range
+                    // chips entirely -- a personal best that changed when a chart
+                    // window moved would be describing the window.
+                    ReorderableCard("records") { RecordsCard(records) },
                     // The AFT sits on Activity because it is the one thing here
                     // that is a test rather than a trend -- and its score moves
                     // on the same training the rest of this tab plots.

@@ -310,6 +310,64 @@ run of deficit days scaled to themselves puts every point below a zero clipped o
 `ChartBoundsTest`'s failure on the one chart whose reference is the difference between losing weight
 and gaining it.
 
+### Streaks and personal records
+
+`domain/Streaks.kt` counts days in a row. It was lifted out of `FastingStatistics`, which had the
+only copy and is now one of four callers — and what made it worth extracting is not the loop but the
+rule under it. **Today is allowed to be empty; yesterday is not.** A streak read at nine in the
+morning is being read before the day has had a chance to happen, so counting today as a miss resets
+every streak in the app overnight and restores it each evening — wrong for most of the hours anybody
+looks, and wrong in the direction that makes it useless. One unfinished day is a day in progress, two
+is a lapse.
+
+**It takes the set of dates that met the bar, never the readings.** A step goal, a protein target, a
+completed supplement slot and a day with any fasting on it are four different questions and only one
+is a comparison against a number, so "did this day count" stays with the data. One consequence is
+deliberate and is the file's single departure from null-is-not-zero: **an absent date and a failed
+one are the same thing to a streak**, because an unbroken run means every day in it cleared the bar
+and a day with no evidence did not.
+
+`FastingStatistics.currentStreak`/`bestStreak` remain as methods and delegate — what a *fasting day*
+is belongs with the fasting; only the run-counting generalises. `FastingStatsTest` passing unchanged
+against the extracted version is what says the refactor was behaviour-preserving.
+
+`domain/PersonalRecords.kt` is the best of each thing, and **every figure is a real performance on a
+real day**. The two-mile comes from a recorded `AftAttempt`, never from `RunPace`'s projection: on a
+card headed *records* a model reads as an achievement, which is exactly the confusion the AFT card
+spends two sentences preventing. Only *finished* fasts can be the longest, for `FastingStats`' reason
+— a running one reports its length so far, takes the record, and beats itself an hour later. A fast
+is dated by the day it **ended**, since a 48-hour fast broken on Sunday is a Sunday achievement and
+dating it Friday puts the record before two of the days that earned it. Grip is per hand because the
+columns are nullable so one hand can be logged alone, and a best-of-both would report the dominant
+figure under a label covering both.
+
+Nothing is stored — it is a scan of a few hundred rows, and a stored best is a claim to invalidate
+every time a row is edited, which on correctable data happens routinely. That is `AftScoring`'s
+never-store-a-score argument arriving at another table.
+
+**`TrendsViewModel.records` sits outside `uiState` and outside `TrendsRange`**, like `aft`: a record
+that changed when a chart's range chip moved would be describing the chip. `RECORD_HISTORY_DAYS`
+(365) bounds the day-indexed reads and glucose; AFT attempts and fasting sessions are read
+**unbounded**, because those tables are small and a two-mile from two years ago is exactly the record
+worth beating. The bound exists for glucose above all — best-day time-in-range has to be computed
+from the readings, since the coverage gate is a rule about the span they occupy. It is larger than
+`LIVE_READ_MAX_DAYS` because it is one cached indexed query rather than a hundred and fifty round
+trips. `bestTimeInRangeByDay` groups by day **once** and scores each day against its own handful;
+handing the whole year to `GlucoseAnalysis.over` 365 times re-filters the same list from the top
+every call, which at CGM resolution is tens of millions of comparisons for one row of a card.
+
+`StreakCount.available` separates *nothing kept up* from *nothing to keep up*. A step streak with no
+goal set is not a zero, it is a question nobody asked, and the card drops those rows rather than
+printing noughts that reproach the reader for missing targets they never set — the
+`GlucoseReportState.hasAnyReadings` distinction again. The supplement streak intersects against the
+standing list rather than counting tick rows, the rule `supplementsTakenCount` already follows, so a
+dose orphaned by a deleted supplement cannot complete a day on its own.
+
+One limitation worth knowing: **the standing supplement list is not versioned**, so old days are
+judged against today's shelf. Adding a supplement resets the adherence streak, which is arguably
+right — you are not completing your current stack — but there is no history that could answer it
+otherwise.
+
 **The master graph's window is no longer anchored to now.** `TodayUiState.panOffset` is how
 far back a horizontal drag has pulled the right edge, and `windowEnd` is `now - panOffset`.
 Everything that draws must measure from `windowEnd`, never from `now`: the absorption and caffeine
@@ -1519,7 +1577,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
 `GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
-`TrendsBucketsTest`, `MovingAverageTest` and
+`TrendsBucketsTest`, `MovingAverageTest`, `StreaksTest`, `PersonalRecordsTest` and
 `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
@@ -1583,6 +1641,12 @@ would still hold the old level up across a stretch nobody weighed anything at al
 `ScreenRenderTest` renders the overlay in **both schemes** and the year view without it, which is the
 only way the colour collision above was found; `render` takes a `dark` flag for that, since
 `HealthTrackerTheme` accepts the choice directly and the qualifier would otherwise have to change.
+`StreaksTest` pins the tolerance rule from both sides — an empty today does not break a run, an empty
+yesterday does — and that `best` will not weld two runs together across a gap, which is what a
+sort-and-count implementation does and which reads as a plausible longer streak.
+`PersonalRecordsTest` pins the ways a number nobody performed could reach that card: a running fast
+taken as the longest, a two-mile read as a maximum rather than a minimum, and one hand's grip filled
+in from the other.
 `SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
 card: counting waking time as sleep, which flatters every night by however long was spent staring at
 the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement

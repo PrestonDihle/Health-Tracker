@@ -152,6 +152,16 @@ interface TrackerDao {
     @Query("SELECT * FROM SupplementDose WHERE date = :date")
     fun getSupplementDosesOn(date: LocalDate): Flow<List<SupplementDose>>
 
+    /**
+     * Every tick in a span, for the adherence streak.
+     *
+     * A range rather than the per-day read above because a streak is a question
+     * about a run of days, and asking it one day at a time would be one query
+     * per day of history.
+     */
+    @Query("SELECT * FROM SupplementDose WHERE date BETWEEN :start AND :end")
+    fun getSupplementDosesBetween(start: LocalDate, end: LocalDate): Flow<List<SupplementDose>>
+
     /** IGNORE, so ticking a box that is already ticked is absorbed rather than thrown. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSupplementDose(dose: SupplementDose)

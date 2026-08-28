@@ -12,7 +12,7 @@ reps and reading.
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, the macro trend and net calories |
-| **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
+| **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, personal records and streaks, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | This morning against your own baseline, the day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, blood oxygen, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
 
@@ -82,6 +82,33 @@ numbers, not because the reader is free to decide what normal is. That is also
 why they stay dashed while the glucose reference line is solid: one is a
 published figure, the other is wherever you decided to put it, and the two should
 not look alike.
+
+## Records and streaks
+
+On Activity: the best of each thing you have logged, with the day you did it —
+grip per hand, quickest two-mile, heaviest deadlift, longest finished fast, and
+the best day your blood sugar spent in range.
+
+Every one is something that actually happened. The two-mile is one you ran in a
+recorded test, not the projection the AFT card makes from ordinary runs; that
+figure has its own place, where it says twice that it is a projection. Only a
+fast that has **finished** can be the longest, or a fast still running would take
+the record and then beat itself an hour later. A fast is dated by the day it
+ended, since one broken on Sunday lunchtime is a Sunday achievement.
+
+Records you have not set yet are left out rather than shown blank. A column of
+dashes is a list of things you have not done, which is not what a personal-bests
+card is for.
+
+Above them, the streaks: days in a row hitting your step goal, your protein
+target, and taking your whole supplement stack. **Today is allowed to be empty.**
+Checked at nine in the morning, before the day has happened, a streak that
+counted today as a miss would read zero every morning and come back every
+evening. An empty yesterday does break it — one unfinished day is a day in
+progress, two is a lapse.
+
+A streak with nothing to measure against does not appear at all. Never set a
+protein target, and there is no protein streak to have broken.
 
 ## How far back the trends reach
 

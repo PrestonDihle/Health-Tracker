@@ -41,8 +41,10 @@ import com.prestondihle.healthtracker.ui.components.StackedBar
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
 // Reusable trend cards.
@@ -340,6 +342,116 @@ internal fun RunsTrendCard(runs: List<RunBreakdown>, range: TrendsRange) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+    }
+}
+
+private val RECORD_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy")
+
+/**
+ * The best of each thing, and how many days each habit has run.
+ *
+ * Every figure carries the date it was set, because a best with no date is a
+ * claim with nothing behind it -- and on a card meant to be worth glancing at,
+ * the difference between a grip figure from last week and one from two summers
+ * ago is most of what it has to say.
+ *
+ * Records nobody has set yet are left out rather than shown blank. A column of
+ * em dashes is a list of things the reader has failed to do, which is the
+ * opposite of what a personal-bests card is for; the empty case says so once, in
+ * a sentence, and stops.
+ */
+@Composable
+internal fun RecordsCard(state: RecordsUiState) {
+    val records = state.records
+    TrendCard(title = "Records and streaks", subtitle = "your own best, and what is running") {
+        val streaks =
+            listOf(
+                "Step goal" to state.stepStreak,
+                "Protein" to state.proteinStreak,
+                "Supplements" to state.supplementStreak,
+            )
+        // A streak with nothing to measure against is dropped, not drawn as a
+        // nought: a reader who has never set a protein target has not broken a
+        // protein streak.
+        val running = streaks.filter { it.second.available }
+        if (running.isNotEmpty()) {
+            running.forEach { (label, streak) ->
+                RecordRow(
+                    label = label,
+                    value = if (streak.current == 1) "1 day" else "${streak.current} days",
+                    note = if (streak.best > streak.current) "best ${streak.best}" else "best ever",
+                )
+            }
+        }
+
+        if (records.isEmpty) {
+            Text(
+                if (running.isEmpty())
+                    "Nothing logged yet that could set a record. Grip, a fitness test, a " +
+                        "finished fast or a covered day of blood sugar will each fill a row."
+                else "No personal bests yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@TrendCard
+        }
+
+        records.gripDominant?.let {
+            RecordRow("Grip, dominant", "${Units.kgToWholeLbs(it.value)} lb", on = it.date)
+        }
+        records.gripNonDominant?.let {
+            RecordRow("Grip, other hand", "${Units.kgToWholeLbs(it.value)} lb", on = it.date)
+        }
+        // The two-mile from a recorded test, never the projection the AFT card
+        // prints: on a card headed with the word "records", a model would be read
+        // as something that was actually run.
+        records.twoMile?.let { RecordRow("Two mile", Units.formatPace(it.value), on = it.date) }
+        records.deadlift?.let {
+            RecordRow("Deadlift, 3RM", "${Units.kgToWholeLbs(it.value)} lb", on = it.date)
+        }
+        records.longestFast?.let {
+            RecordRow("Longest fast", Units.formatDuration(it.value), on = it.date)
+        }
+        records.timeInRange?.let {
+            RecordRow(
+                label = "Best day in range",
+                value = "${(it.value * 100).roundToInt()}%",
+                on = it.date,
+                // Said out loud because it is the one record here that cannot
+                // reach the whole archive, and a "best ever" that quietly means
+                // "best this year" is the kind of claim this app does not make.
+                // Printed in days like the Runs card's own cap rather than as
+                // "1 year", which is both stilted and wrong the moment the
+                // constant moves.
+                note = "last ${state.historyDays} days",
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordRow(label: String, value: String, on: LocalDate? = null, note: String? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            val caption = note ?: on?.let { RECORD_DATE_FORMAT.format(it) }
+            if (caption != null) {
+                Text(
+                    caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

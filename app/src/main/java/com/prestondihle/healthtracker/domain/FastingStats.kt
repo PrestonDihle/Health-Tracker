@@ -105,40 +105,24 @@ object FastingStatistics {
     }
 
     /**
+     * The dates with any fasting on them, which is this screen's answer to
+     * "did today count".
+     */
+    private fun fastedDates(days: List<FastingDay>): Set<LocalDate> =
+        days.filter { it.fastedSeconds > 0L }.map { it.date }.toSet()
+
+    /**
      * Consecutive days ending at [today] with any fasting logged.
      *
-     * Today is allowed to be empty without breaking the streak -- checked in the
-     * morning, before the day's fast has been logged, a streak that reset to
-     * zero every night would be useless. An empty yesterday still breaks it.
+     * The counting moved to [Streaks] when three more streaks wanted the same
+     * tolerate-an-empty-today rule. Kept as a method here because what a fasting
+     * day *is* belongs with the fasting, and only the run-counting generalises.
      */
-    fun currentStreak(days: List<FastingDay>, today: LocalDate): Int {
-        val byDate = days.associateBy { it.date }
-        var streak = 0
-        var cursor = today
-
-        if ((byDate[today]?.fastedSeconds ?: 0L) <= 0L) cursor = today.minusDays(1)
-
-        while ((byDate[cursor]?.fastedSeconds ?: 0L) > 0L) {
-            streak++
-            cursor = cursor.minusDays(1)
-        }
-        return streak
-    }
+    fun currentStreak(days: List<FastingDay>, today: LocalDate): Int =
+        Streaks.current(fastedDates(days), today)
 
     /** Longest run of consecutive fasting days anywhere in [days]. */
-    fun bestStreak(days: List<FastingDay>): Int {
-        var best = 0
-        var run = 0
-        for (day in days.sortedBy { it.date }) {
-            if (day.fastedSeconds > 0L) {
-                run++
-                if (run > best) best = run
-            } else {
-                run = 0
-            }
-        }
-        return best
-    }
+    fun bestStreak(days: List<FastingDay>): Int = Streaks.best(fastedDates(days))
 
     fun summarise(
         sessions: List<FastingSession>,

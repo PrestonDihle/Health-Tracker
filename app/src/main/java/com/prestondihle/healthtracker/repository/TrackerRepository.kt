@@ -258,6 +258,22 @@ class TrackerRepository(
     fun getSupplementsTakenOn(date: LocalDate): Flow<Set<Long>> =
         dao.getSupplementDosesOn(date).map { doses -> doses.map { it.supplementId }.toSet() }
 
+    /**
+     * Which supplements were taken on each day in a span, by id.
+     *
+     * Days with no ticks are absent rather than present-and-empty, which is what
+     * the adherence streak wants: a day nothing was recorded on is a day the
+     * stack was not completed, and [Streaks] reads an absent date and a failed
+     * one the same way.
+     */
+    fun getSupplementsTakenBetween(
+        start: LocalDate,
+        end: LocalDate,
+    ): Flow<Map<LocalDate, Set<Long>>> =
+        dao.getSupplementDosesBetween(start, end).map { doses ->
+            doses.groupBy { it.date }.mapValues { (_, day) -> day.map { it.supplementId }.toSet() }
+        }
+
     suspend fun setSupplementTaken(supplement: Supplement, date: LocalDate, taken: Boolean) {
         if (taken) dao.insertSupplementDose(SupplementDose(supplement.id, date))
         else dao.deleteSupplementDose(supplement.id, date)

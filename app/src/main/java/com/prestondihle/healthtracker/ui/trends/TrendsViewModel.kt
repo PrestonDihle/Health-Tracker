@@ -23,8 +23,12 @@ import com.prestondihle.healthtracker.domain.AftScorecard
 import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.MealClockTimes
 import com.prestondihle.healthtracker.domain.MealDuplicates
+import com.prestondihle.healthtracker.domain.GlucoseAnalysis
 import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.MovingAverage
+import com.prestondihle.healthtracker.domain.PersonalBests
+import com.prestondihle.healthtracker.domain.PersonalRecords
+import com.prestondihle.healthtracker.domain.Streaks
 import com.prestondihle.healthtracker.domain.Readiness
 import com.prestondihle.healthtracker.domain.ReadinessFacts
 import com.prestondihle.healthtracker.domain.RunBreakdown
@@ -125,6 +129,74 @@ private const val PROJECTION_WINDOW_DAYS = 90L
 private const val LIVE_READ_MAX_DAYS = 90L
 
 /**
+ * A streak over the days that met some bar, or an unasked question.
+ *
+ * [met] being null is the "no goal set" case and is not the same as an empty
+ * set: one has nothing to measure against, the other measured and found nothing.
+ */
+private fun streakOver(available: Boolean, today: LocalDate, met: Set<LocalDate>?): StreakCount =
+    if (!available || met == null) StreakCount(available = false)
+    else StreakCount(Streaks.current(met, today), Streaks.best(met), available = true)
+
+/**
+ * Each day's time in range, over the days the sensor actually covered.
+ *
+ * Readings are grouped by day *once* and each day scored against its own
+ * handful, rather than handing the whole year to `GlucoseAnalysis.over` three
+ * hundred and sixty-five times -- which is the same list filtered from the top
+ * on every call, and at CGM resolution is tens of millions of comparisons to
+ * fill one row of a card.
+ *
+ * Days the sensor did not cover are simply absent. That is `GlucoseAnalysis`'s
+ * own refusal carried through: a morning of readings after a sensor change
+ * produces a perfectly well-formed time-in-range about a different span, and on
+ * a card headed *best ever* it would win.
+ */
+private fun bestTimeInRangeByDay(
+    readings: List<Pair<Instant, Int>>,
+    goals: UserGoals,
+    zoneId: ZoneId,
+): Map<LocalDate, Float> {
+    val low = goals.glucoseTargetLowMgDl ?: return emptyMap()
+    val high = goals.glucoseTargetHighMgDl ?: return emptyMap()
+    if (high <= low) return emptyMap()
+
+    return readings
+        .groupBy { it.first.atZone(zoneId).toLocalDate() }
+        .mapNotNull { (date, ofDay) ->
+            GlucoseAnalysis.over(
+                    readings = ofDay,
+                    start = date.atStartOfDay(zoneId).toInstant(),
+                    end = date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+                    targetLowMgDl = low,
+                    targetHighMgDl = high,
+                )
+                ?.let { date to it.timeInRange }
+        }
+        .toMap()
+}
+
+/**
+ * How far back the records and streaks card looks.
+ *
+ * A year, and it is a compromise rather than a principle: a personal best ought
+ * to reach back as far as the table does, and for the small tables it genuinely
+ * does -- AFT attempts and fasting sessions are read unbounded, because a few
+ * hundred rows cost nothing and a two-mile time from two years ago is exactly
+ * the record worth beating.
+ *
+ * The bound is here for the day-indexed reads, and for glucose above all: a year
+ * of CGM is around a hundred thousand rows, and best-day time-in-range has to be
+ * computed from the readings themselves because the coverage gate is a rule
+ * about the span they occupy. Reading further would put the cost of the whole
+ * archive behind one card. The rows are cached and indexed, so a year is a
+ * single ranged query rather than the hundred and fifty round trips
+ * [LIVE_READ_MAX_DAYS] exists to prevent -- which is why this figure is larger
+ * than that one rather than equal to it.
+ */
+private const val RECORD_HISTORY_DAYS = 365L
+
+/**
  * How many meals the biggest-responses ranking lists.
  *
  * Five is a ranking; twenty is the meal list again, sorted differently. The card
@@ -153,6 +225,38 @@ private const val RANKED_MEALS = 5
 data class TrainingWeekState(
     val volumes: List<TrainingVolume> = emptyList(),
     val weekStart: LocalDate = LocalDate.now(),
+)
+
+/**
+ * One streak, as it stands and as its best has ever been.
+ *
+ * [available] is what separates "nothing kept up" from "nothing to keep up":
+ * a step streak with no step goal set, or a supplement streak with an empty
+ * shelf, is not a zero -- it is a question that has not been asked. Rendering
+ * the two alike would leave a card of noughts reproaching the reader for missing
+ * targets they never set, which is the `GlucoseReportState.hasAnyReadings`
+ * distinction in a different coat.
+ */
+data class StreakCount(
+    val current: Int = 0,
+    val best: Int = 0,
+    val available: Boolean = false,
+)
+
+/**
+ * Personal bests and running streaks, over the whole history rather than a window.
+ *
+ * Outside [uiState] and outside [TrendsRange] for `aft`'s reason: a record is not
+ * a trend and a window would cut it off. A best two-mile is the best there has
+ * ever been, and one that changed when a chart's range chip moved would be
+ * describing the chip.
+ */
+data class RecordsUiState(
+    val records: PersonalRecords = PersonalRecords(),
+    val stepStreak: StreakCount = StreakCount(),
+    val proteinStreak: StreakCount = StreakCount(),
+    val supplementStreak: StreakCount = StreakCount(),
+    val historyDays: Long = RECORD_HISTORY_DAYS,
 )
 
 data class MealResponseState(
@@ -557,6 +661,115 @@ class TrendsViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = TrendsUiState(),
+            )
+
+    /**
+     * Personal bests and streaks, over the whole history rather than the window.
+     *
+     * The AFT attempts and the fasting sessions are read unbounded because both
+     * tables are small and a record is supposed to reach; everything else is
+     * bounded by [RECORD_HISTORY_DAYS], glucose because of its volume and the
+     * day-indexed reads because they are keyed by date and a year is already more
+     * than any streak in this app has had a chance to reach.
+     */
+    val records: StateFlow<RecordsUiState> =
+        combine(
+                combine(
+                    repository.getHealthSnapshots(
+                        LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                        LocalDate.now(zoneId),
+                    ),
+                    repository.getUserGoals(),
+                ) { snapshots, goals -> snapshots to (goals ?: UserGoals()) },
+                combine(
+                    repository.getSupplements(),
+                    repository.getSupplementsTakenBetween(
+                        LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                        LocalDate.now(zoneId),
+                    ),
+                ) { supplements, taken -> supplements to taken },
+                combine(
+                    repository.getGripStrengths(
+                        LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                        LocalDate.now(zoneId),
+                    ),
+                    repository.getAftAttempts(),
+                    repository.getAllFastingSessions(),
+                ) { grips, attempts, fasts -> Triple(grips, attempts, fasts) },
+                repository.getBloodSugarBetween(
+                    LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                    LocalDate.now(zoneId),
+                ),
+            ) { daily, stack, performance, glucose ->
+                val (snapshots, goals) = daily
+                val (supplements, takenByDay) = stack
+                val (grips, attempts, fasts) = performance
+                val today = LocalDate.now(zoneId)
+
+                RecordsUiState(
+                    records =
+                        PersonalBests.from(
+                            grips = grips,
+                            aftAttempts = attempts,
+                            fasts = fasts,
+                            timeInRangeByDay =
+                                bestTimeInRangeByDay(
+                                    glucose.map { it.timestamp to it.mgDl },
+                                    goals,
+                                    zoneId,
+                                ),
+                            zoneId = zoneId,
+                        ),
+                    stepStreak =
+                        streakOver(
+                            available = goals.dailyStepGoal != null,
+                            today = today,
+                            met =
+                                goals.dailyStepGoal?.let { goal ->
+                                    snapshots
+                                        .filter { (it.steps ?: 0) >= goal }
+                                        .map { it.date }
+                                        .toSet()
+                                },
+                        ),
+                    proteinStreak =
+                        streakOver(
+                            available = goals.dailyProteinTarget != null,
+                            today = today,
+                            met =
+                                goals.dailyProteinTarget?.let { target ->
+                                    snapshots
+                                        .filter { (it.proteinGrams ?: 0f) >= target }
+                                        .map { it.date }
+                                        .toSet()
+                                },
+                        ),
+                    supplementStreak =
+                        streakOver(
+                            available = supplements.isNotEmpty(),
+                            today = today,
+                            met =
+                                supplements
+                                    .takeIf { it.isNotEmpty() }
+                                    ?.map { it.id }
+                                    ?.toSet()
+                                    ?.let { wanted ->
+                                        // Intersected rather than counted, the rule
+                                        // `supplementsTakenCount` already follows: a
+                                        // dose left behind by a deleted supplement
+                                        // must not complete a day on its own.
+                                        takenByDay
+                                            .filterValues { it.containsAll(wanted) }
+                                            .keys
+                                            .toSet()
+                                    },
+                        ),
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = RecordsUiState(),
             )
 
     /**
