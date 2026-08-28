@@ -108,19 +108,60 @@ internal fun WaistTrendCard(state: TrendsUiState) {
 
 @Composable
 internal fun WeightTrendCard(state: TrendsUiState) {
-    val readings = state.weightSeries(Units::kgToLbs)
+    val chartColors = LocalChartColors.current
+    val plain = state.weightSeries(Units::kgToLbs)
+    // The projection extends the slot list, so the readings it is drawn beside
+    // have to be the padded copy: the chart maps a point to an x by its index,
+    // and two series of different lengths would put every reading under the
+    // wrong day.
+    val projected = state.weightProjectionSeries(Units::kgToLbs)
+    val readings = projected?.first ?: plain
+    val eta = state.weightEta
+
     TrendCard(title = "Weight", subtitle = state.subtitle("pounds, Health Connect and manual")) {
         TrendWithAverage(
             readings = readings,
-            average = state.trailingAverage(readings),
+            average = state.trailingAverage(plain).padTo(readings),
             label = "Weight",
             goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
             // Lighter than the goal, because they are on the way to it rather than
             // the point of it. The axis stretches to hold them, so a mark you have
             // not reached is still drawn.
             subGoalLines = state.weightSubGoals.map { Units.kgToLbs(it.kg) },
+            extra =
+                projected?.second?.let {
+                    LineSeries(
+                        label = "At current pace",
+                        points = it,
+                        color = chartColors.threshold,
+                        style = LineStyle.DOTTED,
+                    )
+                },
         )
+        if (eta != null) {
+            Text(
+                "${Units.kgToWholeLbs(eta.target)} lb by ${ETA_DATE_FORMAT.format(eta.reachedOn)} " +
+                    "at current pace.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
+}
+
+private val ETA_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM")
+
+/**
+ * Stretches a series onto a longer slot list with nulls.
+ *
+ * The moving average is computed over the readings alone and knows nothing about
+ * the projection's lead, so without this it would be short by the lead and the
+ * chart would draw it across the full width with every point over the wrong day.
+ */
+private fun List<DayPoint>.padTo(slots: List<DayPoint>): List<DayPoint> {
+    if (isEmpty() || size >= slots.size) return this
+    val known = associate { it.date to it.value }
+    return slots.map { DayPoint(it.date, known[it.date]) }
 }
 
 /**
@@ -147,10 +188,13 @@ private fun TrendWithAverage(
     label: String,
     goalLine: Float? = null,
     subGoalLines: List<Float> = emptyList(),
+    /** An optional third line, already on the readings' slots. */
+    extra: LineSeries? = null,
 ) {
     val chartColors = LocalChartColors.current
     val modifier = Modifier.fillMaxWidth().height(140.dp)
-    if (average.none { it.value != null }) {
+    val hasAverage = average.any { it.value != null }
+    if (!hasAverage && extra == null) {
         LineChart(
             days = readings,
             goalLine = goalLine,
@@ -161,19 +205,22 @@ private fun TrendWithAverage(
     }
     MultiLineChart(
         series =
-            listOf(
+            listOfNotNull(
                 LineSeries(
                     label = label,
                     points = readings,
                     color = MaterialTheme.colorScheme.primary,
                     style = LineStyle.SOLID,
                 ),
-                LineSeries(
-                    label = "$label (${MovingAverage.WINDOW_DAYS}-day avg)",
-                    points = average,
-                    color = chartColors.movingAverage,
-                    style = LineStyle.DASHED,
-                ),
+                if (!hasAverage) null
+                else
+                    LineSeries(
+                        label = "$label (${MovingAverage.WINDOW_DAYS}-day avg)",
+                        points = average,
+                        color = chartColors.movingAverage,
+                        style = LineStyle.DASHED,
+                    ),
+                extra,
             ),
         goalLine = goalLine,
         subGoalLines = subGoalLines,

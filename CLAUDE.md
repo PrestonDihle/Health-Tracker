@@ -310,6 +310,45 @@ run of deficit days scaled to themselves puts every point below a zero clipped o
 `ChartBoundsTest`'s failure on the one chart whose reference is the difference between losing weight
 and gaining it.
 
+### The goal ETA
+
+`domain/GoalProjection.kt` fits a straight line through the last 30 days of merged weight and runs it
+forward to the next mark — the nearest waypoint still ahead, or the goal if none lies between.
+
+**Most of that file is refusals, and they are the feature.** An ETA is the most confident-sounding
+thing the app prints, a specific weight on a specific dated day, and it is fitted to the shakiest
+input any chart here carries. It declines on: fewer than `MIN_READINGS` (5) in the window, a slope
+pointing away from the target, an arrival past `MAX_HORIZON_DAYS` (730), and no goal set at all. The
+slope one matters most — somebody two pounds up over the month has an arrival date somewhere in the
+past or the far future depending which side of the goal they are on, and silence is the honest answer
+to "when at this pace" when this pace never arrives. **A wrong slope does not look wrong; it looks
+like a plan.**
+
+**The segment starts at the fitted value, not the last reading.** A morning three pounds high on water
+would otherwise put the projection's first point above every point of the trend it claims to extend.
+
+**It is the one series in the app drawn on dates nobody has lived**, which is also the one way it can
+silently corrupt the rest of the chart: `MultiLineChart` maps a point to an x by its *index*, so
+adding future slots to one series and not the others slides every reading onto the wrong day, and
+both versions draw a plausible chart. `weightProjectionSeries` therefore returns the **padded
+readings alongside the projection**, and the moving average is stretched onto the same slots by
+`padTo`. `ScreenRenderTest` asserts the two lists share their dates, which is the only cheap way to
+catch it.
+
+The drawn lead is short — `range.days / 5`, clamped to 2..21 — because a mark six months out drawn to
+scale would be six times the width of the chart under it. The sentence carries the date; the line
+only carries the direction. It is empty at the weekly ranges, where a slot is a week and a lead
+measured in days would run months into the future; the sentence still prints there, since the fit
+never saw buckets.
+
+Its colour is `chartColors.threshold`, deliberately the goal's own family rather than the readings'.
+That was considered rather than defaulted: the projection's whole meaning is *when you meet that
+line*, so sharing its hue is informative, and what separates them is the dash — dotted for the model,
+dashed for the target, solid for the one measurement on the plot. In the dark scheme the two reds are
+close, which is acceptable here in a way `sodium` against `diastolic` was not: that was two *series*
+in one colour with a legend claiming they differed, and this is a series and a rule that are about
+the same thing.
+
 ### Streaks and personal records
 
 `domain/Streaks.kt` counts days in a row. It was lifted out of `FastingStatistics`, which had the
@@ -1577,7 +1616,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
 `GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
-`TrendsBucketsTest`, `MovingAverageTest`, `StreaksTest`, `PersonalRecordsTest` and
+`TrendsBucketsTest`, `MovingAverageTest`, `StreaksTest`, `PersonalRecordsTest`,
+`GoalProjectionTest` and
 `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
@@ -1647,6 +1687,11 @@ sort-and-count implementation does and which reads as a plausible longer streak.
 `PersonalRecordsTest` pins the ways a number nobody performed could reach that card: a running fast
 taken as the longest, a two-mile read as a maximum rather than a minimum, and one hand's grip filled
 in from the other.
+`GoalProjectionTest` is mostly refusals by design — a slope pointing the wrong way, four readings
+instead of five, a crawl that arrives in the next decade — plus the one that catches a fit reading
+too much history: a steep loss last winter followed by a flat month must produce *nothing*, not the
+winter's rate. It also pins that the segment leaves from the fitted value rather than from a morning
+that happened to be high.
 `SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
 card: counting waking time as sleep, which flatters every night by however long was spent staring at
 the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement

@@ -24,6 +24,8 @@ import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.MealClockTimes
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.GlucoseAnalysis
+import com.prestondihle.healthtracker.domain.GoalEta
+import com.prestondihle.healthtracker.domain.GoalProjection
 import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.MovingAverage
 import com.prestondihle.healthtracker.domain.PersonalBests
@@ -467,6 +469,59 @@ data class TrendsUiState(
 
     fun snapshotSeries(valueOf: (HealthDaySnapshot) -> Float?): List<DayPoint> =
         series(snapshots, { it.date }, valueOf)
+
+    /**
+     * Where the last month's weighing lands, in kilograms, or null on a refusal.
+     *
+     * Computed from [weightByDay] rather than from the drawn series, so it is the
+     * same month of readings whatever range chip is selected -- a projection that
+     * changed its slope when a chart widened would be describing the chip. It is
+     * also why this survives the weekly ranges intact: the fit never saw buckets.
+     */
+    val weightEta: GoalEta?
+        get() =
+            GoalProjection.forGoal(
+                readings = weightByDay,
+                today = endDate,
+                goal = goals.goalWeightKg,
+                waypoints = weightSubGoals.map { it.kg },
+            )
+
+    /**
+     * The projection as a drawn segment, sharing the readings' slots plus a lead.
+     *
+     * Empty at the weekly ranges. The lead is measured in days and a slot there
+     * is a week, so the segment would run a lead's worth of *weeks* into the
+     * future -- months of dashed line for a fit over one month of mornings. The
+     * printed sentence still appears there, since the arithmetic never depended
+     * on the range.
+     *
+     * The pair it returns is the padded readings and the projection, because the
+     * chart maps points to x by index and the two only line up if the readings
+     * are extended by the same lead.
+     */
+    fun weightProjectionSeries(convert: (Float) -> Float): Pair<List<DayPoint>, List<DayPoint>>? {
+        if (range.weekly) return null
+        val eta = weightEta ?: return null
+        val readings = weightSeries(convert)
+        // A short segment, not the whole way to the date: a mark six months out
+        // drawn to scale would be six times the width of the chart under it. The
+        // sentence carries the date; the line only has to show the direction.
+        val lead = (range.days / 5).coerceIn(2L, 21L)
+        val future = (1..lead).map { endDate.plusDays(it) }
+
+        val paddedReadings = readings + future.map { DayPoint(it, null) }
+        val projection =
+            readings.map { DayPoint(it.date, null) }.dropLast(1) +
+                DayPoint(endDate, convert(eta.from)) +
+                future.map { date ->
+                    DayPoint(
+                        date,
+                        convert(eta.from + eta.perDay * ChronoUnit.DAYS.between(endDate, date)),
+                    )
+                }
+        return paddedReadings to projection
+    }
 
     /**
      * Calories eaten minus burned, per day, negative for a deficit.

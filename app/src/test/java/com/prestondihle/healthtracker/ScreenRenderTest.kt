@@ -227,6 +227,59 @@ class ScreenRenderTest {
     }
 
     /**
+     * The goal projection, drawn past the right-hand edge.
+     *
+     * This is the one series in the app that occupies dates nobody has lived
+     * yet, so it is also the one that can silently put every *reading* over the
+     * wrong day: the chart maps a point to an x by its index, and adding future
+     * slots to one series without adding them to the others slides them apart.
+     * Rendering it is how that is caught, since both versions draw a plausible
+     * chart and only one of them is about the right days.
+     */
+    @Test
+    fun `the projection draws forward without shifting the readings`() {
+        val today = java.time.LocalDate.now(zone)
+        // A month of steady loss, ending well above a goal it is heading for.
+        val weights =
+            (0L until 30L).map { back ->
+                WeightEntry(
+                    date = today.minusDays(back),
+                    weightKg = Units.lbsToKg(196f + back * 0.4f),
+                )
+            }
+        val state =
+            TrendsUiState(
+                range = TrendsRange.MONTH,
+                startDate = today.minusDays(29),
+                endDate = today,
+                weights = weights,
+                goals = UserGoals(goalWeightKg = Units.lbsToKg(185f)),
+                settings = UserSettings(),
+                zoneId = zone,
+            )
+
+        val eta = state.weightEta
+        assertNotNull(eta)
+        val (padded, projection) = state.weightProjectionSeries(Units::kgToLbs)!!
+
+        // Same length, so index-to-x lines up; the lead is future-dated and the
+        // readings have nothing in it.
+        assertEquals(padded.size, projection.size)
+        assertEquals(padded.map { it.date }, projection.map { it.date })
+        assertTrue(padded.last().date.isAfter(today))
+        assertTrue(padded.filter { it.date.isAfter(today) }.all { it.value == null })
+        assertTrue(projection.filter { it.date.isAfter(today) }.all { it.value != null })
+        // Today carries both: the last reading and the segment's first point.
+        assertNotNull(padded.single { it.date == today }.value)
+        assertNotNull(projection.single { it.date == today }.value)
+
+        render { WeightTrendCard(state) }
+
+        composeRule.onNodeWithText("At current pace").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/weight-projection.png")
+    }
+
+    /**
      * Net calories, on a run of days that are all deficits.
      *
      * The seeding is the case worth capturing rather than an arbitrary one:

@@ -159,6 +159,23 @@ The weekly ranges carry no average, and neither does the key. A point there is
 already a week, and averaging weeks into weeks would be a second smoothing
 wearing the first one's name.
 
+### When you get there
+
+Under the weight chart, when there is enough to say it: *185 lb by 25 Sep at
+current pace.* A straight line through the last month of weighing, run forward
+to the next waypoint — or to the goal, if you have not staged any — and drawn as
+a short dotted segment past the right-hand edge.
+
+It says nothing at all rather than guess. No date appears if you have weighed in
+fewer than five times in the last month, if the line points away from your goal,
+or if the pace is so slight that arriving takes more than two years. A made-up
+date is worse than none, because there is no way to look at one and see how
+little was behind it.
+
+The line starts from where the trend says you are, not from this morning's
+number — a morning three pounds up on water would otherwise launch the whole
+projection from a point the trend never went through.
+
 ### Net calories
 
 On Fuel under the macros: what you ate minus what you burned, one point a day,
