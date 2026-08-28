@@ -13,7 +13,7 @@ reps and reading.
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: one-tap repeats of what you log most, the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, the macro trend and net calories |
 | **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, personal records and streaks, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
-| **Wellness** | This morning against your own baseline, the day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, blood oxygen, sleep, vibe/energy/focus and pages read |
+| **Wellness** | This morning against your own baseline, the day's totals, last night's sleep stages, glucose and ketones, a card for comparing any two daily metrics, and the trends for waist, weight, blood pressure, resting heart rate, blood oxygen, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
 
 **Cards are grouped by subject, and Log is the exception that proves it.**
@@ -82,6 +82,26 @@ numbers, not because the reader is free to decide what normal is. That is also
 why they stay dashed while the glucose reference line is solid: one is a
 published figure, the other is wherever you decided to put it, and the two should
 not look alike.
+
+## Comparing two things
+
+A card on Wellness with two pickers: choose any two of steps, sleep, resting
+heart rate, weight, time in range, net calories, caffeine and pages read, and
+they are drawn on one plot with a scale down each side.
+
+The separate scales are the whole trick. Steps run to five figures and sleep to
+single ones, so on one shared axis the sleep line lies flat along the bottom and
+the chart says nothing.
+
+**It draws the two lines and leaves the reading to you.** There is no correlation
+number, on purpose. A figure would turn "these two moved together for three
+weeks" into a finding, and this is a sample of one with no controls and a
+fortnight of everything else going on at the same time.
+
+The switch underneath shifts the second metric a day later, so a cause sits under
+its effect — last night's caffeine under this morning's sleep, rather than the
+two plotted on the days they happened and appearing to have nothing to do with
+each other.
 
 ## The usual, in one tap
 

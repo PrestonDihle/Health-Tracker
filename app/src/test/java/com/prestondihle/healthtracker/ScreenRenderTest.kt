@@ -33,6 +33,10 @@ import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.components.DayPoint
+import com.prestondihle.healthtracker.ui.trends.CompareCard
+import com.prestondihle.healthtracker.ui.trends.CompareUiState
+import com.prestondihle.healthtracker.ui.trends.ComparableMetric
 import com.prestondihle.healthtracker.ui.trends.NetCaloriesTrendCard
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
@@ -224,6 +228,47 @@ class ScreenRenderTest {
 
         composeRule.onNodeWithText("Weight (7-day avg)").assertDoesNotExist()
         composeRule.onRoot().captureRoboImage("build/screenshots/weight-year-no-average.png")
+    }
+
+    /**
+     * Two metrics of wildly different magnitude, each on its own gutter.
+     *
+     * Steps against sleep is the pairing that proves the card: five figures
+     * against single ones, which on one shared scale draws the sleep line as a
+     * flat rule along the floor. If this renders with both traces visibly
+     * moving, the two-axis arrangement is doing its job.
+     */
+    @Test
+    fun `the compare card gives each metric a gutter of its own`() {
+        val today = java.time.LocalDate.now(zone)
+        val days = (0L until 21L).map { today.minusDays(20 - it) }
+        // Five figures against single ones, which is the case the two gutters
+        // exist for: on one shared scale the sleep trace is a flat rule along the
+        // floor and the card says nothing at all.
+        val compare =
+            CompareUiState(
+                first = ComparableMetric.STEPS,
+                second = ComparableMetric.SLEEP,
+                firstPoints =
+                    days.mapIndexed { index, date ->
+                        DayPoint(date, 7_000f + (index % 5) * 1_400f)
+                    },
+                secondPoints =
+                    days.mapIndexed { index, date -> DayPoint(date, 6.2f + (index % 4) * 0.5f) },
+                startDate = days.first(),
+                endDate = today,
+                zoneId = zone,
+            )
+
+        // Composed on its own, the `SleepCard` pattern: it sits below the fold on
+        // a screen that ticks, so it can never be scrolled to -- and composing it
+        // directly is the only way its two-gutter arithmetic gets a real layout
+        // pass rather than going unexercised entirely.
+        render { CompareCard(state = compare, onPick = { _, _ -> }, onLag = {}) }
+
+        composeRule.onNodeWithText("Compare").assertIsDisplayed()
+        composeRule.onNodeWithText("Shift Sleep a day later").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/compare-card.png")
     }
 
     /**

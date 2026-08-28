@@ -310,6 +310,45 @@ run of deficit days scaled to themselves puts every point below a zero clipped o
 `ChartBoundsTest`'s failure on the one chart whose reference is the difference between losing weight
 and gaining it.
 
+### The compare card
+
+Two daily series on one `DualAxisTimeChart`, on Wellness. **No new chart code** — that chart has been
+dual-axis since the master graph needed it, and what is new is the pairing. A gutter each is what
+makes it work: steps run to five figures and sleep to single ones, and on a shared scale the sleep
+line is a flat rule along the floor.
+
+`ComparableMetric` is a fixed menu of eight, and the limit is the point: these are the series that are
+*one number per day*, so any two line up slot for slot without resampling. A run's zone breakdown or a
+night's stages have no single daily value and are absent rather than flattened into one. A metric
+cannot be paired with itself — two identical lines teach nothing and the second gutter repeats the
+first — so each picker excludes the other's choice.
+
+**It draws two lines and claims nothing.** No correlation figure, no fit, deliberately: a number would
+turn "these moved together for three weeks" into a finding, on data with no controls, a sample of one,
+and whatever else was happening those weeks.
+
+**`compare` keys on the selection as well as the range**, which is the whole reason it is not a field
+on `uiState`. Time in range needs every glucose sample in the window — six figures of rows at a year —
+and loading it for everyone so that one option in a menu of eight is quick would put the cost of a CGM
+archive behind a card most readers will pair steps with sleep on. Glucose and caffeine are queried
+only when chosen and are `flowOf(emptyList())` otherwise, so switching *away* stops paying too.
+
+`MetricSource` is where a metric becomes a series, and every figure with a card elsewhere is derived
+**the same way there**: weight merges manual over synced, net calories wants both halves, time in
+range refuses an uncovered day. Two derivations of one number is how two cards come to disagree about
+one morning.
+
+**The lag shifts the data, not the drawing.** `lagSecond` moves each second-metric point onto the
+following day in the state itself, so the crosshair reads what the plot shows; shifted at the renderer
+they could disagree about which day a point belongs to. The window then has to reach a day further, or
+the newest shifted point is clipped — silently, and looking exactly like a metric that stops early.
+The switch is labelled by direction (*Shift Sleep a day later*) rather than as "+1 day", since which
+way is the entire content of the control.
+
+One trap it walked into: `ChartSeries.label` must be the bare metric name. The legend appends the unit
+from the axis the series is read against, so spelling the unit into the label renders
+*Steps (steps) (steps)*.
+
 ### The usual row on Log
 
 `domain/UsualIntake.kt` derives Log's one-tap shortcuts — repeat the last caffeine dose, log the usual

@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.data.AftAttempt
 import com.prestondihle.healthtracker.data.AftLane
 import com.prestondihle.healthtracker.data.BloodPressureReading
+import com.prestondihle.healthtracker.data.BloodSugarReading
+import com.prestondihle.healthtracker.data.CaffeineIntake
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.ExerciseSet
 import com.prestondihle.healthtracker.data.GripStrengthEntry
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -129,6 +132,77 @@ private const val PROJECTION_WINDOW_DAYS = 90L
  * argument arriving at a different card.
  */
 private const val LIVE_READ_MAX_DAYS = 90L
+
+/**
+ * The rows behind the compare card, and the one place a metric becomes a series.
+ *
+ * Kept apart from `TrendsUiState` deliberately: that state is what the ordinary
+ * trend cards read, and every metric here has an existing card of its own where
+ * the *same* number is already derived. Two derivations of one figure is how the
+ * two disagree, so anything with a home elsewhere is computed the same way here
+ * -- weight merges the manual table over the synced column, net calories wants
+ * both halves, time in range refuses an uncovered day.
+ */
+private class MetricSource(
+    val days: List<LocalDate>,
+    val snapshots: List<HealthDaySnapshot>,
+    val logs: List<DailyLog>,
+    val weights: List<WeightEntry>,
+    val glucose: List<BloodSugarReading>,
+    val goals: UserGoals,
+    val caffeine: List<CaffeineIntake>,
+    val zoneId: ZoneId,
+) {
+    private fun <T> byDate(rows: List<T>, dateOf: (T) -> LocalDate, valueOf: (T) -> Float?) =
+        rows.associate { dateOf(it) to valueOf(it) }
+
+    fun series(metric: ComparableMetric): List<DayPoint> {
+        val values: Map<LocalDate, Float?> =
+            when (metric) {
+                ComparableMetric.STEPS -> byDate(snapshots, { it.date }) { it.steps?.toFloat() }
+                ComparableMetric.SLEEP ->
+                    byDate(snapshots, { it.date }) { snap -> snap.sleepMinutes?.let { it / 60f } }
+                ComparableMetric.RESTING_HR ->
+                    byDate(snapshots, { it.date }) { it.restingHeartRateBpm?.toFloat() }
+                // Manual over synced on any day carrying both, exactly as the
+                // weight chart merges them; a second rule here would make one
+                // card disagree with the other about the same morning.
+                ComparableMetric.WEIGHT ->
+                    (snapshots.mapNotNull { snap -> snap.weightKg?.let { snap.date to it } } +
+                            weights.map { it.date to it.weightKg })
+                        .toMap()
+                        .mapValues { Units.kgToLbs(it.value) }
+                ComparableMetric.TIME_IN_RANGE ->
+                    bestTimeInRangeByDay(glucose.map { it.timestamp to it.mgDl }, goals, zoneId)
+                        .mapValues { it.value * 100f }
+                // Both halves or nothing, the rule the Fuel card follows: a
+                // finished day with no food recorded was not tracked, and zero
+                // would draw a deficit the size of the day's burn.
+                ComparableMetric.NET_CALORIES ->
+                    byDate(snapshots, { it.date }) { snap ->
+                        val eaten = snap.dietaryCalories
+                        val burned = snap.totalCalories
+                        if (eaten == null || burned == null) null else (eaten - burned).toFloat()
+                    }
+                // Summed per day and zero-filled, because caffeine reaches the
+                // table only by being logged: no rows for a day means none was
+                // drunk, which is a reading and not a gap.
+                ComparableMetric.CAFFEINE ->
+                    days.associateWith { date ->
+                        caffeine
+                            .filter { it.timestamp.atZone(zoneId).toLocalDate() == date }
+                            .sumOf { it.milligrams }
+                            .toFloat()
+                    }
+                // Likewise hand-counted, and zero on a day nothing was read.
+                ComparableMetric.PAGES ->
+                    days.associateWith { date ->
+                        logs.firstOrNull { it.date == date }?.bookPagesRead?.toFloat() ?: 0f
+                    }
+            }
+        return days.map { DayPoint(it, values[it]) }
+    }
+}
 
 /**
  * A streak over the days that met some bar, or an unasked question.
@@ -228,6 +302,63 @@ data class TrainingWeekState(
     val volumes: List<TrainingVolume> = emptyList(),
     val weekStart: LocalDate = LocalDate.now(),
 )
+
+/**
+ * The daily series the compare card can put on one plot.
+ *
+ * A fixed menu rather than every series in the app, and the limit is what makes
+ * the card readable: these are the eight that are one number per day, so any two
+ * of them line up slot for slot without either having to be resampled or
+ * explained. A run's zone breakdown or a night's stages have no single daily
+ * value to offer and are deliberately absent rather than flattened into one.
+ */
+enum class ComparableMetric(
+    val label: String,
+    /** Printed in the gutter this metric is given. */
+    val unit: String,
+    val decimals: Int = 0,
+) {
+    STEPS("Steps", "steps"),
+    SLEEP("Sleep", "h", decimals = 1),
+    RESTING_HR("Resting HR", "bpm"),
+    WEIGHT("Weight", "lb", decimals = 1),
+    TIME_IN_RANGE("Time in range", "%"),
+    NET_CALORIES("Net calories", "kcal"),
+    CAFFEINE("Caffeine", "mg"),
+    PAGES("Pages read", "pages"),
+    ;
+
+    /** True for the two that need a table the other six do not. */
+    internal val needsGlucose: Boolean
+        get() = this == TIME_IN_RANGE
+
+    internal val needsCaffeine: Boolean
+        get() = this == CAFFEINE
+}
+
+/**
+ * Two daily series on one plot, and whether the second is shifted a day.
+ *
+ * [lagSecond] answers the question a scatter of two lines cannot: whether the
+ * thing that moved first is the one drawn second. Shifting the second series a
+ * day *forward* puts yesterday's value under today's, which is the alignment for
+ * "did last night's caffeine cost me this morning's sleep" -- a comparison that
+ * reads as nothing at all when both are plotted on the day they happened.
+ */
+data class CompareUiState(
+    val first: ComparableMetric = ComparableMetric.STEPS,
+    val second: ComparableMetric = ComparableMetric.SLEEP,
+    val lagSecond: Boolean = false,
+    val firstPoints: List<DayPoint> = emptyList(),
+    val secondPoints: List<DayPoint> = emptyList(),
+    val startDate: LocalDate = LocalDate.now(),
+    val endDate: LocalDate = LocalDate.now(),
+    val zoneId: ZoneId = ZoneId.systemDefault(),
+) {
+    /** True while neither series has a single reading, so the card can say so. */
+    val isEmpty: Boolean
+        get() = firstPoints.none { it.value != null } && secondPoints.none { it.value != null }
+}
 
 /**
  * One streak, as it stands and as its best has ever been.
@@ -717,6 +848,87 @@ class TrendsViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = TrendsUiState(),
             )
+
+    private val comparison = MutableStateFlow(CompareUiState())
+
+    /**
+     * The compare card's two series, loaded for exactly the pair on screen.
+     *
+     * Keyed on the *selection* as well as the range, which is the whole reason it
+     * is not a field on [uiState]: time in range needs every glucose sample in
+     * the window, and at a year that is six figures of rows. Loading it for
+     * everybody so that one option in a menu of eight can be quick would put the
+     * cost of a CGM archive behind a card most readers will pair steps with
+     * sleep on. The two expensive tables are queried only when chosen, and the
+     * six cheap ones are day-indexed and always loaded.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val compare: StateFlow<CompareUiState> =
+        combine(comparison, range) { choice, selected -> choice to selected }
+            .flatMapLatest { (choice, selected) ->
+                val end = LocalDate.now(zoneId)
+                val start = end.minusDays(selected.days - 1)
+                val wanted = listOf(choice.first, choice.second)
+
+                combine(
+                    repository.getHealthSnapshots(start, end),
+                    repository.getDailyLogs(start, end),
+                    repository.getWeights(start, end),
+                    // Emptied rather than queried when nothing on screen needs
+                    // them, so switching away from time in range also stops
+                    // paying for it. Goals rides with the glucose because the
+                    // target band is what turns readings into a percentage, and
+                    // the outer combine's typed overloads stop at five.
+                    combine(
+                        if (wanted.any { it.needsGlucose })
+                            repository.getBloodSugarBetween(start, end)
+                        else flowOf(emptyList()),
+                        repository.getUserGoals(),
+                    ) { glucose, goals -> glucose to (goals ?: UserGoals()) },
+                    if (wanted.any { it.needsCaffeine })
+                        repository.getCaffeineSince(start.atStartOfDay(zoneId).toInstant())
+                    else flowOf(emptyList()),
+                ) { snapshots, logs, weights, glucoseAndGoals, caffeine ->
+                    val source =
+                        MetricSource(
+                            days = (0..ChronoUnit.DAYS.between(start, end)).map { start.plusDays(it) },
+                            snapshots = snapshots,
+                            logs = logs,
+                            weights = weights,
+                            glucose = glucoseAndGoals.first,
+                            goals = glucoseAndGoals.second,
+                            caffeine = caffeine,
+                            zoneId = zoneId,
+                        )
+                    choice.copy(
+                        firstPoints = source.series(choice.first),
+                        // Shifted here rather than at the chart, so the lag is
+                        // in the data the crosshair reads and the two cannot
+                        // disagree about which day a point belongs to.
+                        secondPoints =
+                            source.series(choice.second).let { points ->
+                                if (!choice.lagSecond) points
+                                else points.map { DayPoint(it.date.plusDays(1), it.value) }
+                            },
+                        startDate = start,
+                        endDate = end,
+                        zoneId = zoneId,
+                    )
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = CompareUiState(),
+            )
+
+    fun setComparison(first: ComparableMetric, second: ComparableMetric) {
+        comparison.value = comparison.value.copy(first = first, second = second)
+    }
+
+    fun setComparisonLag(lag: Boolean) {
+        comparison.value = comparison.value.copy(lagSecond = lag)
+    }
 
     /**
      * Personal bests and streaks, over the whole history rather than the window.

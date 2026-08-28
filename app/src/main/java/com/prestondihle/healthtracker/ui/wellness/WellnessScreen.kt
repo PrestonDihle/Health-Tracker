@@ -78,6 +78,7 @@ import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
 import com.prestondihle.healthtracker.ui.trends.BloodPressureTrendCard
+import com.prestondihle.healthtracker.ui.trends.CompareCard
 import com.prestondihle.healthtracker.ui.trends.ReadinessCard
 import com.prestondihle.healthtracker.ui.trends.RestingHeartRateTrendCard
 import com.prestondihle.healthtracker.ui.trends.SleepTrendCard
@@ -106,6 +107,7 @@ fun WellnessScreen(
     // Its own flow because its window is a fixed thirty days: the baseline must
     // not change when the reader moves a chart's range chip.
     val readiness by trendsViewModel.readiness.collectAsStateWithLifecycle()
+    val compare by trendsViewModel.compare.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
@@ -178,6 +180,17 @@ fun WellnessScreen(
                     ReorderableCard("readiness") { ReadinessCard(readiness) },
                     ReorderableCard("spo2Trend") { Spo2TrendCard(trends) },
                     ReorderableCard("sleepTrend") { SleepTrendCard(trends) },
+                    // Below the single-metric trends, because it answers a
+                    // question they raise rather than one they answer: each of
+                    // those says what one thing did, and this is where two of
+                    // them get put side by side.
+                    ReorderableCard("compare") {
+                        CompareCard(
+                            state = compare,
+                            onPick = trendsViewModel::setComparison,
+                            onLag = trendsViewModel::setComparisonLag,
+                        )
+                    },
                     ReorderableCard("moodTrend") { MoodTrendCard(state = state) },
                     ReorderableCard("readingTrend") { ReadingTrendCard(state = state) },
                 ),

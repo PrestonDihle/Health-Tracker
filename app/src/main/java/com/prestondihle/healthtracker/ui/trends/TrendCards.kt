@@ -14,7 +14,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,6 +42,7 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.BarChart
+import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
@@ -392,6 +405,174 @@ internal fun RunsTrendCard(runs: List<RunBreakdown>, range: TrendsRange) {
             }
         }
     }
+}
+
+/**
+ * Any two daily series on one plot, each with a gutter of its own.
+ *
+ * No new chart code: `DualAxisTimeChart` has been dual-axis since the master
+ * graph needed it, and what is new here is the pairing. A gutter each is what
+ * makes the card work at all -- steps run to five figures and sleep to single
+ * ones, and on a shared scale the sleep line is a flat rule along the floor.
+ *
+ * **It draws two lines and claims nothing about them.** There is no correlation
+ * figure and no fitted anything, deliberately: a number would turn "these two
+ * moved together over three weeks" into a finding, on data with no controls, a
+ * sample of one and whatever else was happening those weeks. The reader can see
+ * a relationship or fail to, which is the honest limit of what a chart of two
+ * daily series supports.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun CompareCard(
+    state: CompareUiState,
+    onPick: (ComparableMetric, ComparableMetric) -> Unit,
+    onLag: (Boolean) -> Unit,
+) {
+    val chartColors = LocalChartColors.current
+    TrendCard(title = "Compare", subtitle = "any two, one gutter each") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricPicker(
+                selected = state.first,
+                // A metric cannot be compared with itself: two identical lines
+                // teach nothing and the second gutter would repeat the first.
+                exclude = state.second,
+                onSelect = { onPick(it, state.second) },
+            )
+            MetricPicker(
+                selected = state.second,
+                exclude = state.first,
+                onSelect = { onPick(state.first, it) },
+            )
+        }
+
+        if (state.isEmpty) {
+            Text(
+                "Neither of these has anything logged in this window.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@TrendCard
+        }
+
+        DualAxisTimeChart(
+            windowStart = state.startDate.atStartOfDay(state.zoneId).toInstant(),
+            // The lag shifts a point onto tomorrow, so the window has to reach a
+            // day further or the newest point of the second series is clipped --
+            // and clipped silently, which on this card would look like a metric
+            // that simply stops before the other.
+            windowEnd =
+                state.endDate.plusDays(if (state.lagSecond) 2 else 1)
+                    .atStartOfDay(state.zoneId)
+                    .toInstant(),
+            series =
+                listOfNotNull(
+                    state.first.chartSeries(
+                        state.firstPoints,
+                        chartColors.gripDominant,
+                        ChartAxis.LEFT,
+                        state.zoneId,
+                    ),
+                    state.second.chartSeries(
+                        state.secondPoints,
+                        chartColors.gripNonDominant,
+                        ChartAxis.RIGHT,
+                        state.zoneId,
+                    ),
+                ),
+            leftAxis = state.first.axis(state.firstPoints, chartColors.gripDominant),
+            rightAxis = state.second.axis(state.secondPoints, chartColors.gripNonDominant),
+            zoneId = state.zoneId,
+            modifier = Modifier.fillMaxWidth().height(180.dp),
+            contentDescription =
+                "${state.first.label} against ${state.second.label} over the chosen window",
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = state.lagSecond, onCheckedChange = onLag)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                // Named by what it is for rather than by what it does: "+1 day"
+                // says nothing about which way, and the direction is the entire
+                // content of the control.
+                "Shift ${state.second.label} a day later",
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        if (state.lagSecond) {
+            Text(
+                "Each ${state.second.label} point is drawn on the following day, so a cause " +
+                    "sits under its effect.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetricPicker(
+    selected: ComparableMetric,
+    exclude: ComparableMetric,
+    onSelect: (ComparableMetric) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(onClick = { open = true }, label = { Text(selected.label) })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            ComparableMetric.entries
+                .filter { it != exclude }
+                .forEach { metric ->
+                    DropdownMenuItem(
+                        text = { Text(metric.label) },
+                        onClick = {
+                            onSelect(metric)
+                            open = false
+                        },
+                    )
+                }
+        }
+    }
+}
+
+/** Day-indexed points at midday, which is where a daily figure belongs on a clock. */
+private fun ComparableMetric.chartSeries(
+    points: List<DayPoint>,
+    color: Color,
+    axis: ChartAxis,
+    zoneId: ZoneId,
+): ChartSeries? {
+    val drawn =
+        points.mapNotNull { point ->
+            point.value?.let { TimePoint(point.date.atTime(12, 0).atZone(zoneId).toInstant(), it) }
+        }
+    if (drawn.isEmpty()) return null
+    // Bare label: the legend appends the unit from the axis this series is read
+    // against, so spelling it here gives "Steps (steps) (steps)".
+    return ChartSeries(label = label, points = drawn, color = color, axis = axis)
+}
+
+/**
+ * A gutter scaled to this series alone.
+ *
+ * Padded a tenth either side so a flat run does not sit exactly on the frame,
+ * and floored at zero for the counts, where a negative gridline is a value the
+ * metric cannot take. Net calories is the exception and keeps its negatives,
+ * since a deficit is the point of it.
+ */
+private fun ComparableMetric.axis(points: List<DayPoint>, color: Color): AxisSpec {
+    val values = points.mapNotNull { it.value }
+    val low = values.minOrNull() ?: 0f
+    val high = values.maxOrNull() ?: 1f
+    val pad = ((high - low) * 0.1f).takeIf { it > 0f } ?: 1f
+    val floorAtZero = this != ComparableMetric.NET_CALORIES
+    return AxisSpec(
+        min = if (floorAtZero) maxOf(0f, low - pad) else low - pad,
+        max = high + pad,
+        label = unit,
+        format = { "%.${decimals}f".format(it) },
+        color = color,
+    )
 }
 
 private val RECORD_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy")
