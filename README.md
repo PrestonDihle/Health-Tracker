@@ -11,7 +11,7 @@ reps and reading.
 | --- | --- |
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
-| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary and the macro trend |
+| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, and the macro trend |
 | **Activity** | The Army Fitness Test scorecard, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
@@ -369,6 +369,36 @@ clock time that was never written, so instead:
   timestamp, energy, all three macros and name are counted once; anything
   differing at all is kept, so a genuine second helping survives.
 
+### What each meal did to the blood sugar
+
+Every meal with a real clock time is scored against the trace around it: the
+baseline it started from (the median of the half hour before), how far it rose,
+how long the rise took, the area it spent above baseline, and how long until it
+came back. Nothing is stored — it is all recomputed from readings already on the
+phone, so correcting a meal's time immediately corrects its score.
+
+The Log rows carry the short version (`+29 mg/dL · back in 2h 31m`), and **Fuel →
+Biggest responses** ranks the meals that moved it most over the chosen window.
+
+The ranking sorts on **area above baseline, not peak height**, and real data
+shows why: the biggest single peak in a fortnight here was a 187 g carbohydrate
+dinner at +56 mg/dL, and it still came *second* to a +51 that stayed up longer.
+A sharp spike that clears quickly and a smaller one that sits there for two hours
+can share a peak. Both figures are shown, so neither stands in for the other.
+
+Four things stop a meal being scored, and all four leave it blank rather than
+guessed:
+
+- The time is a stamp rather than a measurement — the score would be about an
+  hour nobody ate in. Fix the time on Log and it fills in.
+- The sensor did not cover the two hours after it. A peak may have happened and
+  gone unrecorded, and the smaller area left behind reads exactly like a flatter
+  meal.
+- There is no reading before the meal, so there is no baseline to measure from.
+- Eating high does not count as a response: only what stands *above* where the
+  trace already was is counted, and a dip below baseline contributes nothing
+  rather than cancelling out the rise before it.
+
 ### Reading two units at a time
 
 The plot has two gutters and the series carry six different units, so which two
@@ -704,6 +734,7 @@ crashes on nobody's device but a user's. Lint is the only check that looks.
 
 The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay,
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
+per-meal glucose response and the four ways it refuses to score one,
 series gap-splitting, axis selection, gap backfill, gridline spacing, axis range,
 heart-rate zone boundaries, where the waypoint stepper opens, and the panned
 window's own arithmetic -- whether the curves stop at the right edge, and whether

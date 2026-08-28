@@ -111,6 +111,50 @@ class MealTimeStampTest {
     }
 
     /**
+     * The repeat that proves a stamp may be older than the list that displays it.
+     *
+     * Found on the phone rather than reasoned about. The source stamps 10:00:00
+     * roughly once a day, so inside the list's own 24 hours there is exactly one
+     * of them and nothing to repeat against -- the meal was read as a
+     * measurement, printed a plausible clock time instead of "set time", and
+     * once response scoring landed it also printed a rise measured from an hour
+     * nobody ate in. The view model therefore loads two weeks of meals to judge
+     * this and still shows one day of them.
+     */
+    @Test
+    fun `a stamp is still a stamp when its only repeat is older than the list`() {
+        val yesterdaysStamp = meal(1, "2026-08-19T10:00:00Z", calories = 700)
+        val todaysStamp = meal(2, "2026-08-20T10:00:00Z", calories = 820)
+
+        // `now` is 18:00 on the 20th, so the meal from the 19th is more than 24
+        // hours old and does not appear in the list at all.
+        val uiState = state(yesterdaysStamp, todaysStamp)
+
+        assertEquals(listOf(todaysStamp), uiState.mealsInWindow)
+        assertFalse(uiState.hasClockTime(todaysStamp))
+        assertEquals(listOf(todaysStamp), uiState.undatedMealsInWindow)
+    }
+
+    @Test
+    fun `the merged-records count stops at the window the list shows`() {
+        // Two duplicate pairs, one inside the displayed day and one outside it.
+        // The sentence under the list explains the rows above it, so it must
+        // count only the merge the reader can actually see.
+        val olderPair =
+            listOf(meal(1, "2026-08-18T09:15:11Z"), meal(2, "2026-08-18T09:15:11Z"))
+        val todaysPair =
+            listOf(
+                meal(3, "2026-08-20T13:22:07Z", calories = 640),
+                meal(4, "2026-08-20T13:22:07Z", calories = 640),
+            )
+
+        val uiState = state(*(olderPair + todaysPair).toTypedArray())
+
+        assertEquals(1, uiState.mealsInWindow.size)
+        assertEquals(1, uiState.duplicatesCollapsed)
+    }
+
+    /**
      * The presets offered to fix a stamped meal, in the order they are eaten.
      *
      * The three are set in separate fields and nothing stops a night-shift reader

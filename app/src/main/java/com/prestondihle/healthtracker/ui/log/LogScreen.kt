@@ -66,6 +66,10 @@ fun LogScreen(
             cards =
                 listOf(
                     ReorderableCard("meals") {
+                        // Hoisted out of the row lambda: scoring walks the whole
+                        // trace, and read per row it would be walked once per meal
+                        // on every recomposition.
+                        val responses = state.mealResponses
                         MealListCard(
                             meals = state.mealsInWindow,
                             undatedMeals = state.undatedMealsInWindow,
@@ -86,6 +90,8 @@ fun LogScreen(
                                 toast("Meal deleted")
                             },
                             mealPresets = state.settings.mealPresets,
+                            responseFor = { responses[it.id] },
+                            hasGlucose = state.glucose.isNotEmpty(),
                         )
                     },
                     ReorderableCard("body") {

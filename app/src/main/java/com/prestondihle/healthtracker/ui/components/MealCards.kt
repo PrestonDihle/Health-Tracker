@@ -27,11 +27,14 @@ import androidx.compose.ui.unit.dp
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
+import com.prestondihle.healthtracker.domain.MealResponse
+import com.prestondihle.healthtracker.domain.MealResponses
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
 // Meal cards.
@@ -95,6 +98,17 @@ internal fun MealListCard(
     onDelete: (MealEntry) -> Unit,
     /** The reader's habitual meal times, offered only where the time is stamped. */
     mealPresets: List<LocalTime> = emptyList(),
+    /** What each meal did to the blood sugar; absent where it cannot be said. */
+    responseFor: (MealEntry) -> MealResponse? = { null },
+    /**
+     * Whether there is any CGM data at all in the window.
+     *
+     * Separates "the sensor did not cover this meal" from "there is no CGM here",
+     * which is the same distinction the Fuel report card draws. Without it every
+     * meal on a phone with no monitor would carry a line explaining an absence
+     * the reader already knows about.
+     */
+    hasGlucose: Boolean = false,
 ) {
     var editing by remember { mutableStateOf<MealEntry?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -148,6 +162,13 @@ internal fun MealListCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    responseSummary(responseFor(meal), hasClockTime(meal), hasGlucose)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 val placed = hasClockTime(meal)
                 Text(
@@ -249,6 +270,50 @@ internal fun MealListCard(
             now = now,
         )
     }
+}
+
+/**
+ * The blood-sugar line under a meal's macros, or null when there is nothing
+ * honest to print.
+ *
+ * Leads with the rise rather than the area, because the rise is the figure a
+ * reader can hold in their head and check against the chart above. The area is
+ * what the Fuel ranking sorts on, and it is quoted there where it has other
+ * areas to be compared with -- a lone "2,140 mg/dL·min" on a row means nothing
+ * to anybody.
+ *
+ * The return clause is dropped entirely when the sensor stopped inside the
+ * three-hour cap. "Still up at 3h" would be a claim about hours nobody measured,
+ * which is the same error as joining a line across a gap.
+ */
+private fun responseSummary(
+    response: MealResponse?,
+    placed: Boolean,
+    hasGlucose: Boolean,
+): String? =
+    when {
+        response != null ->
+            buildString {
+                append("+${response.peakRiseMgDl.roundToInt()} mg/dL")
+                val back = response.returnToBaseline
+                when {
+                    back != null -> append(" · back in ${back.compact()}")
+                    response.observedFor >= MealResponses.RETURN_CAP ->
+                        append(" · still up at ${MealResponses.RETURN_CAP.compact()}")
+                }
+            }
+        // A stamped meal already carries "set time" in red on the same row, which
+        // states the reason and offers the fix in one. A second line saying it is
+        // unmeasured would be the same news, quieter.
+        !placed -> null
+        hasGlucose -> "no glucose cover"
+        else -> null
+    }
+
+/** "1h 50m", or "45m" under the hour. */
+private fun Duration.compact(): String {
+    val minutes = toMinutes()
+    return if (minutes < 60) "${minutes}m" else "${minutes / 60}h ${minutes % 60}m"
 }
 
 private val Macro.label: String

@@ -29,7 +29,10 @@ import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.FastingAdherence
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
+import com.prestondihle.healthtracker.domain.MealClockTimes
 import com.prestondihle.healthtracker.domain.MealDuplicates
+import com.prestondihle.healthtracker.domain.MealResponse
+import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.SleepNight
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
@@ -133,6 +136,27 @@ private const val LOG_HISTORY_DAYS = 14L
  */
 private const val MEAL_WINDOW_HOURS = 24L
 
+/**
+ * How far back meals are *loaded*, as against how far back the list shows them.
+ *
+ * The stamped-time rule is a repeat detector, so it can only see a repeat that
+ * is inside the data it is given -- and the phone's stamp lands on 10:00:00
+ * about once a day. Judged over the 24 hours the list displays, the single
+ * 10:00 meal in that span has nothing to repeat against and is read as a
+ * measurement: the row prints a plausible clock time instead of "set time", and
+ * since the response scoring landed it also prints a rise and a return measured
+ * from an hour nobody ate in. That is the exact failure the null-for-stamped
+ * rule exists to prevent, arriving through the window rather than through the
+ * rule.
+ *
+ * Two weeks holds a dozen or more of them, so the repeat is unmissable. This is
+ * the same shape as the absorption curves loading past the left edge: **load
+ * wider than you display, because the judgement needs more than the picture
+ * does.** The list itself still stops at [MEAL_WINDOW_HOURS], and so does the
+ * duplicate count printed under it.
+ */
+private const val MEAL_STAMP_HISTORY_DAYS = 14L
+
 data class WellnessUiState(
     val today: LocalDate = LocalDate.now(),
     val now: Instant = Instant.now(),
@@ -226,13 +250,24 @@ data class WellnessUiState(
     /**
      * Meals counted once, collapsing the duplicate records some sources write for
      * one meal -- the same rule the Today chart uses so the two never disagree.
+     *
+     * Spans everything loaded, which reaches two weeks back rather than one day:
+     * this is what the stamped-time rule reads, and it needs the history.
      */
     private val distinctMeals: List<MealEntry>
         get() = MealDuplicates.collapse(meals.sortedBy { it.id })
 
-    /** How many records the collapse absorbed, so the list can own up to it. */
+    /**
+     * How many records the collapse absorbed *within the displayed window*, so
+     * the list can own up to it.
+     *
+     * Counted over the window rather than over everything loaded, which are no
+     * longer the same span. The sentence under the list explains the figures
+     * above it, so a count reaching back a fortnight would claim credit for
+     * merges the reader cannot see and make today's total look wrong.
+     */
     val duplicatesCollapsed: Int
-        get() = meals.size - distinctMeals.size
+        get() = meals.count { it.timestamp in mealWindowStart..now } - mealsInWindow.size
 
     /** Meals eaten in the last 24 hours, newest first. */
     val mealsInWindow: List<MealEntry>
@@ -244,24 +279,41 @@ data class WellnessUiState(
     /**
      * Times of day that are a stamp rather than a measurement.
      *
-     * A source that knows only the date lands every meal on the same second; a
-     * real timestamp never repeats one. Midnight joins unconditionally, since a
-     * lone meal at exactly 00:00:00 is a date too.
+     * The rule itself lives in [MealClockTimes], because the response scoring on
+     * Fuel asks the same question over a different window and the two answers
+     * must not be allowed to drift apart.
      */
     private val stampedTimesOfDay: Set<LocalTime>
-        get() =
-            distinctMeals
-                .groupBy { it.timestamp.atZone(zoneId).toLocalTime() }
-                .filterValues { it.size > 1 }
-                .keys + LocalTime.MIDNIGHT
+        get() = MealClockTimes.stampedTimesOfDay(distinctMeals, zoneId)
 
     /** Whether a meal carries a real clock time or only the date it was eaten on. */
     fun hasClockTime(meal: MealEntry): Boolean =
-        meal.timestamp.atZone(zoneId).toLocalTime() !in stampedTimesOfDay
+        MealClockTimes.hasClockTime(meal, stampedTimesOfDay, zoneId)
 
     /** Meals in the window carrying a stamped time rather than a measured one. */
     val undatedMealsInWindow: List<MealEntry>
         get() = mealsInWindow.filterNot(::hasClockTime)
+
+    /**
+     * What each meal in the window did to the blood sugar, keyed by meal id.
+     *
+     * Absent rather than null-valued for a meal that could not be scored, so a
+     * lookup miss is the single "unmeasured" case rather than two.
+     *
+     * Goes through `rank` with no real limit rather than calling `score` per
+     * meal: `rank` sorts the trace once and binary-searches each meal's slice out
+     * of it, where a loop would re-sort seventy-two hours of readings for every
+     * row on the card.
+     */
+    val mealResponses: Map<Long, MealResponse>
+        get() =
+            MealResponses.rank(
+                    meals = mealsInWindow,
+                    readings = glucose.map { it.timestamp to it.mgDl },
+                    hasClockTime = ::hasClockTime,
+                    limit = mealsInWindow.size,
+                )
+                .associate { it.meal.id to it.response }
 
     /**
      * Creatine taken today, in grams.
@@ -564,7 +616,9 @@ class WellnessViewModel(
             // window is still decaying inside it, and dropping it would start the
             // curve at the wrong height.
             val caffeineSince = now.minus(Duration.ofHours(Caffeine.RELEVANT_HISTORY_HOURS))
-            val mealsSince = now.minus(Duration.ofHours(MEAL_WINDOW_HOURS))
+            // Wider than the list shows, so the stamped-time rule has enough
+            // meals to spot a repeat in. See MEAL_STAMP_HISTORY_DAYS.
+            val mealsSince = now.minus(Duration.ofDays(MEAL_STAMP_HISTORY_DAYS))
             return combine(
                 repository.getBloodSugarSince(since),
                 repository.getKetonesSince(since),

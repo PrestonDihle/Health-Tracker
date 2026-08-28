@@ -788,6 +788,55 @@ can be the average of a trace that was never once in range, and a good time-in-r
 The below/above line appears only when something was outside the band; on a clean window it would be
 two zeroes taking a row to report that nothing happened.
 
+### Per-meal glucose response
+
+`domain/MealResponse.kt` scores what one meal did to the blood sugar: baseline, peak rise, incremental
+area and time back to baseline. Read-time only, over rows already on disk — a stored response would
+have to be invalidated every time a meal's time is corrected, which on this data happens routinely.
+
+**The baseline is a median, not a mean**, over the half hour before the meal. One compression low or
+a stray fingerstick in that window would drag a mean down and inflate *everything* measured against
+it at once — the rise, the area and the apparent return. Six readings shrug off one outlier.
+
+**The area is incremental, and negatives are clamped rather than subtracted.** Only what stands above
+the baseline counts, so a meal is scored on what it added rather than on how high the trace already
+was — eating at 140 would otherwise outscore the same meal eaten at 90 for nothing the meal did. A
+dip below baseline contributes zero instead of cancelling an earlier rise: a meal that spiked and
+then undershot has still spiked.
+
+**The reading taken exactly at the meal is both the last pre-meal value and the first point of the
+trapezoid.** That is not double-counting — it is the level the meal started from, which is what both
+uses are about.
+
+**The ranking sorts on area, not peak rise**, and the author's own data is the argument: the biggest
+peak in the last fortnight (+56, a 187 g carbohydrate dinner) ranks *second* on area behind a +51
+that stayed up longer. A sharp spike that clears in forty minutes and a smaller rise that sits there
+for two hours can share a peak, and the second is usually the one worth finding. Both figures are
+shown so neither has to stand for the other.
+
+**Unscored meals are absent from the ranking rather than sorted to the bottom.** A ranking lists
+things that were measured, and "no CGM cover" is not a small response.
+
+`observedFor` sits beside `returnToBaseline` so a null there can be read correctly. "Still up after
+three hours" and "the sensor stopped after forty minutes" are different statements, and with only the
+null they would print the same sentence — so the meal row drops the return clause entirely when the
+sensor stopped inside the cap, the same rule that stops a line being drawn across a gap.
+
+**A stamped meal is unscored, and the window the stamp is judged over is load-bearing.** This is the
+one thing here that was got wrong first and caught on the phone. `hasClockTime` is a *repeat*
+detector, so it only sees a repeat inside the meals it is handed — and the source stamps 10:00:00
+about once a day. Judged over the 24 hours the Log list displays, the single 10:00 meal in that span
+had nothing to repeat against, was read as a measurement, and printed a rise and a return measured
+from an hour nobody ate in. `MEAL_STAMP_HISTORY_DAYS` (14) is the fix: **load wider than you display,
+because the judgement needs more than the picture does** — the same shape as the absorption curves
+reaching past the left edge. The list still stops at `MEAL_WINDOW_HOURS`, and so does the merged-
+records count printed under it, which had to be re-scoped to the window when the load widened or it
+would have claimed credit for merges the reader cannot see.
+
+`domain/MealClockTimes.kt` holds that rule now, because two screens ask it over different windows and
+two copies would eventually disagree — and the disagreement would look like a scoring bug rather than
+a definition drifting.
+
 ### Body composition
 
 `domain/BodyComposition.kt` is the military body composition screen, and it is **waist over height,
@@ -1193,7 +1242,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
-`GlucoseMetricsTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
+`GlucoseMetricsTest`, `MealResponseTest` and `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
@@ -1213,6 +1262,14 @@ because the collapse runs first. It also pins the meal presets, which are ordina
 untestable: that they read through the day whatever order the three fields were set in, that two set
 alike are offered once, and what the shipped defaults are — the last being the figure
 `MIGRATION_17_18` seeds, so the two cannot drift apart silently.
+
+`MealResponseTest` pins the refusals as hard as the arithmetic, because they are the half that
+protects the reader: a stamped meal unscored even when the trace around it is a textbook response, a
+window the sensor barely covered unscored rather than scored small, and no pre-meal reading meaning no
+baseline and so no figure. The two it pins hardest are the ones a plausible implementation gets
+wrong — that eating high does not outscore the same rise from a lower start, and that a dip below
+baseline does not net off the rise before it. `MealTimeStampTest` carries the companion case found on
+the phone: a stamp whose only repeat is older than the list still counts as a stamp.
 
 **The preset tests pin their clock rather than reading it, and they have to.** A chip disables itself
 for a time that has not come round yet, so a fixture hung off `Instant.now()` would pass in the
@@ -1322,10 +1379,10 @@ asserted on a screen that does not tick, which is why the glucose smoothing and 
 covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
 
 **That ticker now belongs to `FuelViewModel`**, which followed the fast card off Wellness, and
-Fuel is the longest *ticking* tab in the app at twelve cards — so it has the problem worse
+Fuel is the longest *ticking* tab in the app at thirteen cards — so it has the problem worse
 than Wellness ever did. (The count keeps moving: thirteen before the extended-fast entries moved
-inside their own card, eleven after, twelve again with the blood sugar summary. Settings is longer
-still at thirteen with the meal times, and does not tick. The problem does
+inside their own card, eleven after, twelve with the blood sugar summary, thirteen again with the
+biggest-responses ranking. Settings ties it at thirteen and does not tick. The problem does
 not move, so do not read the figure as the point.) Wellness still ticks too, which is what the mood card's direct
 composition is for. Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master

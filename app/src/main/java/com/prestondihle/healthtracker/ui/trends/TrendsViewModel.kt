@@ -21,7 +21,11 @@ import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.AftEvent
 import com.prestondihle.healthtracker.domain.AftScorecard
 import com.prestondihle.healthtracker.domain.AftScoring
+import com.prestondihle.healthtracker.domain.MealClockTimes
+import com.prestondihle.healthtracker.domain.MealDuplicates
+import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.RunBreakdown
+import com.prestondihle.healthtracker.domain.ScoredMeal
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.StackedBar
@@ -68,6 +72,32 @@ private const val DEFAULT_MAX_HEART_RATE = 190
  * projection of anything, and would sit on the card looking exactly like one.
  */
 private const val PROJECTION_WINDOW_DAYS = 90L
+
+/**
+ * How many meals the biggest-responses ranking lists.
+ *
+ * Five is a ranking; twenty is the meal list again, sorted differently. The card
+ * is answering "what should I look at", and a list long enough to need scrolling
+ * has stopped answering it.
+ */
+private const val RANKED_MEALS = 5
+
+/**
+ * The meals that moved the blood sugar most, over the chosen trends window.
+ *
+ * [mealCount] and [hasAnyReadings] exist to tell the three empty cases apart,
+ * which is the same distinction `GlucoseReportState` draws and for the same
+ * reason: "nothing eaten in this window", "no CGM here at all" and "meals and
+ * readings both present, but none of them lined up well enough to score" want
+ * three different sentences, and only one of them is something to fix.
+ */
+data class MealResponseState(
+    val ranked: List<ScoredMeal> = emptyList(),
+    val mealCount: Int = 0,
+    val hasAnyReadings: Boolean = false,
+    val range: TrendsRange = TrendsRange.TWO_WEEKS,
+    val zoneId: ZoneId = ZoneId.systemDefault(),
+)
 
 /**
  * The AFT attempts and the profile they are scored against.
@@ -392,6 +422,54 @@ class TrendsViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = AftUiState(zoneId = zoneId),
+            )
+
+    /**
+     * The meals that moved the blood sugar most over the chosen window.
+     *
+     * Its own flow rather than a field on [uiState] for a plain reason: that
+     * combine is already at the five-source limit its typed overload allows, and
+     * pairing meals with glucose to get under it would put two unrelated things
+     * in one tuple. It still keys on [range], unlike `aft`, because "which meals
+     * spiked me" is exactly the question a window is being chosen for.
+     *
+     * Duplicate records are collapsed first, the same rule the meal list uses. A
+     * source that writes one meal three times would otherwise fill a five-row
+     * ranking with three copies of one dinner.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val mealResponses: StateFlow<MealResponseState> =
+        range
+            .flatMapLatest { selected ->
+                val end = LocalDate.now(zoneId)
+                val start = end.minusDays(selected.days - 1)
+                combine(
+                    repository.getMealsSince(start.atStartOfDay(zoneId).toInstant()),
+                    repository.getBloodSugarBetween(start, end),
+                ) { meals, readings ->
+                    val distinct = MealDuplicates.collapse(meals.sortedBy { it.id })
+                    val stamped = MealClockTimes.stampedTimesOfDay(distinct, zoneId)
+                    MealResponseState(
+                        ranked =
+                            MealResponses.rank(
+                                meals = distinct,
+                                readings = readings.map { it.timestamp to it.mgDl },
+                                hasClockTime = {
+                                    MealClockTimes.hasClockTime(it, stamped, zoneId)
+                                },
+                                limit = RANKED_MEALS,
+                            ),
+                        mealCount = distinct.size,
+                        hasAnyReadings = readings.isNotEmpty(),
+                        range = selected,
+                        zoneId = zoneId,
+                    )
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = MealResponseState(zoneId = zoneId),
             )
 
     fun addAftAttempt(attempt: AftAttempt) {

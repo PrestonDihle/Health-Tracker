@@ -91,6 +91,7 @@ import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.trends.MacrosTrendCard
+import com.prestondihle.healthtracker.ui.trends.MealResponseState
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import java.time.DayOfWeek
 import java.time.Duration
@@ -135,6 +136,9 @@ fun FuelScreen(
     // The macro trend belongs with food: it reads from the same source Activity's
     // other trends do, so Fuel need not re-derive it.
     val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
+    // Same argument as the macro trend: it is keyed on the trends range, so it
+    // comes from the view model that owns the range rather than being re-derived.
+    val mealResponses by trendsViewModel.mealResponses.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var timeEdit by remember { mutableStateOf<TimeEdit?>(null) }
@@ -289,6 +293,7 @@ fun FuelScreen(
                     // Calories from protein, carbs and fat over the fortnight,
                     // moved here from Activity.
                     ReorderableCard("glucoseReport") { GlucoseReportCard(report = glucoseReport) },
+                    ReorderableCard("mealResponses") { MealResponseCard(state = mealResponses) },
                     ReorderableCard("macros") { MacrosTrendCard(trends) },
                 ),
             savedOrder = savedOrder,
@@ -745,6 +750,99 @@ private fun GlucoseReportCard(report: GlucoseReportState) {
 
 /** `Mon 24 Aug`, for naming the week's first day without spending a line on it. */
 private val WEEK_START_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
+
+/** `Tue 25 Aug, 1:09 PM` -- a response is only findable if the meal is. */
+private val RESPONSE_MEAL_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM, h:mm a")
+
+/**
+ * The meals that moved the blood sugar most over the chosen window.
+ *
+ * Ranked on the area above baseline rather than on the peak, because the area is
+ * the honest answer to "how much did this meal do". A sharp spike that clears in
+ * forty minutes and a smaller rise that sits there for two hours can share a
+ * peak, and the second is usually the one worth finding. Both figures are shown,
+ * so neither has to stand for the other.
+ *
+ * Meals that could not be scored are simply absent. A ranking is a list of
+ * things that were measured, and a meal with no CGM cover is not a small
+ * response -- putting it at the bottom would say it was.
+ */
+@Composable
+private fun MealResponseCard(state: MealResponseState) {
+    TrackerCard(
+        title = "Biggest responses",
+        subtitle = "last ${state.range.label}",
+    ) {
+        if (state.ranked.isEmpty()) {
+            Text(
+                when {
+                    !state.hasAnyReadings -> "No blood sugar readings in this window."
+                    state.mealCount == 0 -> "No meals recorded in this window."
+                    // Both present and still nothing scored: every meal either
+                    // carries a stamped time or fell in a gap in the trace. That
+                    // is a fixable state, and the meal list is where it is fixed.
+                    else ->
+                        "No meal here could be scored. A meal needs a real clock time and " +
+                            "a covered two hours after it — set the times on Log and these " +
+                            "will fill in."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@TrackerCard
+        }
+
+        state.ranked.forEach { scored ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        scored.meal.name?.takeIf { it.isNotBlank() } ?: "Meal",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        RESPONSE_MEAL_FORMAT.format(
+                            scored.meal.timestamp.atZone(state.zoneId)
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    scored.meal.carbGrams?.let {
+                        Text(
+                            "${it.roundToInt()}g carb",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "+${scored.response.peakRiseMgDl.roundToInt()} mg/dL",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        "peak at ${scored.response.timeToPeak.toMinutes()} min",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Text(
+            "Ranked by how much the trace stood above where it started, over the two hours " +
+                "after each meal. Meals with a stamped time or a gap in the trace are not " +
+                "scored and are left out.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 /** One window's four figures, plus what is out of range under them. */
 @Composable
