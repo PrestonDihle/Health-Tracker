@@ -60,12 +60,16 @@ class TrendsBucketsTest {
         proteinGrams: Float? = null,
         carbGrams: Float? = null,
         fatGrams: Float? = null,
+        dietaryCalories: Int? = null,
+        totalCalories: Int? = null,
     ) = HealthDaySnapshot(
         date = date,
         steps = steps,
         proteinGrams = proteinGrams,
         carbGrams = carbGrams,
         fatGrams = fatGrams,
+        dietaryCalories = dietaryCalories,
+        totalCalories = totalCalories,
         syncedAt = date.atStartOfDay(zone).toInstant(),
     )
 
@@ -223,6 +227,66 @@ class TrendsBucketsTest {
         assertEquals(150f * 4f, bar.segments[0], 0.01f)
         assertEquals(150f * 4f, bar.segments[1], 0.01f)
         assertEquals(40f * 9f, bar.segments[2], 0.01f)
+    }
+
+    @Test
+    fun `net calories needs both halves, unlike the day card`() {
+        val monday = LocalDate.of(2026, 2, 23)
+        val state =
+            stateOver(
+                TrendsRange.MONTH,
+                wednesday,
+                snapshots =
+                    listOf(
+                        // Both recorded: a real 400-calorie deficit.
+                        snapshot(monday, dietaryCalories = 2_000, totalCalories = 2_400),
+                        // Burn synced, nothing logged eaten. The day card would
+                        // call this a 2,400 deficit, and on today so far it is
+                        // right to -- a fasted morning has eaten nothing. On a
+                        // finished day it means the day was not tracked, and a
+                        // fast that never happened is the worst thing this chart
+                        // could draw.
+                        snapshot(monday.plusDays(1), totalCalories = 2_400),
+                        // Food logged, watch not synced: unknown either way.
+                        snapshot(monday.plusDays(2), dietaryCalories = 2_000),
+                    ),
+            )
+
+        val series = state.netCalorieSeries.associate { it.date to it.value }
+
+        assertEquals(-400f, series[monday]!!, 0.01f)
+        assertNull(series[monday.plusDays(1)])
+        assertNull(series[monday.plusDays(2)])
+    }
+
+    @Test
+    fun `the trailing average is absent once a slot is a week`() {
+        val state = stateOver(TrendsRange.YEAR, wednesday)
+
+        // Points a week apart put every window's own point alone in it, so the
+        // average would refuse them one at a time anyway -- returning nothing
+        // outright is what stops the chart keying a line it does not draw.
+        assertTrue(state.trailingAverage(state.snapshotSeries { it.steps?.toFloat() }).isEmpty())
+    }
+
+    @Test
+    fun `the trailing average keeps the raw series' slots`() {
+        val state =
+            stateOver(
+                TrendsRange.MONTH,
+                wednesday,
+                snapshots = (0L until 20L).map { steps(wednesday.minusDays(it), 9_000 + it.toInt()) },
+            )
+
+        val readings = state.snapshotSeries { it.steps?.toFloat() }
+        val averaged = state.trailingAverage(readings)
+
+        // One slot each, in step. The chart maps a point to an x by its index,
+        // so a shorter list would draw the average across the full width with
+        // every point of it over the wrong day.
+        assertEquals(readings.size, averaged.size)
+        assertEquals(readings.map { it.date }, averaged.map { it.date })
+        assertTrue(averaged.any { it.value != null })
     }
 
     @Test

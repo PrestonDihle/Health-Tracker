@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.prestondihle.healthtracker.domain.BodyComposition
+import com.prestondihle.healthtracker.domain.MovingAverage
 import com.prestondihle.healthtracker.domain.Readiness
 import com.prestondihle.healthtracker.domain.ReadinessFacts
 import com.prestondihle.healthtracker.domain.RunBreakdown
@@ -30,8 +31,12 @@ import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.BarChart
 import com.prestondihle.healthtracker.ui.components.ChartSeries
+import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.LineChart
+import com.prestondihle.healthtracker.ui.components.LineSeries
+import com.prestondihle.healthtracker.ui.components.LineStyle
+import com.prestondihle.healthtracker.ui.components.MultiLineChart
 import com.prestondihle.healthtracker.ui.components.StackedBar
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
@@ -101,17 +106,77 @@ internal fun WaistTrendCard(state: TrendsUiState) {
 
 @Composable
 internal fun WeightTrendCard(state: TrendsUiState) {
+    val readings = state.weightSeries(Units::kgToLbs)
     TrendCard(title = "Weight", subtitle = state.subtitle("pounds, Health Connect and manual")) {
-        LineChart(
-            days = state.weightSeries(Units::kgToLbs),
+        TrendWithAverage(
+            readings = readings,
+            average = state.trailingAverage(readings),
+            label = "Weight",
             goalLine = state.goals.goalWeightKg?.let { Units.kgToLbs(it) },
             // Lighter than the goal, because they are on the way to it rather than
             // the point of it. The axis stretches to hold them, so a mark you have
             // not reached is still drawn.
             subGoalLines = state.weightSubGoals.map { Units.kgToLbs(it.kg) },
-            modifier = Modifier.fillMaxWidth().height(140.dp),
         )
     }
+}
+
+/**
+ * A measured daily series with its trailing weekly mean drawn over it.
+ *
+ * The average is dashed and the readings are solid, which is the rule the whole
+ * app is drawn to: a measurement is solid, a model says so. It is a model in the
+ * ordinary sense here -- nothing was weighed at that value on that morning --
+ * and on a chart where the reader's own goal is *also* dashed, the two are told
+ * apart by colour and by the key rather than by stroke alone.
+ *
+ * Drawn second so it sits over the readings rather than under them, and given
+ * the same colour family: it is the same quantity, said more slowly.
+ *
+ * Falls back to the bare line whenever the average is empty -- at the weekly
+ * ranges, and on a window too thin to average -- because `MultiLineChart` shows
+ * a key the moment it has more than one series, and a key naming a line nobody
+ * can find is worse than no key at all.
+ */
+@Composable
+private fun TrendWithAverage(
+    readings: List<DayPoint>,
+    average: List<DayPoint>,
+    label: String,
+    goalLine: Float? = null,
+    subGoalLines: List<Float> = emptyList(),
+) {
+    val chartColors = LocalChartColors.current
+    val modifier = Modifier.fillMaxWidth().height(140.dp)
+    if (average.none { it.value != null }) {
+        LineChart(
+            days = readings,
+            goalLine = goalLine,
+            subGoalLines = subGoalLines,
+            modifier = modifier,
+        )
+        return
+    }
+    MultiLineChart(
+        series =
+            listOf(
+                LineSeries(
+                    label = label,
+                    points = readings,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = LineStyle.SOLID,
+                ),
+                LineSeries(
+                    label = "$label (${MovingAverage.WINDOW_DAYS}-day avg)",
+                    points = average,
+                    color = chartColors.movingAverage,
+                    style = LineStyle.DASHED,
+                ),
+            ),
+        goalLine = goalLine,
+        subGoalLines = subGoalLines,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -207,10 +272,12 @@ internal fun BloodPressureTrendCard(state: TrendsUiState) {
 
 @Composable
 internal fun RestingHeartRateTrendCard(state: TrendsUiState) {
+    val readings = state.snapshotSeries { it.restingHeartRateBpm?.toFloat() }
     TrendCard(title = "Resting heart rate", subtitle = state.subtitle("bpm")) {
-        LineChart(
-            days = state.snapshotSeries { it.restingHeartRateBpm?.toFloat() },
-            modifier = Modifier.fillMaxWidth().height(140.dp),
+        TrendWithAverage(
+            readings = readings,
+            average = state.trailingAverage(readings),
+            label = "Resting HR",
         )
     }
 }
@@ -275,6 +342,37 @@ internal fun RunsTrendCard(runs: List<RunBreakdown>, range: TrendsRange) {
                 }
             }
         }
+    }
+}
+
+/**
+ * What the day had left over: calories eaten minus calories burned.
+ *
+ * The other half of the macros card above it. That one is what went in, and on
+ * its own it cannot say whether it was a lot -- two thousand calories is a
+ * deficit on a day with a long ruck in it and a surplus on a day at a desk.
+ *
+ * The rule at zero is not a target and is not drawn as one. It is where eating
+ * and burning met, so the caption names the sides rather than leaving a bare
+ * line in the goal's colour to be read as "aim for nothing". It is passed as the
+ * goal purely because that is the mechanism that folds a mark into the axis --
+ * a run of deficit days scaled to themselves would put every point below a zero
+ * that had been clipped off the top, which is the failure `chartBounds` exists
+ * for and looks exactly like a chart with no reference at all.
+ */
+@Composable
+internal fun NetCaloriesTrendCard(state: TrendsUiState) {
+    val readings = state.netCalorieSeries
+    TrendCard(
+        title = "Net calories",
+        subtitle = state.subtitle("eaten minus burned; below the line is a deficit"),
+    ) {
+        TrendWithAverage(
+            readings = readings,
+            average = state.trailingAverage(readings),
+            label = "Net",
+            goalLine = 0f,
+        )
     }
 }
 

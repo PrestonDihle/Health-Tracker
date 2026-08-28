@@ -24,6 +24,7 @@ import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.MealClockTimes
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.MealResponses
+import com.prestondihle.healthtracker.domain.MovingAverage
 import com.prestondihle.healthtracker.domain.Readiness
 import com.prestondihle.healthtracker.domain.ReadinessFacts
 import com.prestondihle.healthtracker.domain.RunBreakdown
@@ -321,6 +322,30 @@ data class TrendsUiState(
     }
 
     /**
+     * The seven-day trailing mean under a daily series, on the same slots.
+     *
+     * Empty at the weekly ranges, and that is the whole of the interaction
+     * between the two: a bucket there is already a week's mean, so a weekly mean
+     * of weekly means would be a second smoothing sold as the first -- and with
+     * the points seven days apart, each window would hold exactly one of them
+     * and [MovingAverage] would rightly refuse the lot. Returning nothing is
+     * what keeps the legend from carrying a key to a line that is not drawn.
+     *
+     * Padded back onto [buckets] so the overlay shares the raw series' slots.
+     * The chart maps a point to an x by its index in the list, so a shorter list
+     * would draw the average stretched across the full width and every point of
+     * it above the wrong day -- a line that is wrong in exactly the way nobody
+     * checks, since it would still look like a plausible trend.
+     */
+    fun trailingAverage(daily: List<DayPoint>): List<DayPoint> {
+        if (range.weekly) return emptyList()
+        val averaged =
+            MovingAverage.trailing(daily.mapNotNull { point -> point.value?.let { point.date to it } })
+                .toMap()
+        return daily.map { DayPoint(it.date, averaged[it.date]) }
+    }
+
+    /**
      * One point per day, null on days the row is missing or the field unset.
      *
      * Null means "no reading", which for anything measured -- steps, sleep, heart
@@ -338,6 +363,31 @@ data class TrendsUiState(
 
     fun snapshotSeries(valueOf: (HealthDaySnapshot) -> Float?): List<DayPoint> =
         series(snapshots, { it.date }, valueOf)
+
+    /**
+     * Calories eaten minus burned, per day, negative for a deficit.
+     *
+     * Null unless **both** halves were recorded, and that is deliberately
+     * stricter than the day card on Today and Wellness, which stands a zero in
+     * for absent food. The two are asking about different days and the rule that
+     * is right for one is wrong for the other. On today so far, nothing logged
+     * genuinely is nothing eaten -- that guard exists because the differential
+     * was blank through every fasted morning, which is when it is worth reading.
+     * On a day that has finished, food with no figure against it almost always
+     * means the day was not tracked rather than not eaten, and counting it as
+     * zero would draw a deficit the size of the whole day's burn: a fast that
+     * never happened, on the chart most likely to be read as evidence one did.
+     *
+     * The burn half keeps its guard on both screens for the reason it always
+     * had -- it comes from a watch, so absent means unsynced.
+     */
+    val netCalorieSeries: List<DayPoint>
+        get() =
+            snapshotSeries { snapshot ->
+                val eaten = snapshot.dietaryCalories
+                val burned = snapshot.totalCalories
+                if (eaten == null || burned == null) null else (eaten - burned).toFloat()
+            }
 
     fun logSeries(valueOf: (DailyLog) -> Float?): List<DayPoint> =
         series(dailyLogs, { it.date }, valueOf)

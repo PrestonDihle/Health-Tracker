@@ -21,6 +21,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.prestondihle.healthtracker.data.AftAttempt
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.data.DailyLog
+import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
@@ -32,6 +33,7 @@ import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.trends.NetCaloriesTrendCard
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsScreen
 import com.prestondihle.healthtracker.ui.trends.TrendsUiState
@@ -131,9 +133,11 @@ class ScreenRenderTest {
         return repository
     }
 
-    private fun render(content: @Composable () -> Unit) {
+    private fun render(dark: Boolean = false, content: @Composable () -> Unit) {
         composeRule.setContent {
-            HealthTrackerTheme { Surface(modifier = Modifier.fillMaxSize()) { content() } }
+            HealthTrackerTheme(darkTheme = dark) {
+                Surface(modifier = Modifier.fillMaxSize()) { content() }
+            }
         }
         composeRule.waitForIdle()
     }
@@ -144,6 +148,125 @@ class ScreenRenderTest {
         val vm = TrendsViewModel(repo, zone)
         render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
         composeRule.onRoot().captureRoboImage("build/screenshots/trends.png")
+    }
+
+    /** A fortnight of daily weighing, drifting down through ordinary noise. */
+    private fun weighedFortnight(today: java.time.LocalDate) =
+        (0L until 14L).map { back ->
+            val lbs = 196f + (back / 14f) * 4f + ((back % 3) - 1) * 0.6f
+            WeightEntry(date = today.minusDays(back), weightKg = Units.lbsToKg(lbs))
+        }
+
+    private fun weightStateAt(range: TrendsRange, today: java.time.LocalDate) =
+        TrendsUiState(
+            range = range,
+            startDate = today.minusDays(range.days - 1),
+            endDate = today,
+            weights = weighedFortnight(today),
+            goals = UserGoals(goalWeightKg = Units.lbsToKg(185f)),
+            settings = UserSettings(),
+            zoneId = zone,
+        )
+
+    /**
+     * The trailing average over the weight, in both schemes.
+     *
+     * Captured twice because a series colour depends on what it is drawn on, and
+     * this one is drawn *over* another line in the same hue -- the case where
+     * getting it wrong produces two lines in nearly one colour with a key
+     * claiming they are different things. That has happened here once already,
+     * to sodium against diastolic, and it was caught on the phone rather than by
+     * any test. The dark set collapses hues the light set keeps apart, so a
+     * value that separates in one is no evidence at all about the other.
+     */
+    @Test
+    fun `the weight average draws over the readings in both schemes`() {
+        val today = java.time.LocalDate.now(zone)
+        val state = weightStateAt(TrendsRange.TWO_WEEKS, today)
+
+        // The overlay has something to draw, or the capture below proves nothing.
+        val averaged = state.trailingAverage(state.weightSeries(Units::kgToLbs))
+        assertTrue(averaged.count { it.value != null } >= 10)
+
+        render { WeightTrendCard(state) }
+        composeRule.onNodeWithText("Weight (7-day avg)").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/weight-average-light.png")
+    }
+
+    @Test
+    fun `the weight average draws over the readings in the dark scheme`() {
+        val today = java.time.LocalDate.now(zone)
+
+        render(dark = true) { WeightTrendCard(weightStateAt(TrendsRange.TWO_WEEKS, today)) }
+
+        composeRule.onNodeWithText("Weight (7-day avg)").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/weight-average-dark.png")
+    }
+
+    /**
+     * The overlay is absent once a slot is a week, and takes its key with it.
+     *
+     * A weekly bucket is already a mean of seven days, so a seven-day mean of
+     * those would be a second smoothing sold as the first. With the points a
+     * week apart every window holds exactly one of them, so the average would
+     * come back empty either way -- what this pins is that the chart then falls
+     * back to a single unkeyed line rather than showing a legend row for a line
+     * that is not on the plot.
+     */
+    @Test
+    fun `the weekly ranges carry no moving average and no key for one`() {
+        val today = java.time.LocalDate.now(zone)
+        val state = weightStateAt(TrendsRange.YEAR, today)
+
+        assertTrue(state.trailingAverage(state.weightSeries(Units::kgToLbs)).isEmpty())
+
+        render { WeightTrendCard(state) }
+
+        composeRule.onNodeWithText("Weight (7-day avg)").assertDoesNotExist()
+        composeRule.onRoot().captureRoboImage("build/screenshots/weight-year-no-average.png")
+    }
+
+    /**
+     * Net calories, on a run of days that are all deficits.
+     *
+     * The seeding is the case worth capturing rather than an arbitrary one:
+     * every point is below zero, so an axis scaled to the readings alone would
+     * put the whole trace under a zero line that had been clipped off the top of
+     * the plot -- the goal-outside-the-readings failure, on the one chart where
+     * the reference is the difference between losing weight and gaining it.
+     */
+    @Test
+    fun `net calories keeps the zero line on the plot when every day is a deficit`() {
+        val today = java.time.LocalDate.now(zone)
+        val snapshots =
+            (0L until 14L).map { back ->
+                HealthDaySnapshot(
+                    date = today.minusDays(back),
+                    dietaryCalories = 1_900 + ((back % 4) * 90).toInt(),
+                    totalCalories = 2_600,
+                    syncedAt = today.atStartOfDay(zone).toInstant(),
+                )
+            }
+        val state =
+            TrendsUiState(
+                range = TrendsRange.TWO_WEEKS,
+                startDate = today.minusDays(13),
+                endDate = today,
+                snapshots = snapshots,
+                settings = UserSettings(),
+                zoneId = zone,
+            )
+
+        val drawn = state.netCalorieSeries.mapNotNull { it.value }
+        assertTrue(drawn.isNotEmpty())
+        assertTrue(drawn.all { it < 0f })
+        // Zero is above every reading, so it has to stretch the axis or vanish.
+        assertTrue(chartBounds(drawn, marks = listOf(0f)).endInclusive >= 0f)
+
+        render { NetCaloriesTrendCard(state) }
+
+        composeRule.onNodeWithText("Net calories").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/net-calories.png")
     }
 
     /**

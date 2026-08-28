@@ -91,6 +91,7 @@ import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.trends.MacrosTrendCard
+import com.prestondihle.healthtracker.ui.trends.NetCaloriesTrendCard
 import com.prestondihle.healthtracker.ui.trends.MealResponseState
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import java.time.DayOfWeek
@@ -295,6 +296,10 @@ fun FuelScreen(
                     ReorderableCard("glucoseReport") { GlucoseReportCard(report = glucoseReport) },
                     ReorderableCard("mealResponses") { MealResponseCard(state = mealResponses) },
                     ReorderableCard("macros") { MacrosTrendCard(trends) },
+                    // Directly under the macros, because it is the other half of
+                    // the same question: that card is what went in, this one is
+                    // what was left over once the day's burn came off it.
+                    ReorderableCard("netCalories") { NetCaloriesTrendCard(trends) },
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,

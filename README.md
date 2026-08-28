@@ -11,7 +11,7 @@ reps and reading.
 | --- | --- |
 | **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
-| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, and the macro trend |
+| **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, the macro trend and net calories |
 | **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
 | **Wellness** | This morning against your own baseline, the day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, blood oxygen, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
@@ -109,6 +109,42 @@ Days you did not record are left out of the average rather than counted as zero.
 A week the watch synced on three days is the average of those three — dividing it
 by seven would draw four days of illness that never happened. A week with nothing
 in it at all breaks the line instead of touching the floor.
+
+### The trend under the noise
+
+Weight, resting heart rate and net calories each carry a **dashed 7-day
+average** over the readings. A weight read every morning moves a pound and a
+half on water and what time you last ate, which is several times what a week of
+real effort shows — so the raw line asks to be read at its last point, and that
+point is mostly noise.
+
+It is a **trailing** average: each point uses that day and the six before it, and
+nothing after. So it lags a few days behind a real change, and in exchange the
+past never moves. A centred average would redraw last Tuesday every time you
+weighed in, and a turn you noticed one week could be gone the next with nothing
+saying it had changed.
+
+It starts a couple of days into the chart rather than at the left edge, because
+until there are three readings behind it there is no average to draw — one
+morning under a label saying "7-day avg" is just the morning again.
+
+The weekly ranges carry no average, and neither does the key. A point there is
+already a week, and averaging weeks into weeks would be a second smoothing
+wearing the first one's name.
+
+### Net calories
+
+On Fuel under the macros: what you ate minus what you burned, one point a day,
+below the line for a deficit. The macros card is what went in, and on its own it
+cannot say whether it was a lot — two thousand calories is a deficit on a day
+with a long ruck in it and a surplus on a day at a desk.
+
+A day only appears when **both** halves were recorded. The day's own card on
+Today counts absent food as zero, which is right while the day is still running:
+a fasted morning really has eaten nothing. On a day that has finished it usually
+means you did not track it, and counting it as zero would draw a deficit the size
+of the whole day's burn — a fast that never happened, on the one chart most
+likely to be taken as proof one did.
 
 **Two cards stop at 90 days whatever chip you pick**, and say so in their own
 subtitle. The runs chart reads the heart-rate trace of every session separately,

@@ -51,6 +51,18 @@ data class ChartColors(
     val steps: Color,
     val gripDominant: Color,
     val gripNonDominant: Color,
+    /**
+     * The seven-day trailing mean drawn over a daily measurement.
+     *
+     * The primary's own hue, because it is the same quantity said more slowly
+     * and a second hue would claim it was a second thing. What separates it from
+     * the readings is lightness and the dash, and which way the lightness goes
+     * *inverts* between the schemes -- the light primary is mid-toned so the
+     * average goes darker, the dark primary is already pale so it goes deeper.
+     * Taking either value across would put a dashed line on top of a solid one
+     * in nearly its own colour.
+     */
+    val movingAverage: Color,
     /** The hypnogram trace, and the ground the master graph shades asleep hours in. */
     val sleep: Color,
     // The four run-intensity zones, low to high, as a green-through-red ramp so a
@@ -86,6 +98,9 @@ val LightChartColors =
         steps = StepsSeries,
         gripDominant = GripDominantSeries,
         gripNonDominant = GripNonDominantSeries,
+        // Yale Blue: the brand's own darker blue, which exists to be read on
+        // alabaster, and a clear step down from the Baltic the readings use.
+        movingAverage = YaleBlue,
         sleep = SleepSeries,
         runEasy = Color(0xFF5B9A6B),
         runModerate = Color(0xFF4E86AB),
@@ -133,6 +148,19 @@ val DarkChartColors =
         steps = Color(0xFF8FB3A0),
         gripDominant = Color(0xFF6FA8D0),
         gripNonDominant = Color(0xFFB9A96A),
+        // Deeper than the pale Baltic the readings take here, which is the
+        // opposite direction to the light set and the whole reason this is not
+        // one value. Yale Blue itself is one of the two tones that vanish
+        // outright on near-black, so it cannot simply be carried across.
+        //
+        // The first attempt at this was #5B8FB5 and it was wrong: against a
+        // primary already up at #9FC6DF the two swatches in the key read as one
+        // colour, which is the sodium-against-diastolic collision exactly. Dark
+        // needs a *bigger* step than light does, because the gap it has to
+        // survive is between two lifted tones rather than between a mid tone and
+        // a dark one. This sits at about the lightness of `fatStack`, which is
+        // as deep as anything here goes and still reads on near-black.
+        movingAverage = Color(0xFF3F7FAD),
         // Yale Blue is one of the two tones that vanish outright on a near-black
         // ground, and this one has to work twice over: as a 2dp trace and as a
         // wash at a sixth of its opacity. Lifted far enough that the wash still

@@ -251,6 +251,65 @@ these ranges. The subtitle already carried the unit and the unit has genuinely c
 longer Tuesday's weight but the mean of the week Tuesday was in, and a reader comparing it against
 the goal line beside it has nothing else to notice the difference by.
 
+### The trend under a measurement
+
+`domain/MovingAverage.kt` is the seven-day trailing mean drawn over weight, resting heart rate and
+net calories. A weight read every morning moves a pound and a half on water and glycogen, several
+times what a week of real effort produces, so the raw line asks to be read at its last point and
+that point is mostly noise.
+
+**Trailing, not centred, and that is where it parts company with `GlucoseSmoothing`.** A centred
+kernel revises last Tuesday every time a new morning is logged — a reader who saw the line turn
+upward can come back to find it never did, with nothing on the chart to say it moved. Trailing costs
+a few days of lag and buys a past that stays put and a newest point that means what it appears to:
+the figure you would have had that morning.
+
+**Time-weighted for `GlucoseSmoothing`'s reason, which survives the change of kernel.** These are
+daily series with holes in them, so "the last seven readings" is not "the last seven days" and on a
+sparse stretch would silently reach back a fortnight. Gaussian rather than flat for that file's other
+reason: a boxcar drops a reading from full weight to nothing the day it ages out, and the kink shows.
+
+Its guarantees are the ones that let it be drawn *over* the readings rather than beside them. It
+cannot overshoot — every output is a renormalised weighted mean of real readings. It does not
+resample: one output per input reading, at that reading's own date, so a day nobody weighed in on
+gets no averaged point either. And below `MIN_READINGS` (3, `GlucoseSmoothing`'s own floor) it emits
+nothing rather than returning the reading itself — a window holding one morning would trace the raw
+line exactly under a key saying *7-day avg*, which is the `Readiness` baseline refusal in a different
+shape.
+
+**`TrendsUiState.trailingAverage` returns empty at the weekly ranges**, and pads what it does return
+back onto `buckets`. Empty because a weekly bucket is already a mean of seven days and a seven-day
+mean of those would be a second smoothing sold as the first; padded because `MultiLineChart` maps a
+point to an x by its *index*, so a shorter list draws the average stretched across the full width
+with every point of it above the wrong day — wrong in the way nobody checks, since it still looks
+like a plausible trend. `TrendWithAverage` falls back to a plain `LineChart` when the average is
+empty, because a legend appears the moment there is more than one series and a key naming a line
+nobody can find is worse than no key.
+
+**`ChartColors.movingAverage` is the case for checking both schemes, and it failed the first check.**
+The average takes the primary's own hue — it is the same quantity said more slowly, and a second hue
+would claim it was a second thing — so lightness and the dash are all that separate it from the
+readings. Which way the lightness goes **inverts** between the schemes: light's primary is mid-toned
+so the average goes darker (Yale Blue), dark's is already pale at `#9FC6DF` so it goes deeper. The
+first dark value tried was `#5B8FB5` and the two swatches in the key read as one colour — the
+sodium-against-diastolic collision exactly, caught here by capturing both. Dark needs the bigger
+step, because the gap is between two lifted tones rather than between a mid tone and a dark one.
+
+**Net calories on Fuel is `dietaryCalories − totalCalories`, null unless both halves were recorded**,
+and that is deliberately stricter than the day card on Today and Wellness. That card stands a zero in
+for absent food, correctly: on today so far, nothing logged is nothing eaten, and the guard exists
+because the differential was blank through every fasted morning. On a day that has *finished*, food
+with no figure against it almost always means the day was not tracked — and counting it zero would
+draw a deficit the size of the whole day's burn, a fast that never happened, on the chart most likely
+to be read as evidence one did. The burn half keeps its guard on both: it comes from a watch, so
+absent means unsynced.
+
+Its rule at zero is passed as `goalLine` but is not a target, and the caption says so — *below the
+line is a deficit*. The mechanism is borrowed purely because it is what folds a mark into the axis: a
+run of deficit days scaled to themselves puts every point below a zero clipped off the top, which is
+`ChartBoundsTest`'s failure on the one chart whose reference is the difference between losing weight
+and gaining it.
+
 **The master graph's window is no longer anchored to now.** `TodayUiState.panOffset` is how
 far back a horizontal drag has pulled the right edge, and `windowEnd` is `now - panOffset`.
 Everything that draws must measure from `windowEnd`, never from `now`: the absorption and caffeine
@@ -1460,7 +1519,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
 `GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
-`TrendsBucketsTest` and
+`TrendsBucketsTest`, `MovingAverageTest` and
 `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
@@ -1515,6 +1574,15 @@ right-hand edge every day but one. `ScreenRenderTest` carries the drawing half: 
 composed on its own, with the goal eighteen pounds below anything weighed and four waypoints between
 them, so `chartBounds` has to hold all five rules inside an axis scaled to weekly means or the
 picture loses them silently.
+`MovingAverageTest` pins the ways a trend line can be wrong while still looking like a trend: it may
+not overshoot the readings it averaged, it may not *lead* them — a step is followed and never
+anticipated, which is what separates trailing from centred — and a window holding one reading after a
+gap is dropped rather than returned raw. The gap case is the one that catches index weighting: three
+mornings, a fortnight off the scale, three more at a lower weight, and a filter weighting by position
+would still hold the old level up across a stretch nobody weighed anything at all.
+`ScreenRenderTest` renders the overlay in **both schemes** and the year view without it, which is the
+only way the colour collision above was found; `render` takes a `dark` flag for that, since
+`HealthTrackerTheme` accepts the choice directly and the qualifier would otherwise have to change.
 `SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
 card: counting waking time as sleep, which flatters every night by however long was spent staring at
 the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement
@@ -1607,11 +1675,11 @@ asserted on a screen that does not tick, which is why the glucose smoothing and 
 covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it once covers both.
 
 **That ticker now belongs to `FuelViewModel`**, which followed the fast card off Wellness, and
-Fuel is the longest *ticking* tab in the app at thirteen cards — so it has the problem worse
+Fuel is the longest *ticking* tab in the app at fourteen cards — so it has the problem worse
 than Wellness ever did. (The count keeps moving: thirteen before the extended-fast entries moved
 inside their own card, eleven after, twelve with the blood sugar summary, thirteen again with the
-biggest-responses ranking. Settings ties it at thirteen and does not tick. The problem does
-not move, so do not read the figure as the point.) Wellness still ticks too, which is what the mood card's direct
+biggest-responses ranking, fourteen with net calories. Settings is second at thirteen and does not
+tick. The problem does not move, so do not read the figure as the point.) Wellness still ticks too, which is what the mood card's direct
 composition is for. Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master
 graph's suite can scroll and wait on idle at all.
