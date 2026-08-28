@@ -872,6 +872,67 @@ would have claimed credit for merges the reader cannot see.
 two copies would eventually disagree — and the disagreement would look like a scoring bug rather than
 a definition drifting.
 
+### Morning readiness, and blood oxygen
+
+`domain/Readiness.kt` is **two facts, never a score**, and the refusal is the design. Every wearable
+ships a composite readiness number that blends things measured in different units, on different
+confidences, with weights nobody publishes — and the result cannot be argued with. Told "readiness
+61" there is nothing to check and nothing to do; told "resting heart rate 6 bpm over baseline, 5h 40m
+asleep" the reader knows which half moved and whether they believe it.
+
+**The two facts are independently absent**, which a single score could not manage: a night with no
+sleep still reports the heart rate, and a phone with sleep but no resting heart rate still reports the
+sleep. `hasAnything` keys on the raw readings rather than on the deltas, and that distinction is a
+bug this caught: keyed on `restingDeltaBpm` the card claims nothing was recorded on exactly the
+mornings where something was, for the first ten days of use, because the baseline is not there yet.
+
+**The baseline excludes today.** Comparing a morning against a median it is itself inside pulls the
+baseline toward it, so a genuinely high morning reads as less high than it is — and on a short window
+the effect is big enough to hide the thing the line exists to show. It is a **median** rather than a
+mean, because resting heart rate has outliers with nothing to do with fitness (an illness, a late
+meal, a night the watch sat badly) and a mean carries one into the baseline for a month afterwards.
+Below `MIN_BASELINE_DAYS` (10) there is **no baseline at all** rather than a confident-looking one —
+a median of two mornings is two mornings, and the comparison would read exactly like a comparison
+against a month.
+
+The reading is still printed when the baseline is missing: it is a measurement, and what is absent is
+the thing to compare it with. Only the wrong direction is coloured, because a green line every
+ordinary morning turns the colour into decoration and then the one morning it means something reads
+as decoration too.
+
+It costs **no sync**. Everything comes off snapshots the daily read has been writing all along plus
+one settings row, which is what lets the line be there the moment the screen opens. Its window is a
+fixed thirty days and deliberately outside `TrendsRange`: at the 7-day chip there would not be enough
+history to have a baseline, and a line that vanished when the reader moved a chart's range chip would
+look broken rather than principled.
+
+**Sleep is attributed to the wake day**, which is what the rest of the app already assumes and is
+confirmed by the real data: a session running 00:45 to 06:41 lands wholly on that date's snapshot, so
+`sleepByDay[today]` is last night. Only the post-midnight portion of a night that starts before
+midnight counts toward the earlier day, and it never dominates.
+
+**SpO2 is the one Garmin metric worth adding and the last one.** HRV status, Body Battery, stress and
+VO2 max do not reach Health Connect at all — there is nothing to add for them and no workaround worth
+attempting. `readMeanSpo2` reads raw records and averages them because Health Connect defines **no
+aggregate metric** for `OxygenSaturationRecord`, unlike heart rate or steps; that is cheap in practice
+since a watch writes a handful of spot readings a night rather than a sample every few seconds.
+
+`MIGRATION_18_19` adds `HealthDaySnapshot.spo2Percent` with **no SQLite default** — the
+`MIGRATION_11_12` shape, not the `MIGRATION_5_6` one. A default would write a health measurement
+nobody took onto every day already on disk, which is worse than a blank chart: a chart of identical
+values looks like a working sensor reporting a very stable night. It is REAL rather than INTEGER
+because it is a mean, and rounding 95.4 to 95 at the storage boundary throws away the only resolution
+a slow drift would show up in. The chart is bounded 90-100 for the reason the glucose plot stops at
+180: below ninety is a medical event rather than a trend, and nine tenths of a full-range axis is
+space no point occupies.
+
+**A metric added in a later version needs its permission asked for again**, and this is the case
+`missingPermissions` exists for. On the author's phone the new read landed as *"Not yet allowed to
+read: oxygen saturation. Those metrics stay blank until granted"* with a Grant button on Wellness —
+which is the whole point of tracking missing permissions separately from `GRANTED`, since the app was
+already connected and would otherwise have reported itself healthy while the column stayed empty for
+ever.
+
 ### Body composition
 
 `domain/BodyComposition.kt` is the military body composition screen, and it is **waist over height,
@@ -915,7 +976,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 18, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 19, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -997,6 +1058,13 @@ means interrupting an upgrading user with something never asked for. These drive
 screen that ships pre-filled, so a NULL would render three chips with no times on them — a feature
 that looks broken on exactly the phones with data worth migrating. **Ask what a NULL would do on
 screen, not whether the column is new.**
+
+`MIGRATION_18_19` adds `HealthDaySnapshot.spo2Percent` and is the same question answered the other
+way — see *Morning readiness, and blood oxygen* for why it carries no default. It is the **first
+alteration to `HealthDaySnapshot` since `MIGRATION_2_3`**, whose statements are inline rather than in
+a `val`, so its schema test builds a hand-written v18 version of that table and replays 18-to-19
+against it rather than replaying from v2. What that pins is the column *type*: declared INTEGER
+against Room's REAL, it passes every other test in the suite and throws on the next launch.
 
 `MIGRATION_10_11` adds the two supplement tables. Both are new, so their DDL is diffed directly --
 there is no `ALTER TABLE`-added column carrying a SQLite default that Room's `CREATE TABLE` omits.
@@ -1277,8 +1345,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
-`GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest` and `CaffeineLastCallTest` are the
-pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
+`GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest` and
+`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same

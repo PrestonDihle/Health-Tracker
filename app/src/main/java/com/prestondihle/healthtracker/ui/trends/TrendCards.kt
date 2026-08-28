@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.prestondihle.healthtracker.domain.BodyComposition
+import com.prestondihle.healthtracker.domain.Readiness
+import com.prestondihle.healthtracker.domain.ReadinessFacts
 import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
@@ -336,3 +338,107 @@ internal fun TrainingVolumeCard(state: TrainingWeekState) {
 
 /** `Mon 24 Aug`, naming the week's first day without spending a line on it. */
 private val WEEK_START_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
+
+/**
+ * Blood oxygen saturation, night by night.
+ *
+ * Bounded 90-100 rather than 0-100 for the reason the glucose plot stops at 180:
+ * a reading below ninety is a medical event and not a trend, so nine tenths of a
+ * full-range axis is space no point ever occupies, and spending it flattens the
+ * two or three points that actually move. The chart still widens to fit an
+ * outlier, so a genuine 88 plots -- it is simply not budgeted for.
+ */
+@Composable
+internal fun Spo2TrendCard(state: TrendsUiState) {
+    TrendCard(title = "Blood oxygen", subtitle = "% saturation, overnight average") {
+        LineChart(
+            days = state.snapshotSeries { it.spo2Percent },
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            minY = 90f,
+            maxY = 100f,
+        )
+    }
+}
+
+/**
+ * The morning's two facts, side by side and never combined.
+ *
+ * Deliberately not a readiness *score*. A composite number blends things measured
+ * in different units on different confidences with weights nobody publishes, and
+ * cannot be argued with -- told "readiness 61" there is nothing to check. Told
+ * the heart rate is six over its own baseline and the night was five-forty, the
+ * reader knows which half moved and whether they believe it.
+ *
+ * Model-labelled, because a trailing median is a model: it is a claim about what
+ * ordinary looks like for this reader, assembled from their own past mornings
+ * rather than measured this morning.
+ */
+@Composable
+internal fun ReadinessCard(readiness: Readiness) {
+    TrendCard(title = "This morning", subtitle = "against your own last 30 days") {
+        if (!readiness.hasAnything) {
+            Text(
+                "Nothing recorded for this morning yet. A resting heart rate needs a night's " +
+                    "wear, and the baseline needs ${ReadinessFacts.MIN_BASELINE_DAYS} " +
+                    "mornings before it means anything.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@TrendCard
+        }
+
+        val delta = readiness.restingDeltaBpm
+        when {
+            delta != null ->
+                Text(
+                    when {
+                        delta > 0 -> "Resting heart rate ${delta} bpm over baseline."
+                        delta < 0 -> "Resting heart rate ${-delta} bpm under baseline."
+                        else -> "Resting heart rate on baseline."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    // Only the wrong direction is coloured. A green line every
+                    // ordinary morning turns the colour into decoration, and then
+                    // the one morning it means something reads as decoration too.
+                    color =
+                        if (delta > 0) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface,
+                )
+            // A reading with nothing to compare it against is still worth printing:
+            // it is a measurement, and the baseline is what is missing.
+            readiness.restingBpm != null ->
+                Text(
+                    "Resting heart rate ${readiness.restingBpm} bpm. " +
+                        "Not enough mornings yet for a baseline.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+        }
+
+        readiness.sleepMinutes?.let { slept ->
+            val short = readiness.sleepDeficitMinutes
+            Text(
+                buildString {
+                    append(Units.formatMinutes(slept))
+                    append(" asleep")
+                    when {
+                        short == null -> append(".")
+                        short > 0 -> append(", ${Units.formatMinutes(short)} under goal.")
+                        else -> append(", goal met.")
+                    }
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color =
+                    if (short != null && short > 0) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        Text(
+            "Two facts rather than a readiness score: a single blended number cannot say which " +
+                "half of it moved. The baseline is the median of your own last " +
+                "${ReadinessFacts.BASELINE_DAYS} days, excluding today.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}

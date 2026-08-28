@@ -77,8 +77,10 @@ import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
 import com.prestondihle.healthtracker.ui.trends.BloodPressureTrendCard
+import com.prestondihle.healthtracker.ui.trends.ReadinessCard
 import com.prestondihle.healthtracker.ui.trends.RestingHeartRateTrendCard
 import com.prestondihle.healthtracker.ui.trends.SleepTrendCard
+import com.prestondihle.healthtracker.ui.trends.Spo2TrendCard
 import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import com.prestondihle.healthtracker.ui.trends.WaistTrendCard
 import com.prestondihle.healthtracker.ui.trends.WeightTrendCard
@@ -100,6 +102,9 @@ fun WellnessScreen(
     // heart rate, sleep) from the same trends source Activity uses, so they read
     // the same wherever they appear.
     val trends by trendsViewModel.uiState.collectAsStateWithLifecycle()
+    // Its own flow because its window is a fixed thirty days: the baseline must
+    // not change when the reader moves a chart's range chip.
+    val readiness by trendsViewModel.readiness.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
@@ -167,6 +172,10 @@ fun WellnessScreen(
                     ReorderableCard("weightTrend") { WeightTrendCard(trends) },
                     ReorderableCard("bloodPressureTrend") { BloodPressureTrendCard(trends) },
                     ReorderableCard("restingHeartRateTrend") { RestingHeartRateTrendCard(trends) },
+                    // Next to the two trends it is drawn from, so the line and the
+                    // charts that justify it are read together.
+                    ReorderableCard("readiness") { ReadinessCard(readiness) },
+                    ReorderableCard("spo2Trend") { Spo2TrendCard(trends) },
                     ReorderableCard("sleepTrend") { SleepTrendCard(trends) },
                     ReorderableCard("moodTrend") { MoodTrendCard(state = state) },
                     ReorderableCard("readingTrend") { ReadingTrendCard(state = state) },

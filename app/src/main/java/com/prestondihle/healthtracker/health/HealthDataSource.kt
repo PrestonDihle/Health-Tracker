@@ -116,6 +116,8 @@ data class HealthDay(
      */
     val bestMileSeconds: Int? = null,
     val glucoseSamples: List<GlucoseSample> = emptyList(),
+    /** Mean blood oxygen saturation across the day, where the watch reported any. */
+    val spo2Percent: Float? = null,
 )
 
 interface HealthDataSource {

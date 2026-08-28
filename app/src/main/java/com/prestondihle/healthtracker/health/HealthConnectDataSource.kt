@@ -13,6 +13,7 @@ import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.NutritionRecord
+import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
@@ -162,6 +163,7 @@ class HealthConnectDataSource(
             weightKg = active.readLatestWeightKg(range),
             bestMileSeconds = active.readBestMileSeconds(start, end),
             glucoseSamples = active.readGlucose(range),
+            spo2Percent = active.readMeanSpo2(range),
         )
     }
 
@@ -514,6 +516,29 @@ class HealthConnectDataSource(
             .getOrDefault(emptyList())
 
     /**
+     * Mean blood oxygen saturation across a day, or null when nothing wrote any.
+     *
+     * Read raw and averaged here rather than aggregated, because Health Connect
+     * defines **no aggregate metric** for `OxygenSaturationRecord` — unlike heart
+     * rate or steps, there is nothing to ask for and the samples have to be
+     * fetched. That is also why this is cheap in practice: a watch writes a
+     * handful of spot readings a night, not a sample every few seconds.
+     *
+     * Failures swallowed to null like every other metric here, so a reader who
+     * grants steps and denies this gets a blank chart rather than a blank screen.
+     */
+    private suspend fun HealthConnectClient.readMeanSpo2(range: TimeRangeFilter): Float? =
+        runCatching {
+                readAllRecords(OxygenSaturationRecord::class, range)
+                    .map { it.percentage.value }
+                    .takeIf { it.isNotEmpty() }
+                    ?.average()
+                    ?.toFloat()
+            }
+            .onFailure { Log.d(TAG, "spo2 read failed", it) }
+            .getOrNull()
+
+    /**
      * Best average mile pace among runs of at least a mile.
      *
      * Health Connect has no mile-split concept, so this divides each qualifying
@@ -600,6 +625,10 @@ class HealthConnectDataSource(
                 HealthPermission.getReadPermission(StepsRecord::class),
                 HealthPermission.getReadPermission(HeartRateRecord::class),
                 HealthPermission.getReadPermission(RestingHeartRateRecord::class),
+                // Garmin syncs this one. HRV status, Body Battery, stress and
+                // VO2 max do not reach Health Connect at all, so there is nothing
+                // here to add for them and no workaround worth attempting.
+                HealthPermission.getReadPermission(OxygenSaturationRecord::class),
                 HealthPermission.getReadPermission(SleepSessionRecord::class),
                 HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
                 HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),

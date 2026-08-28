@@ -13,7 +13,7 @@ reps and reading.
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, and the macro trend |
 | **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
-| **Wellness** | The day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, sleep, vibe/energy/focus and pages read |
+| **Wellness** | This morning against your own baseline, the day's totals, last night's sleep stages, glucose and ketones, and the trends for waist, weight, blood pressure, resting heart rate, blood oxygen, sleep, vibe/energy/focus and pages read |
 | **Settings** | Your profile and fitness-test standard, units, step source, daily goals, blood sugar target, reference line and chart bounds, blood pressure reference, body targets, weight waypoints, meal times, backup export |
 
 **Cards are grouped by subject, and Log is the exception that proves it.**
@@ -198,6 +198,38 @@ trace each time the chart is drawn. Cached figures would be wrong the moment the
 maximum heart rate is edited, and there would be a table to re-key every time it
 was. A run the watch recorded without a heart-rate trace draws nothing rather
 than drawing a guess.
+
+### This morning: two facts, not a score
+
+Wellness opens the day with two statements and deliberately no readiness number:
+how today's resting heart rate compares with **your own** trailing 30-day median,
+and how last night's sleep compares with your goal.
+
+A single blended score cannot say which half of it moved. Told "readiness 61"
+there is nothing to check; told "resting heart rate 6 bpm over baseline, 5h 40m
+asleep" you know what happened and whether you agree. The two are independently
+reported, so a night the watch missed still leaves the other one standing.
+
+The baseline is a **median of your own past mornings, excluding today** — a mean
+would carry one illness into the baseline for a month, and including today would
+pull the comparison toward the very morning being judged. Under ten mornings
+there is no baseline at all: the reading is shown on its own rather than measured
+against something too thin to mean anything.
+
+None of it costs a sync. It is read from days already stored, so the line is
+there the moment the tab opens.
+
+### Blood oxygen
+
+Where the watch records overnight SpO2, Wellness charts the nightly average.
+Garmin syncs this one; HRV status, Body Battery, stress and training load do not
+reach Health Connect at all, so the app does not pretend to show them.
+
+It needs its own Health Connect permission, and because it arrived in a later
+version the app asks for it again rather than assuming — Wellness shows
+"Not yet allowed to read: oxygen saturation" with a Grant button until you do.
+Days recorded before it was granted stay blank rather than being backfilled with
+a plausible number.
 
 ### Training this week
 
@@ -757,6 +789,7 @@ The pure-JVM suites cover the maths: fasting adherence and stats, caffeine decay
 macro absorption, glucose smoothing, meal de-duplication, stamped-time detection,
 per-meal glucose response and the four ways it refuses to score one,
 weekly training volume and the exercise-type mapping behind it,
+the readiness baseline and the several ways it declines to be one,
 series gap-splitting, axis selection, gap backfill, gridline spacing, axis range,
 heart-rate zone boundaries, where the waypoint stepper opens, and the panned
 window's own arithmetic -- whether the curves stop at the right edge, and whether

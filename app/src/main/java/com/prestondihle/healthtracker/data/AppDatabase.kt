@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -536,6 +536,31 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Blood oxygen saturation on the daily snapshot.
+         *
+         * One nullable column and **no SQLite default**, which is the
+         * `MIGRATION_11_12` shape rather than the `MIGRATION_5_6` one. A default
+         * here would be a health measurement nobody took, written onto every day
+         * already on disk — far worse than a blank chart, because a chart of
+         * identical values looks like a working sensor reporting a very stable
+         * night. NULL means "not measured", which for every historical day is
+         * exactly true: the app was not reading SpO2 when they were synced.
+         *
+         * REAL rather than INTEGER: it is a mean of the day's samples, and
+         * rounding 95.4 to 95 at the storage boundary throws away the only
+         * resolution a slow drift would show up in.
+         */
+        internal val migration18To19Statements =
+            listOf("ALTER TABLE `HealthDaySnapshot` ADD COLUMN `spo2Percent` REAL")
+
+        private val MIGRATION_18_19 =
+            object : Migration(18, 19) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration18To19Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -567,6 +592,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_15_16,
                                 MIGRATION_16_17,
                                 MIGRATION_17_18,
+                                MIGRATION_18_19,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

@@ -789,6 +789,7 @@ class TrackerRepository(
                 fatGrams = day.fatGrams,
                 bestMileSeconds = day.bestMileSeconds,
                 weightKg = day.weightKg,
+                spo2Percent = day.spo2Percent,
                 syncedAt = Instant.now(),
             )
         )

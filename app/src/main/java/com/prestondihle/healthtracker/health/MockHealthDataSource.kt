@@ -77,6 +77,9 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
             carbGrams = random.nextInt(20, 120).toFloat(),
             fatGrams = random.nextInt(90, 170).toFloat(),
             weightKg = 82f + random.nextInt(-15, 16) / 10f,
+            // A tight band, because a real overnight SpO2 sits in one: seeding it
+            // across 80-100 would make the trend chart look like a sensor fault.
+            spo2Percent = 94f + random.nextInt(0, 41) / 10f,
             bestMileSeconds = random.nextInt(7 * 60, 11 * 60),
             glucoseSamples = samples,
         )

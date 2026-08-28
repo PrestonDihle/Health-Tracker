@@ -96,6 +96,19 @@ data class HealthDaySnapshot(
      * Readers merge the two, preferring the manual entry.
      */
     val weightKg: Float? = null,
+    /**
+     * Mean blood oxygen saturation across the day, as a percentage.
+     *
+     * A daily average of what is really an overnight measurement: the watch
+     * samples it while asleep and rarely otherwise, so this is "last night's
+     * SpO2" wearing a date. Averaged rather than stored per sample because
+     * nothing here asks *when* — the question is whether the nights are
+     * drifting, which one figure a day answers.
+     *
+     * Nullable and expected to stay null for anyone whose watch does not report
+     * it, which is most of them.
+     */
+    val spo2Percent: Float? = null,
     val syncedAt: Instant,
 )
 

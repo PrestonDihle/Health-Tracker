@@ -321,6 +321,86 @@ class MigrationSchemaTest {
     }
 
     /**
+     * The SpO2 column lands on the shape Room builds.
+     *
+     * Built from a hand-written v18 snapshot table rather than replayed from v2,
+     * because this column's own migration is the thing under test and the older
+     * alterations to this table are inline in `MIGRATION_2_3` rather than in a
+     * `val` a test can reach. What would break on an upgrading phone is the type:
+     * declared INTEGER here against Room's REAL, this passes every other test in
+     * the suite and throws on the next launch.
+     */
+    @Test
+    fun `the SpO2 column lands on the shape Room expects`() {
+        val expected = roomColumns("HealthDaySnapshot")
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `HealthDaySnapshot`")
+            raw.execSQL(snapshotV18)
+            AppDatabase.migration18To19Statements.forEach { raw.execSQL(it) }
+
+            assertEquals(expected, columnsOf(raw, "HealthDaySnapshot"))
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `SpO2 arrives null on days already synced rather than as a made-up reading`() {
+        // The MIGRATION_11_12 shape rather than the MIGRATION_5_6 one, and the
+        // reason is worth pinning: a seeded default would write a health
+        // measurement nobody took onto every day already on disk, and a chart of
+        // identical values looks like a working sensor reporting a very stable
+        // night rather than like no sensor at all.
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `HealthDaySnapshot`")
+            raw.execSQL(snapshotV18)
+            raw.execSQL(
+                "INSERT INTO `HealthDaySnapshot` (`date`, `steps`, `syncedAt`) VALUES (20000, 8500, 1)"
+            )
+
+            AppDatabase.migration18To19Statements.forEach { raw.execSQL(it) }
+
+            raw.query("SELECT `steps`, `spo2Percent` FROM `HealthDaySnapshot`").use {
+                it.moveToNext()
+                assertEquals(8_500, it.getInt(0))
+                assertTrue("spo2 should be null on an already-synced day", it.isNull(1))
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    /** The daily snapshot as it stood at v18, before blood oxygen was read. */
+    private val snapshotV18 =
+        "CREATE TABLE IF NOT EXISTS `HealthDaySnapshot` (" +
+            "`date` INTEGER NOT NULL, " +
+            "`steps` INTEGER, " +
+            "`restingHeartRateBpm` INTEGER, " +
+            "`averageHeartRateBpm` INTEGER, " +
+            "`sleepMinutes` INTEGER, " +
+            "`totalCalories` INTEGER, " +
+            "`activeCalories` INTEGER, " +
+            "`dietaryCalories` INTEGER, " +
+            "`proteinGrams` REAL, " +
+            "`carbGrams` REAL, " +
+            "`fatGrams` REAL, " +
+            "`bestMileSeconds` INTEGER, " +
+            "`weightKg` REAL, " +
+            "`syncedAt` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`date`))"
+
+    /**
      * Only the statements that touch one table.
      *
      * The v5-to-v6 migration both creates tables and alters two that already

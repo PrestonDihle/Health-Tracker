@@ -24,6 +24,8 @@ import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.MealClockTimes
 import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.MealResponses
+import com.prestondihle.healthtracker.domain.Readiness
+import com.prestondihle.healthtracker.domain.ReadinessFacts
 import com.prestondihle.healthtracker.domain.RunBreakdown
 import com.prestondihle.healthtracker.domain.ScoredMeal
 import com.prestondihle.healthtracker.domain.TrainingVolume
@@ -526,6 +528,43 @@ class TrendsViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = TrainingWeekState(),
+            )
+
+    /**
+     * This morning's two facts, against the trailing month.
+     *
+     * Its own flow and its own fixed window, because the baseline is thirty days
+     * whatever the trends chips say -- at the 7-day range there would not be
+     * enough history to have a baseline at all, and a line that vanished when the
+     * reader changed a chart range would look broken rather than principled.
+     *
+     * Everything it needs is already cached, so this costs no sync: the snapshots
+     * are what the daily read has been writing all along, and the goal is a
+     * settings row.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val readiness: StateFlow<Readiness> =
+        combine(
+                repository.getHealthSnapshots(
+                    LocalDate.now(zoneId).minusDays(ReadinessFacts.BASELINE_DAYS.toLong()),
+                    LocalDate.now(zoneId),
+                ),
+                repository.getUserGoals(),
+            ) { snapshots, goals ->
+                ReadinessFacts.on(
+                    today = LocalDate.now(zoneId),
+                    restingByDay =
+                        snapshots.mapNotNull { s -> s.restingHeartRateBpm?.let { s.date to it } }
+                            .toMap(),
+                    sleepByDay =
+                        snapshots.mapNotNull { s -> s.sleepMinutes?.let { s.date to it } }.toMap(),
+                    sleepGoalMinutes = goals?.sleepMinutesGoal,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = Readiness(null, null, null, null),
             )
 
     fun addAftAttempt(attempt: AftAttempt) {
