@@ -47,6 +47,15 @@ A card added in a later update appears at the bottom rather than vanishing,
 because the saved order is reconciled with the tab's built-in one rather than
 replacing it. Ids the save no longer recognises are dropped the same way.
 
+**Cards also fold.** The chevron in a card's title row collapses it to that
+title and opens it again, and which cards you have folded is remembered per tab
+alongside where they sit. Nothing changes until you fold something: an existing
+tab comes through an update exactly as you left it.
+
+The title row is what stays, deliberately — a folded card you cannot identify is
+a row you have to open to find out what it was. Moving a folded card leaves it
+folded, and folding one card does not disturb any other.
+
 ## Reference lines
 
 Every long-run chart is read against something. A bar that is taller than

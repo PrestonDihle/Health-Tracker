@@ -211,17 +211,74 @@ class MigrationSchemaTest {
     }
 
     /**
-     * The saved card order added at v15. A new table, so its DDL is diffed
-     * directly. The composite primary key on `(tab, cardId)` is the part worth
+     * The saved card order, built at v15 and altered at v21.
+     *
+     * Replayed across **both**, which is the rule the MealEntry tests already
+     * follow: a table created by one migration and altered by a later one is
+     * only correct across all of them, and diffing the `CREATE TABLE` alone
+     * would have gone on passing while an upgrading reader's app refused to
+     * open. Compared by `PRAGMA table_info` rather than by DDL text, because
+     * `collapsed` arrives with a SQLite default that Room's own `CREATE TABLE`
+     * does not spell out.
+     *
+     * The composite primary key on `(tab, cardId)` is still the part worth
      * pinning -- keyed on `cardId` alone, the same card on two tabs would
      * overwrite the other's saved slot.
      */
     @Test
     fun `migration builds CardOrderEntry exactly as Room expects`() {
-        assertEquals(
-            roomSchema("CardOrderEntry"),
-            migrationSchema("CardOrderEntry", AppDatabase.migration14To15Statements),
-        )
+        val expected = roomColumns("CardOrderEntry")
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `CardOrderEntry`")
+            AppDatabase.migration14To15Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration20To21Statements.forEach { raw.execSQL(it) }
+
+            assertEquals(expected, columnsOf(raw, "CardOrderEntry"))
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * A card already on the reader's phone arrives open, not shut.
+     *
+     * The default is the whole of what makes this migration invisible. Every row
+     * on disk was written by a build that could not fold a card, so `0` is the
+     * true statement about all of them -- and without the default they would
+     * arrive NULL against a NOT NULL column, which does not merely look wrong,
+     * it refuses the migration outright.
+     */
+    @Test
+    fun `cards already saved arrive unfolded`() {
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `CardOrderEntry`")
+            AppDatabase.migration14To15Statements.forEach { raw.execSQL(it) }
+            raw.execSQL(
+                "INSERT INTO `CardOrderEntry` (`tab`, `cardId`, `position`) " +
+                    "VALUES ('wellness', 'weightTrend', 0)"
+            )
+
+            AppDatabase.migration20To21Statements.forEach { raw.execSQL(it) }
+
+            raw.query("SELECT `collapsed` FROM `CardOrderEntry` WHERE `cardId` = 'weightTrend'")
+                .use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals(0, cursor.getInt(0))
+                }
+        } finally {
+            db.close()
+        }
     }
 
     /**

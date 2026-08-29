@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
@@ -33,7 +35,9 @@ import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.components.CardFold
 import com.prestondihle.healthtracker.ui.components.DayPoint
+import com.prestondihle.healthtracker.ui.components.LocalCardFold
 import com.prestondihle.healthtracker.ui.trends.CompareCard
 import com.prestondihle.healthtracker.ui.trends.CompareUiState
 import com.prestondihle.healthtracker.ui.trends.ComparableMetric
@@ -150,7 +154,12 @@ class ScreenRenderTest {
     fun `trends screen renders`() {
         val repo = seededRepository()
         val vm = TrendsViewModel(repo, zone)
-        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
+        // Hoisted out of the render lambda: built inside it, a new view model is
+        // constructed on every recomposition, each starting its own flows whose
+        // emissions cause the next -- an infinite composition loop wearing the
+        // not-idle timeout's face. See the note in CLAUDE.md.
+        val orderVm = CardOrderViewModel(repo, "activity")
+        render { TrendsScreen(vm, orderVm) }
         composeRule.onRoot().captureRoboImage("build/screenshots/trends.png")
     }
 
@@ -228,6 +237,57 @@ class ScreenRenderTest {
 
         composeRule.onNodeWithText("Weight (7-day avg)").assertDoesNotExist()
         composeRule.onRoot().captureRoboImage("build/screenshots/weight-year-no-average.png")
+    }
+
+    /**
+     * A folded card keeps its title and loses everything else.
+     *
+     * The title is the whole difficulty of folding here: it is drawn *inside* the
+     * card, not by the reorder wrapper, so hiding what the wrapper owns takes the
+     * title with it and leaves a row of chevrons over nothing. Composing the card
+     * under a fold is the only way to see that the chevron, the title and nothing
+     * else survive.
+     */
+    @Test
+    fun `a folded card keeps its title row and drops its body`() {
+        val today = java.time.LocalDate.now(zone)
+        val state = weightStateAt(TrendsRange.TWO_WEEKS, today)
+
+        render {
+            CompositionLocalProvider(
+                LocalCardFold provides CardFold(collapsed = true, onToggle = {})
+            ) {
+                WeightTrendCard(state)
+            }
+        }
+
+        composeRule.onNodeWithText("Weight").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Expand this card").assertIsDisplayed()
+        // The subtitle carries the unit and belongs to the body, so it goes too.
+        composeRule.onNodeWithText("pounds, Health Connect and manual").assertDoesNotExist()
+        composeRule.onNodeWithText("Weight (7-day avg)").assertDoesNotExist()
+        composeRule.onRoot().captureRoboImage("build/screenshots/card-folded.png")
+    }
+
+    @Test
+    fun `an unfolded card shows the chevron and the body together`() {
+        val today = java.time.LocalDate.now(zone)
+        val state = weightStateAt(TrendsRange.TWO_WEEKS, today)
+
+        render {
+            CompositionLocalProvider(
+                LocalCardFold provides CardFold(collapsed = false, onToggle = {})
+            ) {
+                WeightTrendCard(state)
+            }
+        }
+
+        // Not asserted on the bare title here: unfolded, the legend carries
+        // "Weight" too, so the match is ambiguous by design. The subtitle and the
+        // key are what say the body is present.
+        composeRule.onNodeWithContentDescription("Collapse this card").assertIsDisplayed()
+        composeRule.onNodeWithText("pounds, Health Connect and manual").assertIsDisplayed()
+        composeRule.onNodeWithText("Weight (7-day avg)").assertIsDisplayed()
     }
 
     /**
@@ -509,7 +569,12 @@ class ScreenRenderTest {
             )
         }
         val vm = TrendsViewModel(repo, zone)
-        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
+        // Hoisted out of the render lambda: built inside it, a new view model is
+        // constructed on every recomposition, each starting its own flows whose
+        // emissions cause the next -- an infinite composition loop wearing the
+        // not-idle timeout's face. See the note in CLAUDE.md.
+        val orderVm = CardOrderViewModel(repo, "activity")
+        render { TrendsScreen(vm, orderVm) }
 
         composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("Army Fitness Test"))
         composeRule.waitForIdle()
@@ -524,7 +589,12 @@ class ScreenRenderTest {
     fun `the grip strength trend renders both hands`() {
         val repo = seededRepository()
         val vm = TrendsViewModel(repo, zone)
-        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
+        // Hoisted out of the render lambda: built inside it, a new view model is
+        // constructed on every recomposition, each starting its own flows whose
+        // emissions cause the next -- an infinite composition loop wearing the
+        // not-idle timeout's face. See the note in CLAUDE.md.
+        val orderVm = CardOrderViewModel(repo, "activity")
+        render { TrendsScreen(vm, orderVm) }
 
         composeRule.onNode(hasScrollAction()).performScrollToNode(hasText("Grip strength"))
         composeRule.waitForIdle()
@@ -537,7 +607,12 @@ class ScreenRenderTest {
     fun `every trends range renders`() {
         val repo = seededRepository()
         val vm = TrendsViewModel(repo, zone)
-        render { TrendsScreen(vm, CardOrderViewModel(repo, "activity")) }
+        // Hoisted out of the render lambda: built inside it, a new view model is
+        // constructed on every recomposition, each starting its own flows whose
+        // emissions cause the next -- an infinite composition loop wearing the
+        // not-idle timeout's face. See the note in CLAUDE.md.
+        val orderVm = CardOrderViewModel(repo, "activity")
+        render { TrendsScreen(vm, orderVm) }
 
         // Seven days is narrower than the seeded fortnight and ninety is wider
         // than it, so between them these cover both the cropping and the
@@ -575,14 +650,11 @@ class ScreenRenderTest {
     fun `wellness renders`() {
         val repo = seededRepository()
         val vm = WellnessViewModel(repo, zone)
-        render {
-            WellnessScreen(
-                vm,
-                TrendsViewModel(repo, zone),
-                CardOrderViewModel(repo, "wellness"),
-                SnackbarHostState(),
-            )
-        }
+        // Both hoisted, for the reason above the trends render: a view model
+        // built inside the lambda is rebuilt on every recomposition.
+        val trendsVm = TrendsViewModel(repo, zone)
+        val orderVm = CardOrderViewModel(repo, "wellness")
+        render { WellnessScreen(vm, trendsVm, orderVm, SnackbarHostState()) }
         composeRule.onRoot().captureRoboImage("build/screenshots/wellness.png")
     }
 

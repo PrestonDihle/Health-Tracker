@@ -498,7 +498,21 @@ data class HeartRateBucket(
  * their built-in place after the ones it does.
  */
 @Entity(primaryKeys = ["tab", "cardId"])
-data class CardOrderEntry(val tab: String, val cardId: String, val position: Int)
+data class CardOrderEntry(
+    val tab: String,
+    val cardId: String,
+    val position: Int,
+    /**
+     * Whether the card is folded to its title row.
+     *
+     * On the same row as the position rather than in a table of its own, because
+     * the two are one fact about one card on one tab and would otherwise need
+     * keeping in step across two writes. It does mean **both must be written
+     * together**: the repository rewrites whole rows, so a reorder that carried
+     * only positions would silently unfold every card on the tab.
+     */
+    val collapsed: Boolean = false,
+)
 
 @Entity
 data class StepBucket(

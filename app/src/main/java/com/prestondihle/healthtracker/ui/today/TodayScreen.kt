@@ -96,6 +96,7 @@ fun TodayScreen(
     // find a best day, and this is the tab the app opens on.
     val streaks by trendsViewModel.streaks.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
+    val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = CardGap),
@@ -163,6 +164,8 @@ fun TodayScreen(
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,
+            collapsed = collapsedCards,
+            onToggleCollapse = orderViewModel::toggleCollapse,
         )
     }
 }

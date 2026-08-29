@@ -344,6 +344,15 @@ goal* rather than days that had steps, and partly because "Steps" collides with 
 on the same screen. `ScreenRenderTest` caught the collision as *"Expected at most 1 node but found
 2"*, which is worth knowing as the shape that failure takes.
 
+**Two shapes of infinite composition loop have now been written here, and they share a face.** Both
+surface as `AppNotIdleException` on whichever test is slowest — the same face the documented
+load-timeout wears — so neither points at itself, and both were misread as load first. The tell that
+separates them from real load is this file's own advice: run the suspect class at a **known-green
+commit**. If that passes, it is the change and not the machine. The two shapes:
+
+- a view model constructed inside `setContent` (below), and
+- a `compositionLocalOf` provided an unremembered value (see `LocalCardFold` above).
+
 **A view model constructed inside `setContent` is an infinite composition loop.** `MasterGraphRenderTest`
 gained a `TrendsViewModel` for the strip and it was first written inline in the `TodayScreen(...)`
 call — so it was rebuilt on every recomposition, each copy starting its own flows and each emission
@@ -351,7 +360,10 @@ provoking the next recomposition. It presents as `AppNotIdleException` **on whic
 be slowest**, which is the same face the documented load-timeout wears, so it read as load for three
 runs. What separated them was this file's own advice: the known-green-commit run *passed*, which
 pointed the finger back at the change rather than the machine. Hoist the view model out of the
-composable lambda, as the two beside it already were.
+composable lambda, as the two beside it already were. `ScreenRenderTest` had four more of the same
+shape — `CardOrderViewModel(repo, "activity")` inline in a `render { }` — which were harmless while
+that view model held one flow and started looping the moment it held three. **Hoist every view model
+a render test builds.**
 
 ### The compare card
 
@@ -565,6 +577,41 @@ without a gesture, in the same spirit as `SeriesToggles`. Two tabs took work to 
 **Settings** is config rather than a content dashboard but reorders all the same, and **Fuel**'s
 extended-fast entries had to move *inside* the "Extended fasts" card (they were separate cards below
 it) so the scheduler and its list are one reorderable unit and nothing is left pinned.
+
+**Every card also folds to its title row**, saved per tab and card beside the position.
+`MIGRATION_20_21` adds `CardOrderEntry.collapsed` in the `MIGRATION_5_6` shape — `NOT NULL DEFAULT 0`,
+because every row on disk was written by a build that could not fold anything, so `0` is the true
+statement about all of them and an upgrading reader sees nothing change until they fold something.
+There is no third state: a card is open or shut, and "not known whether it is shut" is not a way a
+card can be.
+
+**Position and fold share a row, so they must be written together.** `setCardState` takes both and
+there is no way to express half of it — the write is a whole-row upsert, so passing only the order
+would rewrite every row with `collapsed` back at its default and moving one card would silently
+unfold the entire tab. Worse, it would read as the *fold* having failed to save rather than the
+reorder having cleared it, so the wrong control would get the blame. `CardFoldTest` pins it from four
+directions, including that folds do not leak between tabs — the reason the primary key is the pair.
+`toggleCollapse` writes the whole effective order alongside the fold, which is what makes it work on
+a tab nobody has ever reordered: there are no rows yet, so a fold has nowhere to live until the
+positions exist to hang it on.
+
+**The title has to be drawn by the card, not by the wrapper.** `reorderableCards` owns the move
+arrows and the item; the title lives *inside* `TrackerCard` / `TrendCard`. Folding what the wrapper
+owns would take the title with it and leave a row of chevrons over nothing — so the fold reaches the
+card through `LocalCardFold` and the card itself decides to stop after its title row. That is why a
+composition local is right here and wrong for `ChartColors`: this consumer *is* a composable, where
+a series colour is needed by enums and draw scopes that cannot read a local at all. Threading it
+explicitly would have meant a title and a fold parameter on all ~56 card call sites.
+
+**The `CardFold` handed to that local must be `remember`ed.** `LocalCardFold` is a
+`compositionLocalOf`, which invalidates every reader when its value stops comparing equal — and a
+`CardFold` built inline carries a fresh lambda each time, which compares by identity and so never
+equals the last one. Each recomposition provokes the next: an infinite loop, presenting as
+`AppNotIdleException` on whichever render test happens to be slowest and pointing nowhere near here.
+This is the second time that failure has worn that disguise; see the note under the Today strip.
+
+A card's own `action` (the refresh button on Today) goes away with the body it acts on — a sync
+whose result cannot be seen is a button worth removing while folded.
 
 The **profile** on `UserSettings` — `maxHeartRateBpm`, `ageYears`, `sex`, `heightCm` — is the "You"
 card at the top of Settings. Max HR is the one with teeth: it zones the runs chart. Height is stored
@@ -1358,7 +1405,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 20, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 21, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -1447,6 +1494,13 @@ alteration to `HealthDaySnapshot` since `MIGRATION_2_3`**, whose statements are 
 a `val`, so its schema test builds a hand-written v18 version of that table and replays 18-to-19
 against it rather than replaying from v2. What that pins is the column *type*: declared INTEGER
 against Room's REAL, it passes every other test in the suite and throws on the next launch.
+
+`MIGRATION_20_21` adds `CardOrderEntry.collapsed`, and is the case where the *existing* schema test
+had to change rather than a new one being added: that table is created by `MIGRATION_14_15` and
+altered here, so diffing the `CREATE TABLE` alone would go on passing while an upgrading reader's app
+refused to open. It now replays 14-to-15 then 20-to-21 and compares `PRAGMA table_info`, the MealEntry
+shape. **A new migration that alters an existing table means finding that table's existing test, not
+writing a fresh one.**
 
 `MIGRATION_19_20` adds the four finer nutrition figures to `HealthDaySnapshot` *and* `MealEntry` — see
 *The finer nutrition figures*. Because it alters `MealEntry`, **both** of that table's schema tests
@@ -1888,6 +1942,8 @@ onto the evenings this repository is actually worked on. `NightEndedHoursAgo` pu
 distance behind `now` instead, which is inside the day window and outside the last three hours at
 every hour of every day.
 
+`CardFoldTest` pins that a fold survives a reorder, that folding one card does not unfold another,
+and that folds do not leak across tabs — the three ways one shared row could go wrong.
 `MigrationSchemaTest` diffs the hand-written migration SQL against the schema Room generates from the
 entities. This matters more than it looks: `exportSchema = false` rules out Room's own
 `MigrationTestHelper`, and a mismatched `CREATE TABLE` does not fail the build — it throws on the

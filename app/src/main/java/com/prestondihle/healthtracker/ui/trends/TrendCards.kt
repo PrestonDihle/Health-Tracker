@@ -42,7 +42,9 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AxisRule
 import com.prestondihle.healthtracker.ui.components.AxisSpec
 import com.prestondihle.healthtracker.ui.components.BarChart
+import com.prestondihle.healthtracker.ui.components.CardFoldButton
 import com.prestondihle.healthtracker.ui.components.ChartAxis
+import com.prestondihle.healthtracker.ui.components.LocalCardFold
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
@@ -80,7 +82,20 @@ internal fun TrendCard(title: String, subtitle: String?, content: @Composable ()
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            val fold = LocalCardFold.current
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                fold?.let { CardFoldButton(it) }
+            }
+            if (fold?.collapsed == true) return@Column
             if (subtitle != null) {
                 Text(
                     subtitle,

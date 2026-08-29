@@ -109,6 +109,7 @@ fun WellnessScreen(
     val readiness by trendsViewModel.readiness.collectAsStateWithLifecycle()
     val compare by trendsViewModel.compare.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
+    val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     val permissionLauncher =
@@ -196,6 +197,8 @@ fun WellnessScreen(
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,
+            collapsed = collapsedCards,
+            onToggleCollapse = orderViewModel::toggleCollapse,
         )
 
         item { Spacer(Modifier.height(8.dp)) }

@@ -13,13 +13,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import com.prestondihle.healthtracker.ui.components.CardFold
+import com.prestondihle.healthtracker.ui.components.LocalCardFold
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -51,17 +56,30 @@ class CardOrderViewModel(
     private val tab: String,
 ) : ViewModel() {
 
+    private val entries =
+        repository
+            .getCardEntries(tab)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val savedOrder: StateFlow<List<String>> =
         repository
             .getCardOrder(tab)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The ids currently folded shut on this tab. */
+    val collapsed: StateFlow<Set<String>> =
+        entries
+            .map { rows -> rows.filter { it.collapsed }.map { it.cardId }.toSet() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /**
      * Swaps [cardId] with its neighbour in [direction].
      *
      * Computed against the effective order, not the raw save, so the first move
      * on a never-reordered tab still lands where the reader sees the card rather
-     * than against an empty list.
+     * than against an empty list. The folds are carried through untouched --
+     * the write rewrites whole rows, so passing only the order would unfold
+     * every card on the tab as a side effect of moving one.
      */
     fun move(cardId: String, up: Boolean, defaultOrder: List<String>) {
         viewModelScope.launch {
@@ -71,7 +89,24 @@ class CardOrderViewModel(
             val j = if (up) i - 1 else i + 1
             if (j !in order.indices) return@launch
             order[i] = order[j].also { order[j] = order[i] }
-            repository.setCardOrder(tab, order)
+            repository.setCardState(tab, order, collapsed.value)
+        }
+    }
+
+    /**
+     * Folds [cardId] shut, or opens it again.
+     *
+     * Writes the whole effective order alongside, which is what makes this work
+     * on a tab nobody has ever reordered: there are no rows yet, so the fold has
+     * nowhere to be stored until the positions exist to hang it on.
+     */
+    fun toggleCollapse(cardId: String, defaultOrder: List<String>) {
+        viewModelScope.launch {
+            val order = effectiveCardOrder(savedOrder.value, defaultOrder)
+            if (cardId !in order) return@launch
+            val folded = collapsed.value.toMutableSet()
+            if (!folded.remove(cardId)) folded.add(cardId)
+            repository.setCardState(tab, order, folded)
         }
     }
 
@@ -101,6 +136,13 @@ fun LazyListScope.reorderableCards(
     cards: List<ReorderableCard>,
     savedOrder: List<String>,
     onMove: (cardId: String, up: Boolean, defaultOrder: List<String>) -> Unit,
+    /** Ids currently folded shut. Empty leaves every card open. */
+    collapsed: Set<String> = emptySet(),
+    /**
+     * Folds a card, or opens it. Null makes the whole tab unfoldable, which is
+     * what a caller that has no view model to save the state in wants.
+     */
+    onToggleCollapse: ((cardId: String, defaultOrder: List<String>) -> Unit)? = null,
 ) {
     val defaultOrder = cards.map { it.id }
     val order = effectiveCardOrder(savedOrder, defaultOrder)
@@ -138,7 +180,29 @@ fun LazyListScope.reorderableCards(
                         )
                     }
                 }
-                card.content()
+                // The fold reaches the card through a local rather than a
+                // parameter, so the title stays where it has always been -- drawn
+                // by the card itself, which is what lets it survive the fold.
+                // Hiding what this owns instead would take the title with it.
+                // Remembered, and that is load-bearing rather than tidy.
+                // `LocalCardFold` is a `compositionLocalOf`, so it invalidates
+                // every reader whenever its value stops comparing equal -- and a
+                // `CardFold` built inline carries a fresh lambda each time, which
+                // compares by identity and so never equals the last one. Each
+                // recomposition would provoke the next: an infinite loop, and it
+                // surfaces as the not-idle timeout on whichever test is slowest
+                // rather than as anything pointing here.
+                val isCollapsed = id in collapsed
+                val fold =
+                    onToggleCollapse?.let { toggle ->
+                        remember(id, isCollapsed, defaultOrder) {
+                            CardFold(
+                                collapsed = isCollapsed,
+                                onToggle = { toggle(id, defaultOrder) },
+                            )
+                        }
+                    }
+                CompositionLocalProvider(LocalCardFold provides fold) { card.content() }
             }
         }
     }

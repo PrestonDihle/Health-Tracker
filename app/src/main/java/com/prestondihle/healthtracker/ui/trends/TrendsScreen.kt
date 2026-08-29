@@ -36,6 +36,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
     val records by viewModel.records.collectAsStateWithLifecycle()
     val streaks by viewModel.streaks.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
+    val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
     val chartColors = LocalChartColors.current
 
     LazyColumn(
@@ -145,6 +146,8 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,
+            collapsed = collapsedCards,
+            onToggleCollapse = orderViewModel::toggleCollapse,
         )
     }
 }

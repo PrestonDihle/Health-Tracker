@@ -141,6 +141,7 @@ fun FuelScreen(
     // comes from the view model that owns the range rather than being re-derived.
     val mealResponses by trendsViewModel.mealResponses.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
+    val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var timeEdit by remember { mutableStateOf<TimeEdit?>(null) }
     var addingFast by remember { mutableStateOf(false) }
@@ -303,6 +304,8 @@ fun FuelScreen(
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,
+            collapsed = collapsedCards,
+            onToggleCollapse = orderViewModel::toggleCollapse,
         )
     }
 

@@ -746,9 +746,21 @@ class TrackerRepository(
     fun getCardOrder(tab: String): Flow<List<String>> =
         dao.getCardOrder(tab).map { rows -> rows.map { it.cardId } }
 
-    /** Rewrites the whole order for [tab], each id's slot its index in [cardIds]. */
-    suspend fun setCardOrder(tab: String, cardIds: List<String>) =
-        dao.upsertCardOrder(cardIds.mapIndexed { index, id -> CardOrderEntry(tab, id, index) })
+    /** The saved rows for [tab]: where each card sits and whether it is folded. */
+    fun getCardEntries(tab: String): Flow<List<CardOrderEntry>> = dao.getCardOrder(tab)
+
+    /**
+     * Rewrites the whole state for [tab] -- position *and* fold, together.
+     *
+     * Both in one call because the write is a whole-row upsert: passing only the
+     * order would rewrite every row with `collapsed` back at its default, so
+     * moving one card would unfold all of them. Callers therefore hand over the
+     * complete picture they intend, and there is no way to express half of it.
+     */
+    suspend fun setCardState(tab: String, cardIds: List<String>, collapsed: Set<String>) =
+        dao.upsertCardOrder(
+            cardIds.mapIndexed { index, id -> CardOrderEntry(tab, id, index, id in collapsed) }
+        )
 
     // ----- Army Fitness Test -------------------------------------------------
 

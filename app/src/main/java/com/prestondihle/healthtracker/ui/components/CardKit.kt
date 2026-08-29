@@ -7,16 +7,21 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -74,6 +79,43 @@ internal val BarHeight = 5.dp
  * divider is what separates two groups of figures that would otherwise read as
  * one row of six.
  */
+/**
+ * Whether the card being drawn can be folded, and whether it currently is.
+ *
+ * A composition local rather than a parameter, and this is the one place in the
+ * app where that is the right call: threading it through would mean a `title`
+ * and a fold on every one of the ~56 card call sites, and the thing that needs
+ * it *is* a composable — which is exactly the reason `ChartColors` is passed
+ * explicitly instead (its consumers are enums and draw scopes, which cannot read
+ * a local at all).
+ *
+ * Null means "not foldable", which is the honest default: a card outside
+ * `reorderableCards` — the usual row on Log, the summary strip on Today — has
+ * nowhere to save a fold and no arrows beside it to suggest one.
+ */
+internal data class CardFold(val collapsed: Boolean, val onToggle: () -> Unit)
+
+internal val LocalCardFold = compositionLocalOf<CardFold?> { null }
+
+/**
+ * The chevron that folds a card, drawn in its title row.
+ *
+ * In the title row rather than beside the move arrows above it, because the
+ * title row is the part that survives folding — a control that disappeared when
+ * used would leave no way back.
+ */
+@Composable
+internal fun CardFoldButton(fold: CardFold) {
+    IconButton(onClick = fold.onToggle, modifier = Modifier.size(28.dp)) {
+        Icon(
+            if (fold.collapsed) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+            contentDescription = if (fold.collapsed) "Expand this card" else "Collapse this card",
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 internal fun TrackerCard(
     title: String,
@@ -89,6 +131,7 @@ internal fun TrackerCard(
             modifier = Modifier.padding(CardPadding),
             verticalArrangement = Arrangement.spacedBy(CardSpacing),
         ) {
+            val fold = LocalCardFold.current
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -99,8 +142,15 @@ internal fun TrackerCard(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
-                action?.invoke()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The card's own action goes away with the body it acts on --
+                    // a refresh button on a folded card would sync something the
+                    // reader cannot see the result of.
+                    if (fold?.collapsed != true) action?.invoke()
+                    fold?.let { CardFoldButton(it) }
+                }
             }
+            if (fold?.collapsed == true) return@Column
             if (subtitle != null) {
                 Text(
                     subtitle,

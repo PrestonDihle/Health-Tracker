@@ -79,6 +79,7 @@ private const val DEFAULT_BEDTIME_LIMIT_MG = 25
 fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
+    val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -628,6 +629,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,
+            collapsed = collapsedCards,
+            onToggleCollapse = orderViewModel::toggleCollapse,
         )
     }
 }

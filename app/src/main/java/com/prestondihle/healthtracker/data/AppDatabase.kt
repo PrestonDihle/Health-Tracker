@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -597,6 +597,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Whether a card is folded shut, alongside where it sits.
+         *
+         * The [MIGRATION_5_6] shape rather than the [MIGRATION_11_12] one, and
+         * the question is the one that file settles: *what would a NULL do on
+         * screen*. Every row already on disk was written by a build that could
+         * not fold a card, so `0` is the true statement about all of them --
+         * and an upgrading reader sees precisely nothing change until they fold
+         * something themselves.
+         *
+         * `NOT NULL` with a default rather than a nullable column because there
+         * is no third state. A card is open or shut; "not known whether it is
+         * shut" is not a way a card can be.
+         */
+        internal val migration20To21Statements =
+            listOf(
+                "ALTER TABLE `CardOrderEntry` ADD COLUMN `collapsed` INTEGER NOT NULL DEFAULT 0"
+            )
+
+        private val MIGRATION_20_21 =
+            object : Migration(20, 21) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration20To21Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -630,6 +656,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_17_18,
                                 MIGRATION_18_19,
                                 MIGRATION_19_20,
+                                MIGRATION_20_21,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

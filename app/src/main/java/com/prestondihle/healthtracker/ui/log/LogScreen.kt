@@ -57,6 +57,7 @@ fun LogScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val usual by viewModel.usual.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
+    val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     fun toast(message: String) {
@@ -189,6 +190,8 @@ fun LogScreen(
                 ),
             savedOrder = savedOrder,
             onMove = orderViewModel::move,
+            collapsed = collapsedCards,
+            onToggleCollapse = orderViewModel::toggleCollapse,
         )
 
         item { Spacer(Modifier.height(8.dp)) }
