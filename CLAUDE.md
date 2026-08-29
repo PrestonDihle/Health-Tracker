@@ -1791,7 +1791,7 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
 `TrendsBucketsTest`, `MovingAverageTest`, `StreaksTest`, `PersonalRecordsTest`,
 `GoalProjectionTest`, `UsualIntakeTest` and
-`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest` and `SleepSyncTest`
+`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest`, `CardFoldTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
@@ -1966,8 +1966,9 @@ covered in `MasterGraphRenderTest`. The drawing code is shared, so covering it o
 Fuel is the longest *ticking* tab in the app at fourteen cards — so it has the problem worse
 than Wellness ever did. (The count keeps moving: thirteen before the extended-fast entries moved
 inside their own card, eleven after, twelve with the blood sugar summary, thirteen again with the
-biggest-responses ranking, fourteen with net calories. Settings is second at thirteen and does not
-tick. The problem does not move, so do not read the figure as the point.) Wellness still ticks too, which is what the mood card's direct
+biggest-responses ranking, fourteen with net calories. Wellness and Settings tie for second at
+thirteen, and only Wellness ticks. The problem does not move, so do not read the figure as the
+point.) Wellness still ticks too, which is what the mood card's direct
 composition is for. Today is the screen that gained by the swap: its `minuteTicker` looks like a
 ticker but is only ever advanced by `refresh()`, with no loop behind it, which is why the master
 graph's suite can scroll and wait on idle at all.
@@ -1991,7 +1992,14 @@ not: the class fails the same way on a commit that had passed all 199 an hour ea
 `git stash push -u`, run, `git stash pop`. Cheap, and it separates "my change did this" from "this
 machine cannot run this suite today" in one go, which neither the failing set nor a re-run can.
 
-When the render suites cannot be trusted, the other **32 classes and 259 tests run in well under a
+Two corroborating signals seen on 2026-08-29, when a commit that had passed the full suite an hour
+earlier failed twice in isolation with an unchanged tree. **The first tests to go are the two that
+`performScrollToNode` on Activity** — the AFT card and the grip trend — because scrolling waits on
+idle and Activity is the densest tab. And **`lintDebug` stretched from about a minute to nine**, which
+is the clearest tell that the machine and not the code is the problem: lint composes nothing. When
+both appear together, gate on the named non-Compose classes and say so in the commit.
+
+When the render suites cannot be trusted, the other **42 classes and 365 tests run in well under a
 minute** and are unaffected — they render no Compose. Naming them explicitly with repeated `--tests` flags
 gives a real gate for everything except whether a screen draws, which no test here was answering
 anyway. Say plainly in the commit which of the two was verified; a test count that quietly means
