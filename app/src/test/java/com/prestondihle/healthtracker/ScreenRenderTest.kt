@@ -1,9 +1,11 @@
 package com.prestondihle.healthtracker
 
 import android.content.Context
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -37,6 +39,7 @@ import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
 import com.prestondihle.healthtracker.ui.components.CardFold
 import com.prestondihle.healthtracker.ui.components.DayPoint
+import com.prestondihle.healthtracker.ui.components.EntryList
 import com.prestondihle.healthtracker.ui.components.LocalCardFold
 import com.prestondihle.healthtracker.ui.trends.CompareCard
 import com.prestondihle.healthtracker.ui.trends.CompareUiState
@@ -694,5 +697,71 @@ class ScreenRenderTest {
         composeRule.onNodeWithText("REM").assertIsDisplayed()
         composeRule.onNodeWithText("Deep").assertIsDisplayed()
         composeRule.onRoot().captureRoboImage("build/screenshots/sleep-card.png")
+    }
+
+    /**
+     * The entry list's fold, composed on its own.
+     *
+     * Direct composition for the reason [SleepCard] and [MoodTrendCard] get it:
+     * both cards that carry one of these lists live on Fuel, which ticks, so a
+     * screen-level test could never scroll down to them. Nothing is lost by
+     * skipping the screen -- what is under test is the component's own contract,
+     * which is the same wherever it is hung.
+     */
+    @Test
+    fun `a long entry list shows three rows until it is opened`() {
+        val entries = (1..9).map { "Entry $it" }
+        render { Column { EntryList(entries = entries) { Text(it) } } }
+
+        composeRule.onNodeWithText("Entry 1").assertIsDisplayed()
+        composeRule.onNodeWithText("Entry 3").assertIsDisplayed()
+        // Absent from the tree, not merely off screen: a row that is composed
+        // but scrolled past still costs the height this fold exists to save.
+        composeRule.onNodeWithText("Entry 4").assertDoesNotExist()
+
+        // The count rides in the button because it is the figure the reader is
+        // deciding on -- a bare "Show all" makes them open it to find out how
+        // much they are opening.
+        composeRule.onNodeWithText("Show all 9").performClick()
+        composeRule.onNodeWithText("Entry 9").assertIsDisplayed()
+
+        // And back, because a fold that only opens is a fold used once.
+        composeRule.onNodeWithText("Show fewer").performClick()
+        composeRule.onNodeWithText("Entry 4").assertDoesNotExist()
+    }
+
+    /**
+     * A list already short enough gets no control at all.
+     *
+     * Absent rather than disabled. These lists sit on the two longest tabs in
+     * the app, and a button that cannot do anything is still a line of the card
+     * -- which is the cost this whole change is trying to give back.
+     */
+    @Test
+    fun `a short entry list draws no fold control`() {
+        render { Column { EntryList(entries = listOf("One", "Two", "Three")) { Text(it) } } }
+
+        composeRule.onNodeWithText("Three").assertIsDisplayed()
+        composeRule.onNodeWithText("Show all 3").assertDoesNotExist()
+    }
+
+    /**
+     * The header stays put while the rows fold away underneath it.
+     *
+     * The hydration list is the one that needs this: the figure above it is
+     * today's and the list is a week's, so "Last 7 days" is what stops the three
+     * visible rows being read as today's drinks. Folding it away with them would
+     * take the sentence off exactly the screen it is there to correct.
+     */
+    @Test
+    fun `an entry list keeps its header above the fold`() {
+        render {
+            Column {
+                EntryList(entries = (1..9).map { "Entry $it" }, header = "Last 7 days") { Text(it) }
+            }
+        }
+
+        composeRule.onNodeWithText("Last 7 days").assertIsDisplayed()
+        composeRule.onNodeWithText("Entry 4").assertDoesNotExist()
     }
 }

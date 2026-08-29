@@ -142,7 +142,7 @@ internal fun MealListCard(
             )
         }
 
-        meals.forEach { meal ->
+        EntryList(entries = meals) { meal ->
             Row(
                 modifier =
                     Modifier.fillMaxWidth()

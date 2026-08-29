@@ -56,6 +56,18 @@ The title row is what stays, deliberately — a folded card you cannot identify 
 a row you have to open to find out what it was. Moving a folded card leaves it
 folded, and folding one card does not disturb any other.
 
+**The lists inside a card fold separately.** Water, caffeine, creatine and meals
+each list what you logged so it can be corrected, and those lists get long —
+water reaches back a week, which at four glasses a day is thirty rows sitting on
+top of everything below them. Each now shows its newest three with a *Show all
+31* underneath.
+
+This is a different control from the card fold and both are worth having. Folding
+the Hydration card takes away the buttons that log water too; folding its list
+leaves everything you actually use and hides only the history. Where a list is
+already three rows or shorter there is no button at all — a control that cannot
+do anything is still a line of the card.
+
 ## Reference lines
 
 Every long-run chart is read against something. A bar that is taller than

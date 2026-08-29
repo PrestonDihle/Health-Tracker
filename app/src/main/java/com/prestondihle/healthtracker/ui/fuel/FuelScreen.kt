@@ -75,6 +75,7 @@ import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.EntryList
 import com.prestondihle.healthtracker.ui.components.FastingTimeline
 import com.prestondihle.healthtracker.ui.components.InlineLogButton
 import com.prestondihle.healthtracker.ui.components.InstantPickerDialog
@@ -952,14 +953,10 @@ private fun HydrationCard(
 
             // Said out loud because the figure above it is today's and this list
             // is not: rows carry their weekday, but a reader who has just read
-            // "Today 17 oz" will take what follows for today unless told.
-            Text(
-                "Last 7 days",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            recent.forEach { entry ->
+            // "Today 17 oz" will take what follows for today unless told. It
+            // stays above the fold for that reason -- the sentence is what stops
+            // the visible rows being misread, so it cannot fold away with them.
+            EntryList(entries = recent, header = "Last 7 days") { entry ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1079,7 +1076,7 @@ private fun CreatineCard(
         // Today's doses, newest first, each removable. A mistyped scoop is
         // otherwise stuck in the total until midnight with no way to take it
         // back.
-        state.creatineToday.reversed().forEach { intake ->
+        EntryList(entries = state.creatineToday.reversed()) { intake ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1329,46 +1326,47 @@ private fun CaffeineCard(
                 .filter { !it.timestamp.isBefore(state.caffeineEditableFrom) }
                 .sortedByDescending { it.timestamp }
 
-        if (recent.isNotEmpty()) {
-            recent.forEach { intake ->
+        // No emptiness check around this one: unlike the hydration list it has no
+        // divider of its own to suppress, and EntryList draws nothing on an
+        // empty list anyway.
+        EntryList(entries = recent) { intake ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Tapping the row edits; the bin deletes outright, so removing
+                // a mis-logged dose does not mean opening a dialog first.
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier =
+                        Modifier.weight(1f)
+                            .clickable { dialog = CaffeineDialog.Edit(intake) }
+                            .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Tapping the row edits; the bin deletes outright, so removing
-                    // a mis-logged dose does not mean opening a dialog first.
-                    Row(
-                        modifier =
-                            Modifier.weight(1f)
-                                .clickable { dialog = CaffeineDialog.Edit(intake) }
-                                .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "${intake.milligrams} mg",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            intake.timestamp.asShortDateTime(state),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(
-                        onClick = { onDelete(intake) },
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription =
-                                "Delete ${intake.milligrams} mg at " +
-                                    intake.timestamp.asShortDateTime(state),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
+                    Text(
+                        "${intake.milligrams} mg",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        intake.timestamp.asShortDateTime(state),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(
+                    onClick = { onDelete(intake) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription =
+                            "Delete ${intake.milligrams} mg at " +
+                                intake.timestamp.asShortDateTime(state),
+                        modifier = Modifier.size(16.dp),
+                    )
                 }
             }
         }

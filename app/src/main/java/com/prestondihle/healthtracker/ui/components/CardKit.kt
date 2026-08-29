@@ -20,8 +20,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -238,6 +243,78 @@ internal fun LogButton(
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Button(onClick = onClick, enabled = enabled, contentPadding = CompactButtonPadding) {
             Text(text)
+        }
+    }
+}
+
+/**
+ * How many rows of an entry list are shown before it is asked to open.
+ *
+ * Three rather than one, because the row this list exists for is the one just
+ * logged wrongly -- a stray tap, a dose typed at the wrong strength -- and that
+ * is nearly always the newest row or within a couple of it. One would make the
+ * common correction cost a tap to reach; ten would not be a fold.
+ */
+private const val ENTRY_PREVIEW_ROWS = 3
+
+/**
+ * A list of correctable entries inside a card, showing its newest few until
+ * asked for the rest.
+ *
+ * The hydration list is what forced this. It reaches back a week deliberately --
+ * a stray 100 ml is spotted a day or two after it is written, and a list ending
+ * at midnight would offer the fix only while nobody knew it was needed -- but a
+ * reader who logs four drinks a day is then handed thirty rows above everything
+ * below them on the tab, for a correction they make about once a month.
+ *
+ * **This is not the card fold, and neither replaces the other.**
+ * [LocalCardFold] takes the whole card down to its title row, which also takes
+ * away the buttons that log a drink; the entry list is the one part of these
+ * cards nobody needs open. So the card keeps its figures, its chart and its
+ * controls, and only the history folds.
+ *
+ * The count goes in the button rather than above the list, because the number of
+ * rows hidden is exactly the thing a reader is deciding on when they consider
+ * opening it -- "Show all 31" answers that where a bare "Show all" asks them to
+ * open it to find out.
+ *
+ * State is [rememberSaveable] rather than stored: which way a list happens to be
+ * folded is a glance-by-glance convenience, not a preference worth a column and
+ * a migration, and it costs one tap to change. It survives rotation and process
+ * death, which is as far as it is worth carrying.
+ */
+@Composable
+internal fun <T> EntryList(
+    entries: List<T>,
+    header: String? = null,
+    row: @Composable (T) -> Unit,
+) {
+    if (entries.isEmpty()) return
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val shown = if (expanded) entries else entries.take(ENTRY_PREVIEW_ROWS)
+
+    if (header != null) {
+        Text(
+            header,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    shown.forEach { row(it) }
+
+    // Absent rather than disabled where everything already fits: a control that
+    // cannot do anything is still a line of the card, and these cards are on the
+    // two longest tabs in the app.
+    if (entries.size > ENTRY_PREVIEW_ROWS) {
+        TextButton(
+            onClick = { expanded = !expanded },
+            contentPadding = CompactButtonPadding,
+        ) {
+            Text(
+                if (expanded) "Show fewer" else "Show all ${entries.size}",
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }

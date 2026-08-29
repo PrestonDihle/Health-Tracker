@@ -625,6 +625,40 @@ The **profile** on `UserSettings` — `maxHeartRateBpm`, `ageYears`, `sex`, `hei
 card at the top of Settings. Max HR is the one with teeth: it zones the runs chart. Height is stored
 in cm like everything else and stepped in inches or centimetres by the unit setting.
 
+### Folding the entry lists
+
+`CardKit.EntryList` draws the newest `ENTRY_PREVIEW_ROWS` (3) of a correctable list and hides the
+rest behind a *Show all N*. Four lists use it: hydration, caffeine, creatine and the meal list.
+
+**This is not the card fold and neither replaces the other.** `LocalCardFold` takes a whole card down
+to its title row — which also takes away the buttons that log a drink, the day's figure and the
+chart. The entry list is the one part of these cards that nobody needs open, so folding it leaves
+everything that is actually used in place. A reader who folds the Hydration card wants it out of the
+way; a reader who folds its list still wants to log water.
+
+The hydration list is what forced it. It reaches back a **week** deliberately — a stray 100 ml is
+spotted a day or two later from a figure looking too high, and a list ending at midnight would offer
+the fix only while nobody knew it was needed — but somebody drinking four logged glasses a day is
+then handed thirty rows above everything below them on the tab, for a correction made about once a
+month. Three rows rather than one because the row this list exists for is nearly always the newest or
+within a couple of it; one would put the common correction behind a tap.
+
+**The count rides in the button** — *Show all 31*, not *Show all*. The number of hidden rows is
+exactly what the reader is deciding on, and a bare label makes them open it to find out how much they
+are opening. Where everything already fits the control is **absent rather than disabled**: these
+lists are on the two longest tabs in the app, and a button that cannot do anything is still a line of
+the card, which is the height this is trying to give back.
+
+**A header stays above the fold.** Hydration's *Last 7 days* is the sentence that stops three visible
+rows being read as today's drinks, next to a figure that *is* today's — so it is drawn by `EntryList`
+rather than by the caller above it, where folding the rows would have taken it off exactly the screen
+it exists to correct.
+
+State is `rememberSaveable`, not a column. Which way a list is folded is a glance-by-glance
+convenience costing one tap to change, unlike the card fold, which is a standing decision about a
+tab's shape and is worth `CardOrderEntry.collapsed` and a migration. It survives rotation and process
+death, which is as far as it is worth carrying.
+
 ### The two-tables rule for daily data
 
 This is the most important invariant to preserve:
