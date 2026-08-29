@@ -55,7 +55,15 @@ adb exec-out run-as com.prestondihle.healthtracker cat databases/tracker_databas
 ```
 
 The `-wal` and `-shm` files go with it; a backup of the main file alone can be missing the most
-recent writes. There is no `sqlite3` on the device, so reading the data back means pulling the file
+recent writes.
+
+**Then reading that backup with `sqlite3` makes the two companions disappear, and that is fine.**
+Opening a database that has a `-wal` beside it checkpoints the log into the main file and removes
+both companions on a clean close — so a backup directory inspected once ends up holding a single
+file, which looks exactly like half of it was deleted. Nothing was: the main file now contains what
+the log held, and `PRAGMA integrity_check` plus a row count against the live tables confirms it. Take
+the companions anyway, because the alternative is losing those writes outright; just do not read the
+absence afterwards as damage. There is no `sqlite3` on the device, so reading the data back means pulling the file
 or using the app's own CSV export.
 
 Driving the UI over adb has four traps, all of which have cost something:
