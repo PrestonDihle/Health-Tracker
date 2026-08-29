@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -66,9 +67,12 @@ import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.ChartColors
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
+import com.prestondihle.healthtracker.ui.trends.StreaksUiState
+import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 private val ChartHeight = 300.dp
 
@@ -79,8 +83,18 @@ private val ChartHeight = 300.dp
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TodayScreen(viewModel: TodayViewModel, orderViewModel: CardOrderViewModel) {
+fun TodayScreen(
+    viewModel: TodayViewModel,
+    orderViewModel: CardOrderViewModel,
+    trendsViewModel: TrendsViewModel,
+    /** Opens the tab a summary chip belongs to. */
+    onOpenTab: (String) -> Unit = {},
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val summary by viewModel.summary.collectAsStateWithLifecycle()
+    // Only the streaks, never `records`: that flow reads a year of glucose to
+    // find a best day, and this is the tab the app opens on.
+    val streaks by trendsViewModel.streaks.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
 
     LazyColumn(
@@ -88,6 +102,19 @@ fun TodayScreen(viewModel: TodayViewModel, orderViewModel: CardOrderViewModel) {
         verticalArrangement = Arrangement.spacedBy(CardGap),
         contentPadding = PaddingValues(vertical = CardGap),
     ) {
+        // Above the range chips and above everything else, which is the whole
+        // point of it: the day should be legible before anything is tapped or
+        // scrolled. It is a strip rather than a card so it costs as little of the
+        // fold as it can and still leaves the graph visible under it.
+        item {
+            TodaySummaryStrip(
+                state = state,
+                summary = summary,
+                streaks = streaks,
+                onOpen = onOpenTab,
+            )
+        }
+
         item {
             // Six windows do not fit on one row of a phone, and a row that
             // scrolls sideways hides the widest options behind a gesture nobody
@@ -721,3 +748,100 @@ private fun TodayUiState.windowLabel(): String {
  */
 private fun MealEntry.markerLabel(): String? =
     carbGrams?.let { "${it.toInt()}g C" } ?: calories?.let { "$it kcal" }
+
+/**
+ * The day in one glance, above everything else on Today.
+ *
+ * Every figure here already exists somewhere in the app, and that is the point:
+ * this answers "how is today going" without the four taps that answering it
+ * properly used to take. Each chip opens the tab that owns its number, so the
+ * strip is a way in rather than a second place the figure lives -- which is also
+ * why none of them is editable here.
+ *
+ * **A chip with nothing to say is absent, not blank.** Steps before the first
+ * sync, time in range on a phone with no monitor, a fast nobody started: an
+ * em dash in a strip this small reads as a broken row, and a missing chip reads
+ * as a metric this reader does not use. On a first run the strip is empty and
+ * takes no height at all, which is the right amount of screen for it to occupy.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TodaySummaryStrip(
+    state: TodayUiState,
+    summary: TodaySummaryState,
+    streaks: StreaksUiState,
+    onOpen: (String) -> Unit,
+) {
+    val goals = state.goals
+    val chips = buildList {
+        state.snapshot?.steps?.let { steps ->
+            add(
+                SummaryChip(
+                    // A tenth of a thousand on the count and whole thousands on
+                    // the goal. Truncating the count to whole thousands reads
+                    // 9,900 steps as "9k / 10k", which is a thousand short of
+                    // the truth on exactly the evening the reader is deciding
+                    // whether to go round the block again.
+                    text = goals.dailyStepGoal?.let { "${stepsK(steps)} / ${it / 1000}k steps" }
+                        ?: "${stepsK(steps)} steps",
+                    // Met is worth marking; short of it is not, because a strip
+                    // that flags every unfinished goal at nine in the morning is
+                    // a strip that scolds the reader for the time of day.
+                    met = goals.dailyStepGoal?.let { steps >= it } == true,
+                    route = "activity",
+                )
+            )
+        }
+        state.snapshot?.sleepMinutes?.let { minutes ->
+            add(
+                SummaryChip(
+                    text = Units.formatMinutes(minutes),
+                    met = goals.sleepMinutesGoal?.let { minutes >= it } == true,
+                    route = "wellness",
+                )
+            )
+        }
+        summary.timeInRange?.let {
+            add(SummaryChip("${(it * 100).roundToInt()}% in range", route = "fuel"))
+        }
+        state.netCalories?.let {
+            // Signed, because the sign is the entire content: "-480" and "480"
+            // are a deficit and a surplus, and the strip has no room to say which.
+            add(SummaryChip(if (it < 0) "$it kcal" else "+$it kcal", route = "fuel"))
+        }
+        summary.fastDuration?.let {
+            add(SummaryChip("Fasting ${Units.formatDuration(it)}", route = "fuel"))
+        }
+        streaks.running
+            .filter { it.second.current > 0 }
+            .forEach { (label, streak) ->
+                add(SummaryChip("$label ${streak.current}d", route = "activity"))
+            }
+    }
+
+    if (chips.isEmpty()) return
+
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        chips.forEach { chip ->
+            AssistChip(
+                onClick = { onOpen(chip.route) },
+                label = { Text(chip.text, style = MaterialTheme.typography.labelMedium) },
+                colors =
+                    if (!chip.met) AssistChipDefaults.assistChipColors()
+                    else
+                        AssistChipDefaults.assistChipColors(
+                            labelColor = MaterialTheme.colorScheme.primary
+                        ),
+            )
+        }
+    }
+}
+
+/** One chip: what it says, whether its goal is met, and where it goes. */
+private data class SummaryChip(val text: String, val met: Boolean = false, val route: String)
+
+/** `6.8k`, keeping the tenth that whole thousands would round away. */
+private fun stepsK(steps: Int): String = "%.1fk".format(steps / 1000f)

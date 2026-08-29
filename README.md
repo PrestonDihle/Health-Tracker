@@ -9,7 +9,7 @@ reps and reading.
 
 | Screen | What it does |
 | --- | --- |
-| **Today** | Everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
+| **Today** | The day in a row of chips at the top, then everything on one timeline over 3h to 7d: meals spread into absorption curves, blood sugar, ketones, heart rate, caffeine and steps per hour, with the hours asleep shaded behind all of it — and the day's steps, sleep, calories and macros above it |
 | **Log** | Every logging control in one place, so several things can be entered without changing tabs: one-tap repeats of what you log most, the last day's meals, waist and weight with the body-composition screen, grip, blood pressure, vibe/energy/focus, pages read, pushups and air squats |
 | **Fuel** | Fasting plan, extended fasts, adherence and stats; hydration, caffeine, creatine, supplements; the blood sugar summary, the meals that moved it most, the macro trend and net calories |
 | **Activity** | The Army Fitness Test scorecard, this week's training volume by kind, personal records and streaks, and the movement trends: steps, runs split by heart-rate zone, grip strength, pushups and air squats |
@@ -82,6 +82,21 @@ numbers, not because the reader is free to decide what normal is. That is also
 why they stay dashed while the glucose reference line is solid: one is a
 published figure, the other is wherever you decided to put it, and the two should
 not look alike.
+
+## The day at a glance
+
+A row of chips at the top of Today, above everything else: steps against your
+goal, last night's sleep, the share of today your blood sugar has spent in
+range, net calories, how long the current fast has run, and any streak you have
+going. Tap one and it opens the tab that figure lives on.
+
+Chips with nothing to say are simply not there. No monitor means no in-range
+chip; no fast running means no fast chip; a first run shows an empty strip that
+takes up no room at all. A dash in a row this small looks like something broken,
+where a missing chip just looks like a thing you do not track.
+
+Only a goal you have **met** is marked. A strip that flagged every unfinished
+goal would be telling you off at nine in the morning for not having walked yet.
 
 ## Comparing two things
 

@@ -14,6 +14,7 @@ import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.domain.Caffeine
 import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.Glucose
+import com.prestondihle.healthtracker.domain.GlucoseAnalysis
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
@@ -143,6 +144,22 @@ private const val CURVE_STEP_MAX_SECONDS = 600L
  * most.
  */
 private val SLEEP_HISTORY: Duration = Duration.ofHours(18)
+
+/**
+ * The parts of the summary strip that are about today rather than the window.
+ *
+ * Nulls are all "nothing to say" rather than zero: no covered day has no time in
+ * range, and no running fast has no duration.
+ */
+data class TodaySummaryState(
+    /** Share of today so far inside the target band, or null below coverage. */
+    val timeInRange: Float? = null,
+    val fastingSince: Instant? = null,
+    val now: Instant = Instant.now(),
+) {
+    val fastDuration: Duration?
+        get() = fastingSince?.let { Duration.between(it, now) }
+}
 
 data class TodayUiState(
     val range: MasterRange = MasterRange.DAY,
@@ -617,6 +634,48 @@ class TodayViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = TodayUiState(zoneId = zoneId),
+            )
+
+    /**
+     * The two figures the summary strip needs that the graph does not carry.
+     *
+     * Its own flow because both are about *today* while [uiState] is about the
+     * window, and the window is dragged and zoomed. Time in range read off the
+     * plotted glucose would report the last three hours at the 3h chip and change
+     * every time the reader zoomed, which is a figure that looks like a day's and
+     * is not; the fast is not on that state at all, since the master graph has
+     * never drawn one.
+     */
+    val summary: StateFlow<TodaySummaryState> =
+        combine(
+                repository.getBloodSugarForDate(LocalDate.now(zoneId)),
+                repository.getActiveFastingSession(),
+                repository.getUserGoals(),
+            ) { glucose, fast, goals ->
+                val today = LocalDate.now(zoneId)
+                val now = Instant.now()
+                TodaySummaryState(
+                    // Measured against the day *so far* rather than the whole
+                    // day, the rule the Fuel card settled: against a full day a
+                    // monitored morning covers a third of it and reports nothing
+                    // until evening.
+                    timeInRange =
+                        GlucoseAnalysis.over(
+                                readings = glucose.map { it.timestamp to it.mgDl },
+                                start = today.atStartOfDay(zoneId).toInstant(),
+                                end = now,
+                                targetLowMgDl = goals?.glucoseTargetLowMgDl ?: 70,
+                                targetHighMgDl = goals?.glucoseTargetHighMgDl ?: 140,
+                            )
+                            ?.timeInRange,
+                    fastingSince = fast?.startInstant,
+                    now = now,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = TodaySummaryState(),
             )
 
     init {

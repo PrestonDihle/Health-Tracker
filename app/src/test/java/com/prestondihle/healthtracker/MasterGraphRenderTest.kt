@@ -47,6 +47,7 @@ import com.prestondihle.healthtracker.ui.components.MealListCard
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.today.TodayScreen
 import com.prestondihle.healthtracker.ui.today.TodayViewModel
+import com.prestondihle.healthtracker.ui.trends.TrendsViewModel
 import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
 import java.time.Duration
 import java.time.Instant
@@ -149,10 +150,22 @@ class MasterGraphRenderTest {
         runBlocking { seed(repository) }
         val viewModel = TodayViewModel(repository, ZoneId.of("UTC"))
         val orderViewModel = CardOrderViewModel(repository, "today")
+        // Built here and not inside `setContent`, which is not style: constructed
+        // in the composable lambda it is rebuilt on every recomposition, each
+        // copy starting its own flows, each emission provoking the next
+        // recomposition -- a genuine infinite composition loop. It cost three
+        // runs to find, because it presents as `AppNotIdleException` on whichever
+        // test happens to be slowest, which is the same face the documented
+        // load-timeout wears.
+        //
+        // Same zone as everything else in this suite: the strip is about *today*,
+        // and a view model on the machine's own zone would disagree with the rest
+        // of the screen about which day that is for anyone west of Greenwich.
+        val trendsViewModel = TrendsViewModel(repository, ZoneId.of("UTC"))
         composeRule.setContent {
             HealthTrackerTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    TodayScreen(viewModel, orderViewModel)
+                    TodayScreen(viewModel, orderViewModel, trendsViewModel)
                 }
             }
         }

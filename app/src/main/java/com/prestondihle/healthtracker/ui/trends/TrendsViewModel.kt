@@ -386,11 +386,36 @@ data class StreakCount(
  */
 data class RecordsUiState(
     val records: PersonalRecords = PersonalRecords(),
-    val stepStreak: StreakCount = StreakCount(),
-    val proteinStreak: StreakCount = StreakCount(),
-    val supplementStreak: StreakCount = StreakCount(),
     val historyDays: Long = RECORD_HISTORY_DAYS,
 )
+
+/**
+ * The running streaks, split off from the records they share a card with.
+ *
+ * Two flows rather than one because two screens want different halves at very
+ * different prices. The records read a year of glucose to find the best day in
+ * range; the streaks read day-indexed rows and a handful of supplement ticks.
+ * The Today strip wants only the streaks, and Today is the tab the app opens on
+ * -- folded together, glancing at the day would pay for a CGM archive.
+ */
+data class StreaksUiState(
+    val step: StreakCount = StreakCount(),
+    val protein: StreakCount = StreakCount(),
+    val supplement: StreakCount = StreakCount(),
+) {
+    /**
+     * The ones with something to measure, which is what a strip should show.
+     *
+     * "Step goal" rather than "Steps", and not only to avoid colliding with the
+     * Steps trend card sharing the Activity screen: a streak counts the days that
+     * *met the goal*, which is a different thing from the days that had steps in
+     * them, and the shorter label quietly claims the second.
+     */
+    val running: List<Pair<String, StreakCount>>
+        get() =
+            listOf("Step goal" to step, "Protein" to protein, "Supplements" to supplement)
+                .filter { it.second.available }
+}
 
 data class MealResponseState(
     val ranked: List<ScoredMeal> = emptyList(),
@@ -941,38 +966,18 @@ class TrendsViewModel(
      */
     val records: StateFlow<RecordsUiState> =
         combine(
-                combine(
-                    repository.getHealthSnapshots(
-                        LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
-                        LocalDate.now(zoneId),
-                    ),
-                    repository.getUserGoals(),
-                ) { snapshots, goals -> snapshots to (goals ?: UserGoals()) },
-                combine(
-                    repository.getSupplements(),
-                    repository.getSupplementsTakenBetween(
-                        LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
-                        LocalDate.now(zoneId),
-                    ),
-                ) { supplements, taken -> supplements to taken },
-                combine(
-                    repository.getGripStrengths(
-                        LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
-                        LocalDate.now(zoneId),
-                    ),
-                    repository.getAftAttempts(),
-                    repository.getAllFastingSessions(),
-                ) { grips, attempts, fasts -> Triple(grips, attempts, fasts) },
+                repository.getUserGoals(),
+                repository.getGripStrengths(
+                    LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                    LocalDate.now(zoneId),
+                ),
+                repository.getAftAttempts(),
+                repository.getAllFastingSessions(),
                 repository.getBloodSugarBetween(
                     LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
                     LocalDate.now(zoneId),
                 ),
-            ) { daily, stack, performance, glucose ->
-                val (snapshots, goals) = daily
-                val (supplements, takenByDay) = stack
-                val (grips, attempts, fasts) = performance
-                val today = LocalDate.now(zoneId)
-
+            ) { goals, grips, attempts, fasts, glucose ->
                 RecordsUiState(
                     records =
                         PersonalBests.from(
@@ -982,12 +987,46 @@ class TrendsViewModel(
                             timeInRangeByDay =
                                 bestTimeInRangeByDay(
                                     glucose.map { it.timestamp to it.mgDl },
-                                    goals,
+                                    goals ?: UserGoals(),
                                     zoneId,
                                 ),
                             zoneId = zoneId,
-                        ),
-                    stepStreak =
+                        )
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = RecordsUiState(),
+            )
+
+    /**
+     * The running streaks, without the records' year of glucose behind them.
+     *
+     * Split out when the Today strip wanted the streaks and nothing else. Today
+     * is the tab the app opens on, and subscribing it to [records] would have
+     * meant a glance at the day paying for a CGM archive to answer a question
+     * about supplements. Everything here is day-indexed rows and a handful of
+     * ticks.
+     */
+    val streaks: StateFlow<StreaksUiState> =
+        combine(
+                repository.getHealthSnapshots(
+                    LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                    LocalDate.now(zoneId),
+                ),
+                repository.getUserGoals(),
+                repository.getSupplements(),
+                repository.getSupplementsTakenBetween(
+                    LocalDate.now(zoneId).minusDays(RECORD_HISTORY_DAYS - 1),
+                    LocalDate.now(zoneId),
+                ),
+            ) { snapshots, rawGoals, supplements, takenByDay ->
+                val goals = rawGoals ?: UserGoals()
+                val today = LocalDate.now(zoneId)
+
+                StreaksUiState(
+                    step =
                         streakOver(
                             available = goals.dailyStepGoal != null,
                             today = today,
@@ -999,7 +1038,7 @@ class TrendsViewModel(
                                         .toSet()
                                 },
                         ),
-                    proteinStreak =
+                    protein =
                         streakOver(
                             available = goals.dailyProteinTarget != null,
                             today = today,
@@ -1011,7 +1050,7 @@ class TrendsViewModel(
                                         .toSet()
                                 },
                         ),
-                    supplementStreak =
+                    supplement =
                         streakOver(
                             available = supplements.isNotEmpty(),
                             today = today,
@@ -1036,7 +1075,7 @@ class TrendsViewModel(
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = RecordsUiState(),
+                initialValue = StreaksUiState(),
             )
 
     /**

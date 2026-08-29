@@ -34,6 +34,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
     val aft by viewModel.aft.collectAsStateWithLifecycle()
     val training by viewModel.training.collectAsStateWithLifecycle()
     val records by viewModel.records.collectAsStateWithLifecycle()
+    val streaks by viewModel.streaks.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val chartColors = LocalChartColors.current
 
@@ -84,7 +85,7 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                     // that measures it. Like the AFT card it ignores the range
                     // chips entirely -- a personal best that changed when a chart
                     // window moved would be describing the window.
-                    ReorderableCard("records") { RecordsCard(records) },
+                    ReorderableCard("records") { RecordsCard(records, streaks) },
                     // The AFT sits on Activity because it is the one thing here
                     // that is a test rather than a trend -- and its score moves
                     // on the same training the rest of this tab plots.

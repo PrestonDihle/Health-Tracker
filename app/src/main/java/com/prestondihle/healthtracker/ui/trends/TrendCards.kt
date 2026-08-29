@@ -591,19 +591,13 @@ private val RECORD_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy")
  * a sentence, and stops.
  */
 @Composable
-internal fun RecordsCard(state: RecordsUiState) {
+internal fun RecordsCard(state: RecordsUiState, streaks: StreaksUiState) {
     val records = state.records
     TrendCard(title = "Records and streaks", subtitle = "your own best, and what is running") {
-        val streaks =
-            listOf(
-                "Step goal" to state.stepStreak,
-                "Protein" to state.proteinStreak,
-                "Supplements" to state.supplementStreak,
-            )
         // A streak with nothing to measure against is dropped, not drawn as a
         // nought: a reader who has never set a protein target has not broken a
         // protein streak.
-        val running = streaks.filter { it.second.available }
+        val running = streaks.running
         if (running.isNotEmpty()) {
             running.forEach { (label, streak) ->
                 RecordRow(

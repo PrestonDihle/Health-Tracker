@@ -126,7 +126,24 @@ fun TrackerNavHost(appContainer: AppContainer) {
                     viewModel(
                         factory = TodayViewModel.provideFactory(appContainer.trackerRepository)
                     )
-                TodayScreen(vm, cardOrderVm(appContainer, Screen.Today.route))
+                TodayScreen(
+                    vm,
+                    cardOrderVm(appContainer, Screen.Today.route),
+                    trendsViewModel,
+                    // Same options as the bottom bar's own taps, so a chip and
+                    // the tab button below it land in exactly the same place --
+                    // a second navigation path with different flags would leave
+                    // the back stack depending on which of the two was used.
+                    onOpenTab = { route ->
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
             composable(Screen.Log.route) {
                 LogScreen(

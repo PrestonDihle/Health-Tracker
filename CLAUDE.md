@@ -310,6 +310,49 @@ run of deficit days scaled to themselves puts every point below a zero clipped o
 `ChartBoundsTest`'s failure on the one chart whose reference is the difference between losing weight
 and gaining it.
 
+### The Today summary strip
+
+A wrapped row of chips above everything on Today: steps against goal, sleep, time in range, net
+calories, the running fast, and any streak with days on it. Each opens the tab that owns its figure,
+using **the same navigation options the bottom bar uses** — a second path with different flags would
+leave the back stack depending on which of the two the reader tapped.
+
+**A chip with nothing to say is absent, not blank.** Steps before the first sync, time in range on a
+phone with no monitor, a fast nobody started: an em dash in a strip this small reads as a broken row,
+where a missing chip reads as a metric this reader does not use. With nothing at all it takes no
+height, which is the right amount of screen for it on a first run. Only a *met* goal is marked;
+flagging every unmet one at nine in the morning would have the strip scolding the reader for the time
+of day.
+
+`TodayViewModel.summary` is its own flow because both of its figures are about **today** while
+`uiState` is about the *window*, which is zoomed and dragged. Time in range read off the plotted
+glucose would report the last three hours at the 3h chip — a figure that looks like a day's and is
+not — and the fast is not on that state at all. It is measured against *the day so far*, the rule the
+Fuel card settled.
+
+**`TrendsViewModel.streaks` was split off `records` for this strip.** Today is the tab the app opens
+on, and `records` reads a year of glucose to find a best day in range; folded together, a glance at
+the day would have paid for a CGM archive to answer a question about supplements. The streaks read
+day-indexed rows and a handful of ticks. Activity subscribes to both; Today to `streaks` alone.
+
+The step chip prints a tenth (`6.8k / 10k`). Truncating to whole thousands reads 9,900 steps as
+*9k / 10k*, a thousand short of the truth on exactly the evening somebody is deciding whether to walk
+round the block again.
+
+The streak label is **"Step goal"**, not "Steps" — partly because a streak counts days that *met the
+goal* rather than days that had steps, and partly because "Steps" collides with the Steps trend card
+on the same screen. `ScreenRenderTest` caught the collision as *"Expected at most 1 node but found
+2"*, which is worth knowing as the shape that failure takes.
+
+**A view model constructed inside `setContent` is an infinite composition loop.** `MasterGraphRenderTest`
+gained a `TrendsViewModel` for the strip and it was first written inline in the `TodayScreen(...)`
+call — so it was rebuilt on every recomposition, each copy starting its own flows and each emission
+provoking the next recomposition. It presents as `AppNotIdleException` **on whichever test happens to
+be slowest**, which is the same face the documented load-timeout wears, so it read as load for three
+runs. What separated them was this file's own advice: the known-green-commit run *passed*, which
+pointed the finger back at the change rather than the machine. Hoist the view model out of the
+composable lambda, as the two beside it already were.
+
 ### The compare card
 
 Two daily series on one `DualAxisTimeChart`, on Wellness. **No new chart code** — that chart has been
