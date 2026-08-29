@@ -3,7 +3,9 @@ package com.prestondihle.healthtracker
 import com.prestondihle.healthtracker.data.ExerciseSet
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
+import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.ui.trends.TrendsRange
 import com.prestondihle.healthtracker.ui.trends.TrendsUiState
 import org.junit.Assert.assertEquals
@@ -287,6 +289,40 @@ class TrendsBucketsTest {
         assertEquals(readings.size, averaged.size)
         assertEquals(readings.map { it.date }, averaged.map { it.date })
         assertTrue(averaged.any { it.value != null })
+    }
+
+    @Test
+    fun `the goal ETA is the same date whatever range chip is showing`() {
+        // Thirty days of steady loss toward a goal below. The fit is specified as
+        // thirty days; fed the drawn window instead it fits whatever the chip is
+        // -- fourteen days at the default -- and the printed date moves when the
+        // reader widens the chart. Found on the phone, where "270 lb by 5 Sep"
+        // turned out to be a fortnight's slope wearing a month's label.
+        val weights =
+            (0L until 30L).map { back ->
+                WeightEntry(date = wednesday.minusDays(back), weightKg = 90f + back * 0.1f)
+            }
+
+        fun etaAt(range: TrendsRange) =
+            TrendsUiState(
+                    range = range,
+                    // The query is widened at the source, so a state built for a
+                    // narrow chip still carries the full fit window.
+                    startDate = wednesday.minusDays(range.days - 1),
+                    endDate = wednesday,
+                    weights = weights,
+                    goals = UserGoals(goalWeightKg = 85f),
+                    settings = UserSettings(),
+                    zoneId = zone,
+                )
+                .weightEta
+
+        val fortnight = etaAt(TrendsRange.TWO_WEEKS)
+        val quarter = etaAt(TrendsRange.THREE_MONTHS)
+
+        assertTrue(fortnight != null)
+        assertEquals(fortnight!!.reachedOn, quarter!!.reachedOn)
+        assertEquals(fortnight.perDay, quarter.perDay, 0.0001f)
     }
 
     @Test

@@ -629,10 +629,15 @@ data class TrendsUiState(
     /**
      * Where the last month's weighing lands, in kilograms, or null on a refusal.
      *
-     * Computed from [weightByDay] rather than from the drawn series, so it is the
-     * same month of readings whatever range chip is selected -- a projection that
-     * changed its slope when a chart widened would be describing the chip. It is
-     * also why this survives the weekly ranges intact: the fit never saw buckets.
+     * Reads [weightByDay], which is deliberately loaded a fit window wide however
+     * narrow the chip is -- see the query. Fed the drawn window instead, this
+     * fitted fourteen days at the default range and the printed date moved
+     * whenever the reader widened the chart: a projection describing the chip
+     * rather than the reader, and undetectable by eye because both versions print
+     * a confident date.
+     *
+     * Reading the merged rows rather than the drawn series is also what makes it
+     * survive the weekly ranges intact: the fit never sees a bucket.
      */
     val weightEta: GoalEta?
         get() =
@@ -819,12 +824,26 @@ class TrendsViewModel(
             .flatMapLatest { selected ->
                 val end = LocalDate.now(zoneId)
                 val start = end.minusDays(selected.days - 1)
+                // The weight-bearing tables are read at least a fit window wide,
+                // however narrow the chip is. The goal projection fits thirty
+                // days, and read over the chosen range instead it silently fits
+                // whatever the chip happens to be -- fourteen days at the
+                // default -- so the printed date moved when the reader widened a
+                // chart. That is the projection describing the chip rather than
+                // the reader, and it is invisible: both versions print a
+                // confident date.
+                //
+                // Nothing drawn changes. `series()` re-projects every row onto
+                // `days`, which is still the chosen window, so the extra rows
+                // reach the fit and nothing else. Both tables are one row per
+                // day.
+                val fitStart = minOf(start, end.minusDays(GoalProjection.FIT_DAYS - 1))
 
                 combine(
                     repository.getDailyLogs(start, end),
-                    repository.getHealthSnapshots(start, end),
+                    repository.getHealthSnapshots(fitStart, end),
                     combine(
-                        repository.getWeights(start, end),
+                        repository.getWeights(fitStart, end),
                         repository.getWaists(start, end),
                         repository.getGripStrengths(start, end),
                     ) { weights, waists, grips ->

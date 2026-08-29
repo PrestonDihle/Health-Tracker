@@ -68,6 +68,36 @@ fun LogScreen(
         verticalArrangement = Arrangement.spacedBy(CardGap),
         contentPadding = PaddingValues(vertical = CardGap),
     ) {
+        // Pinned above the reorderable cards rather than being one of them, and
+        // the phone is what settled it: declared first in the list it still
+        // appeared *last*, because `effectiveCardOrder` appends ids a saved order
+        // has never seen to the bottom -- which is right for a card added in an
+        // update and exactly wrong for this one, whose entire value is being the
+        // first thing under the thumb. It is a row, not a card: a shortcut to
+        // things other tabs own, like the summary strip on Today, and nothing
+        // below it writes anything this row does.
+        item {
+            UsualCard(
+                state = state,
+                usual = usual,
+                onWater = {
+                    viewModel.logHydration(it)
+                    toast("Logged ${Units.mlToWholeOz(it)} oz")
+                },
+                onCaffeine = {
+                    viewModel.logCaffeine(it)
+                    toast("Logged $it mg caffeine")
+                },
+                onSlot = { supplements ->
+                    viewModel.takeSlot(supplements)
+                    toast(
+                        if (supplements.size == 1) "Took ${supplements.first().name}"
+                        else "Took ${supplements.size} supplements"
+                    )
+                },
+            )
+        }
+
         // Declared in their out-of-the-box order; the reader's saved order, if
         // any, is reconciled against this. Meals lead by default: the most-logged
         // thing here, and the card doubles as the last day's meals to check
@@ -75,34 +105,6 @@ fun LogScreen(
         reorderableCards(
             cards =
                 listOf(
-                    // First by default, and it is the only card here that is
-                    // purely a shortcut: everything below writes something this
-                    // screen alone can write, while this row repeats what the
-                    // reader has already been doing. The widget makes the case --
-                    // water, caffeine and the stack are the entries made while
-                    // doing something else, and Log should not be slower than a
-                    // home screen for them.
-                    ReorderableCard("usual") {
-                        UsualCard(
-                            state = state,
-                            usual = usual,
-                            onWater = {
-                                viewModel.logHydration(it)
-                                toast("Logged ${Units.mlToWholeOz(it)} oz")
-                            },
-                            onCaffeine = {
-                                viewModel.logCaffeine(it)
-                                toast("Logged $it mg caffeine")
-                            },
-                            onSlot = { supplements ->
-                                viewModel.takeSlot(supplements)
-                                toast(
-                                    if (supplements.size == 1) "Took ${supplements.first().name}"
-                                    else "Took ${supplements.size} supplements"
-                                )
-                            },
-                        )
-                    },
                     ReorderableCard("meals") {
                         // Hoisted out of the row lambda: scoring walks the whole
                         // trace, and read per row it would be walked once per meal

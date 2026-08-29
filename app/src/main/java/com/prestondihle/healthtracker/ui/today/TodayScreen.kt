@@ -782,7 +782,10 @@ private fun TodaySummaryStrip(
                     // 9,900 steps as "9k / 10k", which is a thousand short of
                     // the truth on exactly the evening the reader is deciding
                     // whether to go round the block again.
-                    text = goals.dailyStepGoal?.let { "${stepsK(steps)} / ${it / 1000}k steps" }
+                    // Both halves keep their tenth. The goal is the reader's own
+                    // figure and 12,500 truncated to "12k" understates the thing
+                    // they are being measured against by five hundred steps.
+                    text = goals.dailyStepGoal?.let { "${stepsK(steps)} / ${stepsK(it)} steps" }
                         ?: "${stepsK(steps)} steps",
                     // Met is worth marking; short of it is not, because a strip
                     // that flags every unfinished goal at nine in the morning is
@@ -843,5 +846,12 @@ private fun TodaySummaryStrip(
 /** One chip: what it says, whether its goal is met, and where it goes. */
 private data class SummaryChip(val text: String, val met: Boolean = false, val route: String)
 
-/** `6.8k`, keeping the tenth that whole thousands would round away. */
-private fun stepsK(steps: Int): String = "%.1fk".format(steps / 1000f)
+/**
+ * `6.8k`, keeping the tenth that whole thousands would round away.
+ *
+ * A round figure drops the tenth, so a 10,000-step goal reads "10k" rather than
+ * the fussier "10.0k" -- the digit is there to carry information, and on a round
+ * number it carries none.
+ */
+private fun stepsK(steps: Int): String =
+    "%.1fk".format(steps / 1000f).replace(".0k", "k")
