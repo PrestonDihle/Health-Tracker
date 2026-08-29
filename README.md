@@ -812,10 +812,28 @@ asks "was this measured"; going back to the source asks "is it worth a query",
 and a reader taking three fingersticks a day has hours of genuine emptiness that
 no re-read will ever fill.
 
-## Dark mode
+## Light and dark
 
-Follows the system setting, with no in-app switch — nobody wants this app light
-while everything else is dark. The dark scheme is not the light one inverted:
+Follows your phone by default, and **Settings → Theme** overrides it: *System*,
+*Light*, *Dark*.
+
+Three options rather than a switch, and that is what makes the override
+worth having at all. This app deliberately had no theme setting for a long time,
+because a per-app switch is a second place for the theme to live and a state that
+can drift out of step with the phone. Keeping *System* on the list — and as the
+default — answers that: following the phone is never somewhere you can get
+stranded outside of. A plain on/off toggle could not have said the same, because
+the first tap would put the phone's own setting permanently out of reach.
+
+What earns it is the charts. Every line here has a colour chosen separately for
+each scheme, and the separations they were picked for are not identical between
+the two, so reading a plot in whichever scheme it is clearest in is a real
+reason to differ from your phone for a few minutes.
+
+The home-screen widget is not covered. It sits on the launcher next to every
+other widget and follows the phone with them.
+
+The dark scheme is not the light one inverted:
 the brand's own tones *are* dark ones, so they lift rather than flip, and cards
 stay above the background, which on a dark ground means lighter.
 

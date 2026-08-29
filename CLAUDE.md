@@ -1472,7 +1472,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 21, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 22, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -1569,6 +1569,18 @@ refused to open. It now replays 14-to-15 then 20-to-21 and compares `PRAGMA tabl
 shape. **A new migration that alters an existing table means finding that table's existing test, not
 writing a fresh one.**
 
+`MIGRATION_21_22` adds `UserSettings.themeMode`, the **seventh** alteration to that table and the
+fourth `NOT NULL`-with-a-seeded-default on it after `smoothGlucose`, `sex` and `aftLane`. TEXT,
+because `Converters` stores an enum by `name` — the meal presets are the same trap pointing the
+other way, where a column that reads as a time is an INTEGER. It joins the UserSettings replay in
+`MigrationSchemaTest`, in **both** of that table's tests, rather than taking one of its own.
+
+Its seed is `'SYSTEM'`, and the `MIGRATION_17_18` question — *what would a NULL do on screen* —
+answers it in one step. This column decides the colours of the first frame, so there is no reading of
+NULL that draws nothing; whatever it meant would still have to be a scheme. Seeding it with the
+behaviour that shipped before the column existed is the only value that leaves an upgrading reader's
+app looking exactly as they left it.
+
 `MIGRATION_19_20` adds the four finer nutrition figures to `HealthDaySnapshot` *and* `MealEntry` — see
 *The finer nutrition figures*. Because it alters `MealEntry`, **both** of that table's schema tests
 had to gain it: the column diff and the `hidden`-column test each rebuild the table from its own
@@ -1609,11 +1621,37 @@ the top fifth of a 200 ceiling is never reached and spending it flattens the 30 
 meal into a wiggle. Both charts still widen an axis to fit an outlier, so a 210 reading plots; it is
 simply not budgeted for.
 
-The theme follows the system light/dark setting, with **no in-app override** — a per-app switch is a
-setting to maintain and a state to get out of step with the phone. Dynamic color is deliberately
-absent in both: leaving it on would let Android 12+ derive the palette from the user's wallpaper and
-discard the brand colors entirely. Palette: Baltic Blue `#2F6690` (primary), Olive Bark `#625834`
-(secondary), Alabaster Grey `#D9DCD6` (background), Yale Blue `#16425B`, Inferno `#A30000` (error).
+The theme follows the system light/dark setting **by default**, and `UserSettings.themeMode` can
+override it. Dynamic color is deliberately absent in both: leaving it on would let Android 12+ derive
+the palette from the user's wallpaper and discard the brand colors entirely. Palette: Baltic Blue
+`#2F6690` (primary), Olive Bark `#625834` (secondary), Alabaster Grey `#D9DCD6` (background), Yale
+Blue `#16425B`, Inferno `#A30000` (error).
+
+**The override is three-state, and that is the whole of why it was allowed to exist.** This file
+said for a long time that there would be no in-app switch, because a per-app switch is a second place
+for the theme to live and a state that can get out of step with the phone — and that argument is
+answered only by keeping *follow the phone* reachable. `ThemeMode.SYSTEM` is the default and is one
+of the three chips, so it is never a state the reader can be stranded outside of. A two-state toggle
+could not have promised that: the first tap would make the phone's own setting unreachable for ever,
+and every later "why is this app light" would have no way back.
+
+What earns the override is that **the charts are the reason**. Every series here carries two
+hand-picked values, one per scheme, and the separations they were chosen for genuinely differ between
+the two — so reading a plot in the scheme it is legible in is a real reason to differ from the phone
+for a few minutes. That is not true of a text app, which is why this is not general advice.
+
+`MainActivity` resolves the mode through `ThemeMode?.resolvedDark()` and hands
+`HealthTrackerTheme` a plain `Boolean`. Two things about that are load-bearing. The parameter stays a
+`Boolean` because the render tests pass a *scheme* directly to capture both, and threading a settings
+enum through them would make those calls say something about a preference when what they are choosing
+is a ground. And **`null` — settings not yet read off disk — resolves exactly as `SYSTEM` does**: the
+row arrives a frame or two after the window, and any other reading paints one scheme and repaints in
+the other on every launch, worst for precisely the reader whose choice differs from their phone.
+`ScreenRenderTest` pins that equality rather than the two obvious cases.
+
+**The home-screen widget is deliberately outside all of this.** It draws through `GlanceTheme` on the
+launcher's own surface, and a widget disagreeing with every other widget beside it would be reading
+this setting somewhere it does not apply.
 
 **The dark scheme is not the light one inverted.** The brand's own tones *are* the dark ones — Yale
 Blue and Olive Bark exist to be read on alabaster — so reusing them as foreground colours puts

@@ -44,6 +44,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.AftLane
 import com.prestondihle.healthtracker.data.Sex
+import com.prestondihle.healthtracker.data.ThemeMode
 import com.prestondihle.healthtracker.data.UnitSystemEnum
 import kotlin.math.roundToInt
 import com.prestondihle.healthtracker.data.WeightSubGoal
@@ -231,6 +232,39 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+                    },
+                    ReorderableCard("theme") {
+                        SettingsCard(title = "Theme") {
+                            // Chips rather than a switch, because the choice is
+                            // genuinely three-way. A switch would have to mean
+                            // "override the phone: yes/no" or "dark: yes/no", and
+                            // the second of those makes "follow the phone"
+                            // unreachable after the first tap.
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ThemeMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        selected = state.settings.themeMode == mode,
+                                        onClick = {
+                                            viewModel.saveSettings(
+                                                state.settings.copy(themeMode = mode)
+                                            )
+                                        },
+                                        label = { Text(mode.label) },
+                                    )
+                                }
+                            }
+                            Text(
+                                "System follows your phone, which is where this started and " +
+                                    "is still the default. The override is here because the " +
+                                    "charts are: every line has a colour picked separately for " +
+                                    "each scheme, and reading a plot in the one it looks best " +
+                                    "in is worth a tap. The home-screen widget is not covered " +
+                                    "— it sits on the launcher and follows the phone with " +
+                                    "every other widget beside it.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     },
                     ReorderableCard("stepSource") {
                         SettingsCard(title = "Step source") {

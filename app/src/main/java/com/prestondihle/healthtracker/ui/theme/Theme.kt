@@ -7,6 +7,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import com.prestondihle.healthtracker.data.ThemeMode
 
 /**
  * Light scheme built from the brand palette.
@@ -112,11 +113,41 @@ private val BrandDarkColorScheme =
   )
 
 /**
- * Follows the system setting.
+ * Which scheme a [ThemeMode] asks for, here and now.
  *
- * No in-app override: a per-app theme switch is a setting to maintain and a
- * state to get out of step with the phone, and nobody wants this app light while
- * everything else is dark.
+ * `null` -- settings not read off disk yet -- resolves the same way [SYSTEM]
+ * does, which is what keeps the first frame from flashing. The row arrives a
+ * frame or two after the window, and any other reading would paint one scheme
+ * and then repaint in the other on every launch.
+ *
+ * Composable rather than a plain function because [isSystemInDarkTheme] is a
+ * composition-scoped read: it has to re-run when the phone's own setting changes
+ * under a reader sitting on SYSTEM, which a value captured once would not.
+ */
+@Composable
+fun ThemeMode?.resolvedDark(): Boolean =
+  when (this) {
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
+    ThemeMode.SYSTEM, null -> isSystemInDarkTheme()
+  }
+
+/**
+ * The brand scheme, in whichever of its two grounds is asked for.
+ *
+ * **The default still follows the phone**, and the parameter is deliberately a
+ * plain `Boolean` rather than a `ThemeMode`: the render tests pass a scheme
+ * directly to capture both, and threading a settings enum through them would
+ * make every one of those calls say something about a *preference* when what it
+ * is choosing is a *scheme*. `MainActivity` resolves the mode with
+ * [resolvedDark] and hands the answer in.
+ *
+ * There is an in-app override now, and the argument that there should not be is
+ * worth keeping rather than deleting: a per-app switch is a second place for the
+ * theme to live and a state that can disagree with the phone. What answers it is
+ * that [ThemeMode.SYSTEM] exists and is the default, so "follow the phone" is
+ * never a state the reader can be stranded outside of -- which a two-state
+ * toggle could not have promised.
  */
 @Composable
 fun HealthTrackerTheme(

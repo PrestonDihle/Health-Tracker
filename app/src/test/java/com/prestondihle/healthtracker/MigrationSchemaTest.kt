@@ -589,6 +589,10 @@ class MigrationSchemaTest {
             // time reads as -- getting that wrong is exactly the mismatch this
             // replay exists to catch, and it would not fail until the next launch.
             AppDatabase.migration17To18Statements.forEach { raw.execSQL(it) }
+            // The theme mode, the seventh. TEXT, because `Converters` stores an
+            // enum by name -- the meal presets are the trap in the other
+            // direction, where something that reads as a time is an INTEGER.
+            AppDatabase.migration21To22Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -628,6 +632,7 @@ class MigrationSchemaTest {
             AppDatabase.migration13To14Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration16To17Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration17To18Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration21To22Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
@@ -653,7 +658,7 @@ class MigrationSchemaTest {
                 }
             raw.query(
                     "SELECT `smoothGlucose`, `sex`, `aftLane`, `mealPresetBreakfast`, " +
-                        "`mealPresetLunch`, `mealPresetDinner` FROM `UserSettings`"
+                        "`mealPresetLunch`, `mealPresetDinner`, `themeMode` FROM `UserSettings`"
                 )
                 .use {
                     it.moveToNext()
@@ -670,6 +675,12 @@ class MigrationSchemaTest {
                     assertEquals(LocalTime.of(6, 30).toSecondOfDay(), it.getInt(3))
                     assertEquals(LocalTime.of(12, 0).toSecondOfDay(), it.getInt(4))
                     assertEquals(LocalTime.of(18, 30).toSecondOfDay(), it.getInt(5))
+                    // The theme, and the seed matters more here than it looks:
+                    // this column decides the colours of the very first frame, so
+                    // there is no value that would draw nothing. Anything but
+                    // SYSTEM would change the look of an upgrading reader's app
+                    // without them having asked for it.
+                    assertEquals("SYSTEM", it.getString(6))
                 }
         } finally {
             db.close()

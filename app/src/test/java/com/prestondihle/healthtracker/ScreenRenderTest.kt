@@ -27,6 +27,7 @@ import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.Sex
+import com.prestondihle.healthtracker.data.ThemeMode
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WeightEntry
@@ -37,6 +38,7 @@ import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.theme.resolvedDark
 import com.prestondihle.healthtracker.ui.components.CardFold
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.EntryList
@@ -763,5 +765,33 @@ class ScreenRenderTest {
 
         composeRule.onNodeWithText("Last 7 days").assertIsDisplayed()
         composeRule.onNodeWithText("Entry 4").assertDoesNotExist()
+    }
+
+    /**
+     * What an unread setting resolves to, which is the whole of the no-flash
+     * guarantee.
+     *
+     * The settings row arrives a frame or two after the window does, so the theme
+     * is asked for a scheme before there is a stored answer. If `null` resolved
+     * any way other than [ThemeMode.SYSTEM]'s way, every launch would paint one
+     * scheme and repaint in the other -- visible, and worst for the reader whose
+     * choice differs from their phone, which is the reader this setting exists
+     * for.
+     */
+    @Test
+    fun `an unread theme setting resolves the same way system does`() {
+        val resolved = mutableMapOf<String, Boolean>()
+        render {
+            resolved["light"] = ThemeMode.LIGHT.resolvedDark()
+            resolved["dark"] = ThemeMode.DARK.resolvedDark()
+            resolved["system"] = ThemeMode.SYSTEM.resolvedDark()
+            resolved["unread"] = (null as ThemeMode?).resolvedDark()
+        }
+
+        // The two explicit modes ignore the phone entirely, which is the point of
+        // having them at all.
+        assertEquals(false, resolved["light"])
+        assertEquals(true, resolved["dark"])
+        assertEquals(resolved["system"], resolved["unread"])
     }
 }

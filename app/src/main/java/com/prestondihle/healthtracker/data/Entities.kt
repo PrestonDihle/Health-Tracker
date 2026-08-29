@@ -16,6 +16,33 @@ enum class DataSourceEnum { MANUAL, HEALTH_CONNECT }
 
 enum class UnitSystemEnum { IMPERIAL, METRIC }
 
+/**
+ * Which colour scheme the app draws in.
+ *
+ * **Three states rather than a boolean, and [SYSTEM] is the point of it.** The
+ * app followed the phone with no override at all, on the argument that a per-app
+ * switch is a state to get out of step with the phone -- and that argument is
+ * only answered by keeping "follow the phone" reachable. A two-state toggle
+ * cannot express it: the first tap makes the phone's own setting unreachable for
+ * ever, and every later question of "why is this app light" has no way back.
+ *
+ * The override exists because the charts are the reason. Every series here has
+ * two hand-picked values, one per scheme, and the separations they were chosen
+ * for differ between them -- so reading a plot in the scheme it looks best in is
+ * a real reason to differ from the phone for a few minutes, which is not true of
+ * a text app.
+ *
+ * The home-screen widget is deliberately not covered: it draws through
+ * `GlanceTheme` on the launcher's surface, and a widget that disagreed with
+ * every other widget beside it would be reading this setting somewhere it does
+ * not apply.
+ */
+enum class ThemeMode(val label: String) {
+    SYSTEM("System"),
+    LIGHT("Light"),
+    DARK("Dark"),
+}
+
 /** Biological sex, for the metrics that read differently by it. UNSPECIFIED is the unset state. */
 enum class Sex { MALE, FEMALE, UNSPECIFIED }
 
@@ -759,6 +786,17 @@ data class UserSettings(
     val mealPresetBreakfast: LocalTime = LocalTime.of(6, 30),
     val mealPresetLunch: LocalTime = LocalTime.of(12, 0),
     val mealPresetDinner: LocalTime = LocalTime.of(18, 30),
+    /**
+     * Light, dark, or whatever the phone is set to.
+     *
+     * `NOT NULL` with a seeded `'SYSTEM'`, the shape [sex], [aftLane] and the
+     * meal presets use, and for the [mealPresetBreakfast] reason rather than the
+     * caffeine-limit one: this drives something drawn on screen from the first
+     * frame, so a NULL would have to be read as *something* anyway and the only
+     * honest reading is the behaviour that shipped before the column existed.
+     * Seeded that way, an upgrading reader sees precisely nothing change.
+     */
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
 )
 
 /**

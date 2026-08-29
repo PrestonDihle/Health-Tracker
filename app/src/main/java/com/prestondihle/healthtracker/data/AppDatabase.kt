@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -623,6 +623,34 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Light, dark or the phone's own setting.
+         *
+         * The seventh alteration to `UserSettings` and the fourth
+         * `NOT NULL`-with-a-seeded-default on it, after `smoothGlucose`, `sex`,
+         * `aftLane` and the three meal presets. TEXT because `Converters` stores
+         * an enum by `name`.
+         *
+         * `'SYSTEM'` is the seed, and the question `MIGRATION_17_18` settles --
+         * what would a NULL do on screen -- answers it in one step here. This
+         * column decides the colours of the first frame, so there is no reading
+         * of NULL that draws nothing; whatever it meant would have to be a
+         * scheme. Seeding it with the behaviour that shipped before the column
+         * existed is the only value that leaves an upgrading reader's app
+         * looking exactly as they left it.
+         */
+        internal val migration21To22Statements =
+            listOf(
+                "ALTER TABLE `UserSettings` ADD COLUMN `themeMode` TEXT NOT NULL DEFAULT 'SYSTEM'"
+            )
+
+        private val MIGRATION_21_22 =
+            object : Migration(21, 22) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration21To22Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -657,6 +685,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_18_19,
                                 MIGRATION_19_20,
                                 MIGRATION_20_21,
+                                MIGRATION_21_22,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

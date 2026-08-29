@@ -12,9 +12,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.ui.navigation.TrackerNavHost
 import com.prestondihle.healthtracker.ui.theme.HealthTrackerTheme
+import com.prestondihle.healthtracker.ui.theme.resolvedDark
 import com.prestondihle.healthtracker.work.CaffeineLastCallWorker
 
 class MainActivity : ComponentActivity() {
@@ -52,7 +55,20 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            HealthTrackerTheme {
+            // Read here rather than inside the theme so there is exactly one
+            // subscription to it, and collected with a null initial value on
+            // purpose: the row arrives a frame or two after the window, and
+            // `resolvedDark` reads that null as "follow the phone" -- the
+            // behaviour that shipped before this setting existed. Guessing a
+            // scheme instead would paint one and repaint in the other on every
+            // launch, which is a visible flash on the reader whose choice
+            // differs from their phone.
+            val settings by
+                appContainer.trackerRepository
+                    .getUserSettings()
+                    .collectAsStateWithLifecycle(initialValue = null)
+
+            HealthTrackerTheme(darkTheme = settings?.themeMode.resolvedDark()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
