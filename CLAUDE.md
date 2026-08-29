@@ -1472,7 +1472,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 22, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 23, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -1581,6 +1581,13 @@ NULL that draws nothing; whatever it meant would still have to be a scheme. Seed
 behaviour that shipped before the column existed is the only value that leaves an upgrading reader's
 app looking exactly as they left it.
 
+`MIGRATION_22_23` adds the heart-rate axis to `UserGoals` — the fifth alteration to that table — and
+is the one migration here carrying **both default policies at once**. The two plot bounds are seeded
+with the exact figures the axis was hard-coded at; the reference rule carries none. It is the
+clearest worked example of *ask what a NULL would do on screen, not whether the column is new*,
+because the same migration answers that question both ways in three lines. See *Units and theme* for
+the reasoning, and for why there is no target band to go with it.
+
 `MIGRATION_19_20` adds the four finer nutrition figures to `HealthDaySnapshot` *and* `MealEntry` — see
 *The finer nutrition figures*. Because it alters `MealEntry`, **both** of that table's schema tests
 had to gain it: the column diff and the `hidden`-column test each rebuild the table from its own
@@ -1614,12 +1621,49 @@ Everything is **stored in metric** to match Health Connect and converted at the 
 but presented in exact quarter-inches (`roundToQuarter`, `formatInches` renders `42 1/4"`). Grip
 strength follows the same rule: kilograms in the database, pounds on every screen.
 
-`domain/Glucose.kt` and `domain/Ketones.kt` own their axes for the same reason: the entry stepper,
-the Wellness chart, the master graph and the settings target all have to agree on what the scale
-means, and four copies of the numbers drift. The glucose plot is **60–180 mg/dL**, not 60–200 —
+`domain/Glucose.kt`, `domain/Ketones.kt` and `domain/HeartRate.kt` own their axes for the same
+reason: the entry stepper, the Wellness chart, the master graph and the settings target all have to
+agree on what the scale means, and four copies of the numbers drift. The glucose plot is
+**60–180 mg/dL**, not 60–200 —
 the top fifth of a 200 ceiling is never reached and spending it flattens the 30 mg/dL swing around a
 meal into a wiggle. Both charts still widen an axis to fit an outlier, so a 210 reading plots; it is
 simply not budgeted for.
+
+**`HeartRate` is `Glucose`'s shape applied to the master graph's other configurable axis**, and it
+stops one step short of it. Floor, ceiling and a solid reference rule are settings; there is
+deliberately **no target band**, because heart rate's only plot is the master graph and that plot
+removed its own glucose band for a reason that would recur here exactly — a band backs one series,
+this plot carries eight, and shaded behind carbohydrate curves and step columns it stops reading as a
+target and starts reading as a region of the chart. The rule is the half that survives on a busy
+plot.
+
+Its two defaults follow **different policies in one migration**, and both come from
+`MIGRATION_17_18`'s question rather than from whether the column is new. The plot bounds are seeded
+40 and 180, which are *exactly the figures that axis was hard-coded at* — `MIGRATION_8_9` repeating,
+where a NULL would visibly rescale an existing reader's chart, and changing what a chart looks like
+is the one thing turning a constant into a setting must not do. The reference rule carries **no**
+default, the `MIGRATION_11_12` shape, because nothing was ever drawn on that axis: NULL draws what is
+drawn today, and a seeded value would put a line on the chart of every reader who never asked for
+one. `MIN_PLOT_SPAN` is 30 rather than glucose's 20, since the quantity moves further — a heart rate
+covers 50 bpm between sitting and a brisk walk.
+
+**The master graph opens on three series, not eight** (`DEFAULT_VISIBLE_SERIES`: glucose, heart rate,
+steps). The switches are unchanged and still reach the rest in one tap; what moved is which end the
+reader starts from. Eight series at once is a legible chart of nothing in particular — the macro
+curves, the caffeine decay and the ketone trace each answer a question that was not asked on opening
+the app, and together they bury the two that were: why is the heart rate up, and what moved the
+glucose.
+
+**`labelledAxes` had to move with it**, and this is the part that would have been missed: the default
+pairing was glucose against macros, which was right while all eight were drawn and prints a g/h
+gutter beside three switched-off curves once they are not. An axis labelling nothing on the plot is
+worse than an unlabelled one, because it still looks like a reading. `AxisSelectionTest` now asserts
+the general rule — *every labelled axis has a visible line under it by default* — rather than the
+particular pair, so the next change to either list is caught by the one that is wrong.
+
+Three render tests assumed all eight started on and had to be told otherwise; two of them switch
+caffeine on first, and the switch-everything-off test now turns off **what is on** rather than
+clicking all eight, which under the new default would have switched five *on*.
 
 The theme follows the system light/dark setting **by default**, and `UserSettings.themeMode` can
 override it. Dynamic color is deliberately absent in both: leaving it on would let Android 12+ derive

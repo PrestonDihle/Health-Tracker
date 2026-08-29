@@ -104,6 +104,28 @@ why they stay dashed while the glucose reference line is solid: one is a
 published figure, the other is wherever you decided to put it, and the two should
 not look alike.
 
+### The heart-rate axis
+
+**Settings → Heart rate chart** does for the heart-rate line on Today what the
+blood sugar card does for the glucose one: a floor, a ceiling, and a solid rule
+wherever you want it. Neither bound clips anything — a reading outside them still
+widens the axis to fit. What they change is how much of the plot the ordinary
+range gets, which is the difference between a day's heart rate reading as a flat
+line and reading as the shape it actually was.
+
+The floor and ceiling start at 40 and 180, which is exactly where the axis was
+fixed before it was adjustable, so nothing about your chart moves until you move
+it. The rule starts **off**, because nothing was ever drawn there and switching a
+setting on should not be how you discover a new line on your chart. If your max
+heart rate is in the profile, the stepper tells you where your easy and hard zone
+boundaries fall, since "where should this line go" is the part it cannot answer
+for you.
+
+There is deliberately no shaded target band to go with it. The Today graph
+carries eight possible lines and dropped its own blood sugar band for that
+reason: a wash behind that many series stops reading as one line's target and
+starts reading as a region of the chart.
+
 ## The day at a glance
 
 A row of chips at the top of Today, above everything else: steps against your
@@ -602,6 +624,17 @@ eaten, how it is being absorbed, how much caffeine is still in the body, and wha
 blood sugar, ketones, heart rate and walking did in response. Windows run from 3
 hours — about one meal, start to finish — out to 7 days, where individual meals
 stop being legible but habits do not.
+
+**It opens on three lines: blood sugar, heart rate and steps.** The other five —
+the three macro curves, ketones and caffeine — are one tap away on the switch
+row, and nothing about how the switches work has changed. All eight at once is a
+legible chart of nothing in particular: each of the five is answering a question
+you did not ask by opening the app, and together they bury the two you probably
+did — why is the heart rate up, and what moved the blood sugar.
+
+The numbers down the two sides start as blood sugar and heart rate to match,
+since a gutter labelled for curves that are switched off is worse than no
+gutter — it still looks like something you could read a value off.
 
 Vertical rules mark the hours: every hour up to a 12-hour window, every four
 hours beyond it, widening again where a week's worth would arrive as forty lines

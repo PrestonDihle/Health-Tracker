@@ -45,11 +45,41 @@ class AxisSelectionTest {
     }
 
     @Test
-    fun `the default pairing is glucose against the macro curves`() {
+    fun `the default pairing is glucose against heart rate`() {
         val uiState = TodayUiState()
 
-        assertEquals(listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS), uiState.labelledAxes)
+        assertEquals(listOf(AxisMetric.GLUCOSE, AxisMetric.HEART_RATE), uiState.labelledAxes)
         assertEquals(MAX_LABELLED_AXES, uiState.labelledAxes.size)
+    }
+
+    @Test
+    fun `every labelled axis has a visible line under it by default`() {
+        // The pairing used to be glucose against macros, which was right while
+        // all eight series were drawn. With the default narrowed to three, a g/h
+        // gutter would be printing numbers for three curves that are switched
+        // off -- an axis describing nothing on the plot, which is worse than an
+        // unlabelled one because it looks like a reading.
+        val uiState = TodayUiState()
+
+        uiState.labelledAxes.forEach { metric ->
+            assertEquals(
+                "$metric is labelled but nothing visible is drawn against it",
+                true,
+                metric.series.any(uiState::isVisible),
+            )
+        }
+    }
+
+    @Test
+    fun `the master graph opens on the day's shape rather than on everything`() {
+        // Eight series is a legible chart of nothing in particular. These three
+        // carry the two questions the chart is opened for -- why is the heart
+        // rate up, and what moved the glucose -- and the switches still reach
+        // the rest in one tap.
+        assertEquals(
+            setOf(MasterSeries.GLUCOSE, MasterSeries.HEART_RATE, MasterSeries.STEPS),
+            TodayUiState().visibleSeries,
+        )
     }
 
     @Test
@@ -73,7 +103,10 @@ class AxisSelectionTest {
 
     @Test
     fun `an axis serving one line takes that line's colour`() {
-        val uiState = TodayUiState()
+        // Caffeine has to be switched on explicitly now: it is off by default,
+        // and an axis whose only series is not drawn correctly has no colour --
+        // which is the case the test below this one covers.
+        val uiState = TodayUiState(visibleSeries = MasterSeries.entries.toSet())
 
         assertEquals(MasterSeries.GLUCOSE.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.GLUCOSE, LightChartColors))
         assertEquals(MasterSeries.CAFFEINE.colorIn(LightChartColors), uiState.axisColorFor(AxisMetric.CAFFEINE, LightChartColors))
@@ -84,7 +117,11 @@ class AxisSelectionTest {
         // Tinting g/h in the carbohydrate colour would claim the protein and fat
         // curves are read against some other axis. There is no honest colour
         // here, and the ordinary label grey is the honest answer.
-        val uiState = TodayUiState()
+        //
+        // All three switched on explicitly. Under the default set this would pass
+        // with none of them drawn at all, which is a different rule -- and a test
+        // passing for the wrong reason stops guarding the one it names.
+        val uiState = TodayUiState(visibleSeries = MasterSeries.entries.toSet())
 
         assertNull(uiState.axisColorFor(AxisMetric.MACROS, LightChartColors))
     }

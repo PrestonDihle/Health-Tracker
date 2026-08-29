@@ -16,6 +16,7 @@ import com.prestondihle.healthtracker.domain.CaffeineDose
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.GlucoseAnalysis
 import com.prestondihle.healthtracker.domain.GlucoseSmoothing
+import com.prestondihle.healthtracker.domain.HeartRate
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.MacroAbsorption
 import com.prestondihle.healthtracker.domain.MacroServing
@@ -121,6 +122,31 @@ val MasterSeries.metric: AxisMetric
 const val MAX_LABELLED_AXES = 2
 
 /**
+ * What the master graph draws before anybody touches a switch.
+ *
+ * Three rather than all eight, and the switches keep working in both directions
+ * as they always did -- what changes is which end the reader starts from. Eight
+ * series on one plot is a legible chart of nothing in particular: the three
+ * macro curves, a caffeine decay and a ketone trace are each answering a
+ * question that was not asked on opening the app, and together they bury the
+ * ones that were.
+ *
+ * These three because they are the day's *shape* -- what the blood sugar did,
+ * what the body was doing, and when the walking happened -- and because they
+ * carry between them the two questions this chart gets opened for: why is the
+ * heart rate up, and what moved the glucose. The rest answer follow-ups, and a
+ * follow-up is worth a tap.
+ *
+ * Not stored. Like the labelled axes and unlike the range chips, this is a
+ * starting point rather than a preference: it lives in the view model for the
+ * session and comes back on the next launch, so a reader who switches
+ * everything on to answer one question is not left with that arrangement for
+ * ever by accident.
+ */
+val DEFAULT_VISIBLE_SERIES: Set<MasterSeries> =
+    setOf(MasterSeries.GLUCOSE, MasterSeries.HEART_RATE, MasterSeries.STEPS)
+
+/**
  * Roughly how many points an absorption curve is sampled at across the window.
  *
  * The step is derived from this rather than fixed, and then clamped: a fixed ten
@@ -202,16 +228,17 @@ data class TodayUiState(
     val healthState: HealthPermissionState = HealthPermissionState.NOT_GRANTED,
     val isSyncing: Boolean = false,
     val zoneId: ZoneId = ZoneId.systemDefault(),
-    /** Everything starts on; the switches are for narrowing, not for building up. */
-    val visibleSeries: Set<MasterSeries> = MasterSeries.entries.toSet(),
+    val visibleSeries: Set<MasterSeries> = DEFAULT_VISIBLE_SERIES,
     /**
      * Which units have their numbers printed, in order: first left, then right.
      *
      * Ordered rather than a set, because which side a unit lands on is the whole
-     * point. Glucose and macros to begin with, which is the pairing the chart was
-     * built around.
+     * point. Glucose and heart rate, which is the pair the default three series
+     * make readable -- macros held the right-hand gutter while every series was
+     * drawn, and a g/h axis printed beside three curves that are switched off is
+     * a gutter describing nothing on the plot.
      */
-    val labelledAxes: List<AxisMetric> = listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS),
+    val labelledAxes: List<AxisMetric> = listOf(AxisMetric.GLUCOSE, AxisMetric.HEART_RATE),
     /**
      * How far back from [now] the window's right edge has been dragged.
      *
@@ -313,6 +340,20 @@ data class TodayUiState(
     /** The reader's own rule across the glucose axis, or null when cleared. */
     val glucoseReference: Float?
         get() = goals.glucoseReferenceMgDl?.toFloat()
+
+    /** Floor and ceiling of the heart-rate axis, from settings. */
+    val heartRatePlotRange: ClosedFloatingPointRange<Float>
+        get() = HeartRate.plotRange(goals.heartRatePlotMinBpm, goals.heartRatePlotMaxBpm)
+
+    /**
+     * The reader's own rule across the heart-rate axis, or null for none.
+     *
+     * Null is the shipped state here, unlike the glucose reference: nothing was
+     * ever drawn on this axis, so an unset rule draws what the chart already
+     * drew rather than removing a line.
+     */
+    val heartRateReference: Float?
+        get() = goals.heartRateReferenceBpm?.toFloat()
 
     /**
      * Caffeine in the body across the window, sampled evenly.
@@ -497,9 +538,12 @@ class TodayViewModel(
     private val range = MutableStateFlow(MasterRange.DAY)
     private val healthState = MutableStateFlow(HealthPermissionState.NOT_GRANTED)
     private val syncing = MutableStateFlow(false)
-    private val visibleSeries = MutableStateFlow(MasterSeries.entries.toSet())
+    private val visibleSeries = MutableStateFlow(DEFAULT_VISIBLE_SERIES)
+    // Heart rate rather than macros in the right gutter, following the default
+    // series above: a g/h axis printed beside three curves that are switched off
+    // is a gutter describing nothing on the plot.
     private val labelledAxes =
-        MutableStateFlow(listOf(AxisMetric.GLUCOSE, AxisMetric.MACROS))
+        MutableStateFlow(listOf(AxisMetric.GLUCOSE, AxisMetric.HEART_RATE))
     private val panOffset = MutableStateFlow(Duration.ZERO)
 
     /**

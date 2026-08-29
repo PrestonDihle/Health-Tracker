@@ -12,6 +12,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isOff
+import androidx.compose.ui.test.isOn
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -302,6 +303,15 @@ class MasterGraphRenderTest {
 
         chooseRange(MasterRange.THREE)
 
+        // Switched on, because the graph opens on glucose, heart rate and steps
+        // now. What is under test is that the curve is built from a dose older
+        // than the window, not which series the chart happens to start with.
+        composeRule
+            .onAllNodes(isToggleable())[MasterSeries.entries.indexOf(MasterSeries.CAFFEINE)]
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+
         composeRule.onNodeWithText("Caffeine (0-200 mg)", substring = true).assertIsDisplayed()
         composeRule.onRoot().captureRoboImage("build/screenshots/master_graph_caffeine.png")
     }
@@ -545,13 +555,25 @@ class MasterGraphRenderTest {
             MasterSeries.entries.size,
             switches.fetchSemanticsNodes().size,
         )
+        // Whatever is on gets switched off, rather than "click all eight". Three
+        // of the eight are on by default now, so clicking every switch would
+        // turn the other five *on* and leave the plot fuller than it started --
+        // and the assertion below would catch it, but as a mystery rather than
+        // as this.
+        //
         // Scrolled to individually rather than clicked where they lie. Eight
         // switches wrap onto three rows and the card no longer fits the screen,
         // so the last row is below the fold -- and a click on an off-screen node
         // is clamped into view and quietly lands on nothing, leaving two series
         // still drawn and this test passing for the wrong reason until the
         // assertion below caught it.
-        MasterSeries.entries.indices.forEach { switches[it].performScrollTo().performClick() }
+        repeat(MasterSeries.entries.size) {
+            val on = composeRule.onAllNodes(isToggleable() and isOn())
+            if (on.fetchSemanticsNodes().isNotEmpty()) {
+                on[0].performScrollTo().performClick()
+                composeRule.waitForIdle()
+            }
+        }
         composeRule.waitForIdle()
 
         // Back up to the plot, which the scrolling above pushed off the top.
@@ -581,6 +603,16 @@ class MasterGraphRenderTest {
         renderScreen { repository ->
             repository.addCaffeine(mg = 120, at = Instant.now().minus(Duration.ofMinutes(30)))
         }
+
+        // Switched on first, because caffeine is off by default now -- the graph
+        // opens on glucose, heart rate and steps. Its being off is not what this
+        // test is about, and starting from there would only ever assert that the
+        // key omits a line nobody drew.
+        composeRule
+            .onAllNodes(isToggleable())[MasterSeries.entries.indexOf(MasterSeries.CAFFEINE)]
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
 
         // The legend sits at the foot of the chart card, below the fold on a
         // phone. Scrolled to the line that explains it, which is directly under.

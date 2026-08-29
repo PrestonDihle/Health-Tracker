@@ -680,6 +680,38 @@ data class UserGoals(
     val glucosePlotMaxMgDl: Int? = 180,
 
     /**
+     * Floor and ceiling of the heart-rate axis on the master graph, in bpm.
+     *
+     * [glucosePlotMinMgDl]'s counterpart, and seeded with the **exact figures
+     * that axis was hard-coded at** (40 and 180) for `MIGRATION_8_9`'s reason:
+     * turning a constant into a setting must not change what an existing
+     * reader's chart looks like.
+     */
+    val heartRatePlotMinBpm: Int? = 40,
+    val heartRatePlotMaxBpm: Int? = 180,
+
+    /**
+     * A single value marked with a solid rule across the heart-rate axis, or
+     * null to draw nothing.
+     *
+     * Solid like [glucoseReferenceMgDl] and for the same reason -- the reader
+     * decided where it goes, where the blood pressure rules are published
+     * figures and are dashed to say so.
+     *
+     * **Null rather than seeded, which is the opposite of the glucose
+     * reference**, and the question `MIGRATION_11_12` settles decides it: ask
+     * what a NULL does on screen. The glucose rule was already being drawn at
+     * 100 before it was a setting, so a NULL there would have removed a line.
+     * Nothing is drawn on the heart-rate axis today, so NULL is the true
+     * statement about every existing reader, and a seeded value would put a rule
+     * on their chart that they never asked for.
+     *
+     * There is deliberately **no target band to go with it** -- see
+     * [com.prestondihle.healthtracker.domain.HeartRate].
+     */
+    val heartRateReferenceBpm: Int? = null,
+
+    /**
      * Rules across the blood pressure chart, in mmHg.
      *
      * Two, because a blood pressure reading is two numbers and a single rule can

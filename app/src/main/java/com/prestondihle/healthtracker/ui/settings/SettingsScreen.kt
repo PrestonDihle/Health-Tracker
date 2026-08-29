@@ -49,6 +49,7 @@ import com.prestondihle.healthtracker.data.UnitSystemEnum
 import kotlin.math.roundToInt
 import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Glucose
+import com.prestondihle.healthtracker.domain.HeartRate
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AbsorptionModelCard
 import com.prestondihle.healthtracker.ui.components.CompactTimeField
@@ -75,6 +76,16 @@ private val MEAL_PRESET_FORMAT = DateTimeFormatter.ofPattern("h:mm a")
  * beside it is the actual answer.
  */
 private const val DEFAULT_BEDTIME_LIMIT_MG = 25
+
+/**
+ * Where the heart-rate rule opens once it is switched on.
+ *
+ * A hundred is the top of the resting range most references quote, so the
+ * stepper opens on a figure that means something rather than on the floor of
+ * its own range -- the AFT steppers' argument, which open on the 60-point
+ * requirement rather than on zero.
+ */
+private const val DEFAULT_HEART_RATE_RULE_BPM = 100
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewModel) {
@@ -516,6 +527,101 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                     valueFormatter = { "$it ${Glucose.UNIT}" },
                 )
             }
+                    },
+                    ReorderableCard("heartRateChart") {
+                        SettingsCard(title = "Heart rate chart") {
+                            Text(
+                                "The heart-rate axis on the Today graph, in the same shape as " +
+                                    "the blood sugar one above. Neither figure clips anything " +
+                                    "— a reading outside them still widens the axis to fit.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            val hrMin = state.goals.heartRatePlotMinBpm ?: HeartRate.PLOT_MIN.toInt()
+                            val hrMax = state.goals.heartRatePlotMaxBpm ?: HeartRate.PLOT_MAX.toInt()
+
+                            IntStepper(
+                                label = "Chart floor",
+                                value = hrMin,
+                                // Held apart as they move, the glucose bounds'
+                                // rule: an axis whose floor has passed its
+                                // ceiling draws every reading at one height or
+                                // upside down, and the stepper is the only place
+                                // that can be prevented cheaply.
+                                onValueChange = {
+                                    viewModel.saveGoals(
+                                        state.goals.copy(
+                                            heartRatePlotMinBpm =
+                                                it.coerceAtMost(hrMax - HeartRate.MIN_PLOT_SPAN),
+                                            heartRatePlotMaxBpm = hrMax,
+                                        )
+                                    )
+                                },
+                                step = 5,
+                                range = HeartRate.ENTRY_RANGE,
+                                valueFormatter = { "$it ${HeartRate.UNIT}" },
+                            )
+                            HorizontalDivider()
+                            IntStepper(
+                                label = "Chart ceiling",
+                                value = hrMax,
+                                onValueChange = {
+                                    viewModel.saveGoals(
+                                        state.goals.copy(
+                                            heartRatePlotMinBpm = hrMin,
+                                            heartRatePlotMaxBpm =
+                                                it.coerceAtLeast(hrMin + HeartRate.MIN_PLOT_SPAN),
+                                        )
+                                    )
+                                },
+                                step = 5,
+                                range = HeartRate.ENTRY_RANGE,
+                                valueFormatter = { "$it ${HeartRate.UNIT}" },
+                            )
+                            HorizontalDivider()
+
+                            // Off until it is set, unlike the blood sugar rule
+                            // beside it. Nothing was ever drawn on this axis, so
+                            // there is no line for an unset value to remove --
+                            // and a seeded one would have appeared on the chart
+                            // of every reader who never asked for it.
+                            val hrRule = state.goals.heartRateReferenceBpm
+                            IntStepper(
+                                label = "Reference line",
+                                value = hrRule ?: DEFAULT_HEART_RATE_RULE_BPM,
+                                onValueChange = {
+                                    viewModel.saveGoals(
+                                        state.goals.copy(heartRateReferenceBpm = it)
+                                    )
+                                },
+                                step = 5,
+                                range = HeartRate.ENTRY_RANGE,
+                                supportingText =
+                                    if (hrRule == null) "off — nudge to draw it"
+                                    // Their own zone boundaries, where the
+                                    // profile knows them, because "where should
+                                    // this line go" is the question the stepper
+                                    // cannot answer on its own.
+                                    else
+                                        state.settings.maxHeartRateBpm?.let { max ->
+                                            "easy below ${(max * 0.6f).roundToInt()}, " +
+                                                "hard above ${(max * 0.75f).roundToInt()}"
+                                        } ?: "solid rule across the Today graph",
+                                valueFormatter = { "$it ${HeartRate.UNIT}" },
+                            )
+                            if (hrRule != null) {
+                                TextButton(
+                                    onClick = {
+                                        viewModel.saveGoals(
+                                            state.goals.copy(heartRateReferenceBpm = null)
+                                        )
+                                    }
+                                ) {
+                                    Text("Remove the line")
+                                }
+                            }
+                        }
                     },
                     ReorderableCard("bloodPressureReference") {
                         SettingsCard(title = "Blood pressure reference") {

@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -651,6 +651,42 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * The heart-rate axis on the master graph, made a setting.
+         *
+         * Three columns and **two different default policies in one migration**,
+         * which is the pair worth holding together because the alternative looks
+         * arbitrary. Both follow from `MIGRATION_17_18`'s question -- what would
+         * a NULL do on screen -- rather than from whether the column is new.
+         *
+         * The two plot bounds carry `DEFAULT 40` and `DEFAULT 180`, which are
+         * exactly the figures that axis was hard-coded at. This is
+         * `MIGRATION_8_9` repeating: those numbers were already drawing an
+         * existing reader's chart, so a NULL would visibly rescale it, and
+         * changing what a chart looks like is the one thing turning a constant
+         * into a setting must not do.
+         *
+         * The reference rule carries **no default**, the `MIGRATION_11_12`
+         * shape, and it is the same question answered the other way. Nothing is
+         * drawn on that axis today, so NULL is a true statement about every row
+         * on disk and draws exactly what is drawn now -- nothing. A seeded value
+         * would put a line on an upgrading reader's chart that they never asked
+         * for, which is the notification argument in a quieter form.
+         */
+        internal val migration22To23Statements =
+            listOf(
+                "ALTER TABLE `UserGoals` ADD COLUMN `heartRatePlotMinBpm` INTEGER DEFAULT 40",
+                "ALTER TABLE `UserGoals` ADD COLUMN `heartRatePlotMaxBpm` INTEGER DEFAULT 180",
+                "ALTER TABLE `UserGoals` ADD COLUMN `heartRateReferenceBpm` INTEGER",
+            )
+
+        private val MIGRATION_22_23 =
+            object : Migration(22, 23) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration22To23Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -686,6 +722,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_19_20,
                                 MIGRATION_20_21,
                                 MIGRATION_21_22,
+                                MIGRATION_22_23,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

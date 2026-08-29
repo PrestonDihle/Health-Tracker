@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.domain.Glucose
+import com.prestondihle.healthtracker.domain.HeartRate
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.MacroAbsorption
@@ -328,8 +329,21 @@ private fun TodayUiState.specFor(metric: AxisMetric, colors: ChartColors): AxisS
             )
         AxisMetric.MACROS ->
             AxisSpec(min = 0f, max = 40f, label = "g/h", color = axisColorFor(metric, colors))
+        // No band here either, and for the glucose reason above rather than for
+        // want of somewhere to put one: a wash behind eight series stops reading
+        // as a target for one of them. The rule is the honest half.
         AxisMetric.HEART_RATE ->
-            AxisSpec(min = 40f, max = 180f, label = "bpm", color = axisColorFor(metric, colors))
+            AxisSpec(
+                min = heartRatePlotRange.start,
+                max = heartRatePlotRange.endInclusive,
+                label = HeartRate.UNIT,
+                // Solid, like the glucose rule: the reader put it where they
+                // wanted it. The dashed rules on the blood pressure chart are
+                // published clinical figures, and drawing both the same way
+                // would lend one the other's authority.
+                rules = listOfNotNull(heartRateReference?.let { AxisRule(it, dashed = false) }),
+                color = axisColorFor(metric, colors),
+            )
         AxisMetric.KETONES ->
             AxisSpec(
                 min = Ketones.PLOT_MIN,

@@ -593,6 +593,11 @@ class MigrationSchemaTest {
             // enum by name -- the meal presets are the trap in the other
             // direction, where something that reads as a time is an INTEGER.
             AppDatabase.migration21To22Statements.forEach { raw.execSQL(it) }
+            // The heart-rate axis: the fifth alteration to UserGoals, and the one
+            // carrying both default policies at once -- the two plot bounds
+            // seeded with the figures that axis was hard-coded at, the reference
+            // rule left NULL because nothing was ever drawn there.
+            AppDatabase.migration22To23Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -633,12 +638,14 @@ class MigrationSchemaTest {
             AppDatabase.migration16To17Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration17To18Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration21To22Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration22To23Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
                         "`glucoseReferenceMgDl`, `glucosePlotMinMgDl`, `glucosePlotMaxMgDl`, " +
                         "`bloodPressureSystolicReference`, `bloodPressureDiastolicReference`, " +
-                        "`sleepMinutesGoal` FROM `UserGoals`"
+                        "`sleepMinutesGoal`, `heartRatePlotMinBpm`, `heartRatePlotMaxBpm`, " +
+                        "`heartRateReferenceBpm` FROM `UserGoals`"
                 )
                 .use {
                     it.moveToNext()
@@ -655,6 +662,17 @@ class MigrationSchemaTest {
                     assertEquals(120, it.getInt(6))
                     assertEquals(80, it.getInt(7))
                     assertEquals(480, it.getInt(8))
+                    // The heart-rate axis was hard-coded at exactly 40 and 180
+                    // before it was a setting, which is the glucose plot bounds'
+                    // case again: an upgrading reader's chart must look the same
+                    // until they move something themselves.
+                    assertEquals(40, it.getInt(9))
+                    assertEquals(180, it.getInt(10))
+                    // And the same question answered the other way. Nothing was
+                    // ever drawn on that axis, so NULL is true of every row on
+                    // disk and draws what is drawn now -- nothing. A seeded value
+                    // would put a line on a chart nobody asked for one on.
+                    assertTrue(it.isNull(11))
                 }
             raw.query(
                     "SELECT `smoothGlucose`, `sex`, `aftLane`, `mealPresetBreakfast`, " +
