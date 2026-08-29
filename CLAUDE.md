@@ -625,6 +625,53 @@ The **profile** on `UserSettings` — `maxHeartRateBpm`, `ageYears`, `sex`, `hei
 card at the top of Settings. Max HR is the one with teeth: it zones the runs chart. Height is stored
 in cm like everything else and stepped in inches or centimetres by the unit setting.
 
+### Scoring the food logging
+
+`domain/FoodLogConfidence.kt` is five named levels, 1 to 5, stored as an integer on
+`DailyLog.foodLogConfidence`. Set on Log under the meal list, echoed as a chip on the Today strip,
+and carried into the CSV export.
+
+**Self-rated, never derived, and the refusal is the design** — `Readiness`' argument arriving at a
+different table. The app can see whether meals exist, whether their macros are filled in and whether
+the day's intake is implausibly low, and none of that answers the question asked. A day of restaurant
+meals entered from memory is *complete*: every meal present, every macro filled, nothing the app
+holds says otherwise, and every gram of it is a guess. Only the person who ate it knows, so only they
+can score it. A derived figure would measure completeness and be read as accuracy.
+
+It is also deliberately **not** blended with anything. That keeps it on the right side of the
+composite-score rule: this is one person's answer to one question, stored as given, rather than
+several things measured differently combined under weights nobody published.
+
+**On `DailyLog` rather than `HealthDaySnapshot`, and the two-tables rule decides it** rather than
+taste. It is a judgement *about* the nutrition cache, not a figure read from Health Connect, so it
+has to survive that cache being deleted and re-synced — which is precisely what the snapshot promises
+not to do. Subjective, hand-entered, one per day: `vibe`'s shape, in `vibe`'s table.
+
+**Null is unrated, never "badly logged".** A day nobody scored and a day scored 1 are different
+statements, and collapsing them would drop every day predating the column to the bottom of a scale
+whose whole purpose is being filtered on. That is also why the chips clear: tapping the level already
+selected returns the day to unrated, which is the only way back once one has been touched.
+
+**Five named levels rather than a 1-10 slider**, which is why this card does not reuse
+`LabeledSlider` like the mood scores beside it. A vibe of 7 is read back the same day by the person
+who set it; this figure is read in a spreadsheet next February, where *"everything logged as it
+happened, portions eyeballed"* survives and a bare 3 does not. Five is as many distinctions as anyone
+can honestly make about their own logging.
+
+**Stored as the integer, not the enum name**, deliberately against `Converters`' usual habit of
+writing enums by `name`. The question the column exists for is *drop everything below a 3*, which is
+a comparison in a spreadsheet where a name would be a lookup table the reader has to reconstruct.
+
+**Nothing is filtered by it** — the owner's call, and it is the scope boundary worth knowing before
+"finishing" this. No chart drops a low-scoring day, no window excludes one; the figure is recorded
+and exported, and the throwing-out happens downstream. Adding a cutoff later means deciding what a
+filtered-out day *draws*, which is a null and not a zero (ground rule 6), and every nutrition chart
+would need to agree about it.
+
+The CSV export needed no work at all, which is `CsvBackup` earning its design: it reads tables from
+`sqlite_master` and columns off the cursor, so a migration's new column appears in the export with
+nothing told about it.
+
 ### Folding the entry lists
 
 `CardKit.EntryList` draws the newest `ENTRY_PREVIEW_ROWS` (3) of a correctable list and hides the
@@ -1472,7 +1519,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 23, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 24, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding
@@ -1580,6 +1627,18 @@ answers it in one step. This column decides the colours of the first frame, so t
 NULL that draws nothing; whatever it meant would still have to be a scheme. Seeding it with the
 behaviour that shipped before the column existed is the only value that leaves an upgrading reader's
 app looking exactly as they left it.
+
+`MIGRATION_23_24` adds `DailyLog.foodLogConfidence`, and is the **first alteration `DailyLog` has
+ever had** — that table was rebuilt wholesale by the v1-to-v2 destructive fallback and untouched
+since. So unlike every other recent migration, there was no existing schema test to add a replay to;
+it needed one written. **A table with no schema test is not a table that cannot break** — it is one
+whose breakage first appears as an app that will not open.
+
+Nullable with no default, the `MIGRATION_11_12` shape, and the sharpest case for it in this file. A
+seeded value would be a judgement nobody made, written onto every day already on disk — and this is
+the column that exists to be *filtered on*, so seeding it would push every historical day either into
+or out of the reader's next analysis on the strength of a number the app picked for them. INTEGER
+rather than the enum's usual TEXT; see *Scoring the food logging*.
 
 `MIGRATION_22_23` adds the heart-rate axis to `UserGoals` — the fifth alteration to that table — and
 is the one migration here carrying **both default policies at once**. The two plot bounds are seeded

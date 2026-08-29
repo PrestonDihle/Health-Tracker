@@ -181,6 +181,15 @@ data class TodaySummaryState(
     /** Share of today so far inside the target band, or null below coverage. */
     val timeInRange: Float? = null,
     val fastingSince: Instant? = null,
+    /**
+     * Today's food-logging score, or null where nobody has rated it.
+     *
+     * The one figure in this strip that is an opinion rather than a measurement,
+     * which is exactly why it belongs beside the others: the net-calorie chip a
+     * few places along is only worth as much as the logging behind it, and that
+     * is not something any other chip here can say.
+     */
+    val foodLogConfidence: Int? = null,
     val now: Instant = Instant.now(),
 ) {
     val fastDuration: Duration?
@@ -695,7 +704,8 @@ class TodayViewModel(
                 repository.getBloodSugarForDate(LocalDate.now(zoneId)),
                 repository.getActiveFastingSession(),
                 repository.getUserGoals(),
-            ) { glucose, fast, goals ->
+                repository.getDailyLog(LocalDate.now(zoneId)),
+            ) { glucose, fast, goals, log ->
                 val today = LocalDate.now(zoneId)
                 val now = Instant.now()
                 TodaySummaryState(
@@ -713,6 +723,7 @@ class TodayViewModel(
                             )
                             ?.timeInRange,
                     fastingSince = fast?.startInstant,
+                    foodLogConfidence = log?.foodLogConfidence,
                     now = now,
                 )
             }

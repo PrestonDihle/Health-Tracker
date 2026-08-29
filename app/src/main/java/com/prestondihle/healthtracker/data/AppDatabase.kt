@@ -40,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -687,6 +687,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * How well a day's food was logged, as scored by whoever logged it.
+         *
+         * **The first alteration to `DailyLog` since v1**, which is worth
+         * noticing rather than passing over: that table was rebuilt wholesale by
+         * the v1-to-v2 destructive fallback and has been untouched since, so
+         * there is no `ALTER TABLE` history on it to replay. Its schema test is
+         * new for that reason.
+         *
+         * Nullable and carrying **no default**, the `MIGRATION_11_12` shape. A
+         * default would be a judgement nobody made, written onto every day
+         * already on disk -- and worse than an ordinary invented figure, because
+         * this column exists precisely to be filtered on. Seeding it would put
+         * every historical day either into or out of the reader's next analysis
+         * on the strength of a number this app chose for them. NULL is the true
+         * statement about all of them: nobody was asked.
+         *
+         * INTEGER rather than the enum's TEXT, deliberately against `Converters`'
+         * usual habit. The question this column is for is "drop everything below
+         * a 3", and the CSV export writes storage classes straight through, so a
+         * number is a comparison in a spreadsheet where a name is a lookup table
+         * the reader has to reconstruct.
+         */
+        internal val migration23To24Statements =
+            listOf("ALTER TABLE `DailyLog` ADD COLUMN `foodLogConfidence` INTEGER")
+
+        private val MIGRATION_23_24 =
+            object : Migration(23, 24) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration23To24Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -723,6 +756,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_20_21,
                                 MIGRATION_21_22,
                                 MIGRATION_22_23,
+                                MIGRATION_23_24,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

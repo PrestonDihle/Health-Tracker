@@ -947,6 +947,23 @@ class WellnessViewModel(
         viewModelScope.launch { repository.deleteCaffeine(intake) }
     }
 
+    /**
+     * Scores how well today's food was logged, or clears the score.
+     *
+     * Clearable, unlike the mood sliders, because null and 1 mean genuinely
+     * different things here -- *nobody was asked* against *there is nothing worth
+     * reading* -- and a rating tapped by accident on the tab where everything
+     * else is a logging button would otherwise be stuck as a number the reader
+     * did not mean. The mood sliders have no equivalent: they submit a value the
+     * reader dragged to, and there is no way to drag to "unrated".
+     */
+    fun setFoodLogConfidence(score: Int?) {
+        viewModelScope.launch {
+            val current = repository.getDailyLog(today).first() ?: DailyLog(today)
+            repository.upsertDailyLog(current.copy(foodLogConfidence = score))
+        }
+    }
+
     fun submitMood(vibe: Int, energy: Int, focus: Int) {
         viewModelScope.launch {
             val current = repository.getDailyLog(today).first() ?: DailyLog(today)

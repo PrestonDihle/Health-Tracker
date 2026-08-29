@@ -85,6 +85,27 @@ data class DailyLog(
     val focus: Int? = null,
     val sleepQuality: Int? = null,
     val bookPagesRead: Int? = null,
+    /**
+     * How well this day's food was logged, 1 to 5, as judged by the logger.
+     *
+     * Here rather than on [HealthDaySnapshot] and that is the two-tables rule
+     * deciding it, not a coin toss. It is a *judgement about* the nutrition
+     * cache rather than a figure read from Health Connect, so it must survive
+     * the cache being deleted and re-synced -- which is exactly what the
+     * snapshot promises not to do. Subjective, hand-entered, one per day: the
+     * same shape as [vibe] and [sleepQuality], in the table those live in.
+     *
+     * Null means unrated, never "badly logged". A day nobody scored and a day
+     * scored 1 are different statements, and collapsing them would put every
+     * day before this column existed at the bottom of the scale -- ground rule
+     * 6 arriving at a column that is entirely opinion.
+     *
+     * Stored as the [com.prestondihle.healthtracker.domain.FoodLogConfidence]
+     * score rather than the enum name so the CSV export carries a number: the
+     * question this exists for is "drop everything below a 3", which is a
+     * comparison rather than a string match.
+     */
+    val foodLogConfidence: Int? = null,
 )
 
 /**

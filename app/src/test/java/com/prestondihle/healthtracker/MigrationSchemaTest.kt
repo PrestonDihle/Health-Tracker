@@ -705,6 +705,64 @@ class MigrationSchemaTest {
         }
     }
 
+    /**
+     * `DailyLog` as Room built it at v2.
+     *
+     * The v1 schema kept steps, sleep, macros and rep counts on this table and is
+     * the one case the destructive fallback still covers, so v2 is where its
+     * history actually starts. Written out by hand for [ketoneV4]'s reason.
+     */
+    private val dailyLogV2 =
+        "CREATE TABLE IF NOT EXISTS `DailyLog` (" +
+            "`date` INTEGER NOT NULL, " +
+            "`vibe` INTEGER, " +
+            "`energy` INTEGER, " +
+            "`focus` INTEGER, " +
+            "`sleepQuality` INTEGER, " +
+            "`bookPagesRead` INTEGER, " +
+            "PRIMARY KEY(`date`))"
+
+    /**
+     * The first alteration `DailyLog` has ever had, so the first test it needs.
+     *
+     * Every other table's replay was added to an existing test; this one had none
+     * to be added to, which is the case worth noticing rather than assuming. A
+     * table with no schema test is not a table that cannot break -- it is one
+     * whose breakage first shows up as an app that will not open.
+     */
+    @Test
+    fun `the food logging score lands on the shape Room expects`() {
+        val expected = roomColumns("DailyLog")
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `DailyLog`")
+            raw.execSQL(dailyLogV2)
+            raw.execSQL("INSERT INTO `DailyLog` (`date`, `vibe`) VALUES (20000, 7)")
+
+            AppDatabase.migration23To24Statements.forEach { raw.execSQL(it) }
+
+            assertEquals(expected, columnsOf(raw, "DailyLog"))
+
+            raw.query("SELECT `vibe`, `foodLogConfidence` FROM `DailyLog`").use {
+                it.moveToNext()
+                assertEquals(7, it.getInt(0))
+                // No default, and this is the column where that matters most:
+                // it exists to be filtered on, so a seeded value would push
+                // every historical day either into or out of the reader's next
+                // analysis on the strength of a number the app chose. NULL says
+                // nobody was asked, which is true of all of them.
+                assertTrue(it.isNull(1))
+            }
+        } finally {
+            db.close()
+        }
+    }
+
     private fun roomColumns(table: String): List<String> {
         val db =
             Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)

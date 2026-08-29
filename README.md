@@ -126,6 +126,30 @@ carries eight possible lines and dropped its own blood sugar band for that
 reason: a wash behind that many series stops reading as one line's target and
 starts reading as a region of the chart.
 
+## How well did today get logged?
+
+A card under the meal list on Log, with five levels: *Barely*, *Guessed*,
+*Estimated*, *Mostly weighed*, *Weighed*. Tap one to score the day; tap the one
+you are already on to clear it. The score shows as a chip on Today and goes into
+the CSV export as a number from 1 to 5, so a year of days can be filtered on it —
+drop everything below a 3 before drawing conclusions about what you ate.
+
+**Only you can answer this, which is why the app does not try.** It can see
+whether meals exist, whether the macros are filled in, whether the day's total
+looks implausibly low — and none of that is the question. A day of restaurant
+meals typed in from memory looks *complete* from the app's side: every meal
+present, every figure filled, and every gram of it a guess. A derived figure
+would be measuring completeness and would get read as accuracy.
+
+Words rather than a number out of ten, because the number has to survive being
+read next February in a spreadsheet, where "everything logged as it happened,
+portions eyeballed" means something and a 6 does not.
+
+**An unrated day stays unrated.** It is not the same as a badly-logged one, and
+it is not treated as one — no chart drops a low-scoring day and no figure is
+adjusted by it. The score is recorded and exported, and what you throw out is
+your decision, made wherever you do the analysis.
+
 ## The day at a glance
 
 A row of chips at the top of Today, above everything else: steps against your

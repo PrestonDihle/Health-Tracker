@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.data.Supplement
 import com.prestondihle.healthtracker.data.mealPresets
+import com.prestondihle.healthtracker.domain.FoodLogConfidence
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.MealListCard
@@ -31,6 +32,7 @@ import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.wellness.BloodPressureCard
 import com.prestondihle.healthtracker.ui.wellness.BodyCard
+import com.prestondihle.healthtracker.ui.wellness.FoodLogConfidenceCard
 import com.prestondihle.healthtracker.ui.wellness.GripStrengthCard
 import com.prestondihle.healthtracker.ui.wellness.MoodCard
 import com.prestondihle.healthtracker.ui.wellness.MovementCard
@@ -133,6 +135,23 @@ fun LogScreen(
                             mealPresets = state.settings.mealPresets,
                             responseFor = { responses[it.id] },
                             hasGlucose = state.glucose.isNotEmpty(),
+                        )
+                    },
+                    // Directly under the meals, which is the card it is a
+                    // judgement about: the question "how well did today get
+                    // logged" is only answerable while looking at what was
+                    // logged.
+                    ReorderableCard("foodLogConfidence") {
+                        FoodLogConfidenceCard(
+                            state = state,
+                            onRate = {
+                                viewModel.setFoodLogConfidence(it)
+                                toast(
+                                    it?.let { score ->
+                                        "Food logging: ${FoodLogConfidence.of(score)?.label}"
+                                    } ?: "Food logging rating cleared"
+                                )
+                            },
                         )
                     },
                     ReorderableCard("body") {

@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.domain.BodyComposition
+import com.prestondihle.healthtracker.domain.FoodLogConfidence
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Ketones
 import com.prestondihle.healthtracker.domain.Sleep
@@ -1008,6 +1009,54 @@ internal fun MoodTrendCard(state: WellnessUiState) {
             minY = 1f,
             maxY = 10f,
             modifier = Modifier.fillMaxWidth().height(170.dp),
+        )
+    }
+}
+
+/**
+ * How well today's food was logged, in the logger's own judgement.
+ *
+ * Chips rather than a slider, unlike every other subjective score here, and the
+ * words are the reason. A 7-out-of-10 on vibe is read back the same day by the
+ * person who set it; this figure exists to be read in a spreadsheet next
+ * February, and "everything logged as it happened, portions eyeballed" survives
+ * that where a 3 does not. Five levels is as many distinctions as anyone can make
+ * honestly about their own logging.
+ *
+ * Saved on tap with no Submit, because a rating is one value rather than the
+ * three the mood card collects before committing -- and tapping the level you are
+ * already on clears it, which is the only way back to *unrated* once a chip has
+ * been touched. Unrated is a real state and not the bottom of the scale: no
+ * answer and "barely logged" are different things, and this column's whole
+ * purpose is being filtered on.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun FoodLogConfidenceCard(state: WellnessUiState, onRate: (Int?) -> Unit) {
+    val current = FoodLogConfidence.of(state.dailyLog.foodLogConfidence)
+    TrackerCard(title = "Food logging", subtitle = "how well did today get logged?") {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FoodLogConfidence.entries.forEach { level ->
+                FilterChip(
+                    selected = current == level,
+                    // Tapping the current level clears it. The alternative is a
+                    // separate Clear button that is dead for as long as nothing
+                    // is rated, on a card that is one row tall.
+                    onClick = { onRate(if (current == level) null else level.score) },
+                    label = { Text(level.label) },
+                )
+            }
+        }
+
+        Text(
+            current?.meaning
+                // Named rather than numbered even here: the reader is choosing
+                // between five sentences, and the number is only the storage.
+                ?: "Not rated. This is the only part of the day's nutrition the " +
+                    "app cannot work out for itself — a day of guessed restaurant " +
+                    "portions looks complete from the outside.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

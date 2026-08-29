@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.domain.Glucose
+import com.prestondihle.healthtracker.domain.FoodLogConfidence
 import com.prestondihle.healthtracker.domain.HeartRate
 import com.prestondihle.healthtracker.domain.Macro
 import com.prestondihle.healthtracker.domain.Ketones
@@ -831,6 +832,16 @@ private fun TodaySummaryStrip(
         }
         summary.fastDuration?.let {
             add(SummaryChip("Fasting ${Units.formatDuration(it)}", route = "fuel"))
+        }
+        // Directly after net calories, which is the figure it qualifies. Absent
+        // rather than prompting where nobody has rated the day: an unrated day is
+        // the ordinary state until somebody has finished eating, and a strip that
+        // asked for a score at breakfast would be the "scolding at nine in the
+        // morning" problem in a second costume. It opens Log rather than Fuel --
+        // the rating is set there, and a chip that led somewhere it cannot be
+        // changed would be the only dead end in the strip.
+        FoodLogConfidence.of(summary.foodLogConfidence)?.let {
+            add(SummaryChip("Logging: ${it.label}", route = "log"))
         }
         streaks.running
             .filter { it.second.current > 0 }
