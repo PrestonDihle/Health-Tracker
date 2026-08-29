@@ -28,7 +28,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,6 +50,7 @@ import com.prestondihle.healthtracker.data.WeightSubGoal
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.AbsorptionModelCard
+import com.prestondihle.healthtracker.ui.components.CompactTimeField
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.Stepper
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
@@ -736,7 +736,7 @@ private fun MealPresetDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(slot.label) },
-        text = { TimePicker(state = pickerState) },
+        text = { CompactTimeField(state = pickerState) },
         confirmButton = {
             TextButton(onClick = { onConfirm(LocalTime.of(pickerState.hour, pickerState.minute)) }) {
                 Text("Set")

@@ -657,11 +657,13 @@ things follow from it:
   phone's 10:00 stamp sails straight past it. The repeat is the signal; the particular hour is not.
 - **A stamped meal is corrected with one tap, from three preset chips.** `UserSettings` holds the
   reader's own breakfast, lunch and dinner times (`mealPresets` sorts them through the day and drops
-  a repeat), and `MealEntryDialog` offers them **above** the clock face — under a 250dp `TimePicker`
-  they would be below the fold of the dialog, which is where the series switches were when the
-  legend briefly replaced them. A chip **saves as well as sets**: the meal was opened because its
-  time is wrong, and a chip that only moved the clock hands would leave the reader a Save button
-  away from the thing they had already said.
+  a repeat), and `MealEntryDialog` offers them **above** the time field — under the 250dp
+  `TimePicker` dial this dialog used to carry they were below the fold, which is where the series
+  switches were when the legend briefly replaced them. The dial is gone (see *The time field*
+  below) and the chips would fit under it now; they stay above it because the order is also the
+  order the question is asked in — which meal was this, and only then exactly when. A chip **saves
+  as well as sets**: the meal was opened because its time is wrong, and a chip that only moved the
+  clock hands would leave the reader a Save button away from the thing they had already said.
 
   Two rules keep it from being a shortcut to a wrong answer. The chips appear **only where
   `hasClockTime` is false** — on a meal whose time was genuinely recorded they would offer to
@@ -767,6 +769,29 @@ prefers the manual entry on any day that has both. A sync must never overwrite a
 `netCalories` (eaten − burned, green under, red over), which is null unless *both* halves are known —
 substituting zero for a missing half would render a fake deficit the size of whichever figure synced.
 Grouping burn figures next to protein/carbs/fat is what originally made Wellness read as intake.
+
+### The time field
+
+`ui/components/TimeField.kt` is the one time control in the app, and it is Material's **typed**
+variant (`TimeInput`) rather than the clock dial (`TimePicker`). Five dialogs use it: the two intake
+dialogs, the meal dialog, the feeding-window picker on Fuel and the meal presets in Settings.
+
+**The dial cost about 250dp before its AM/PM column**, which is most of a phone dialog, and the bill
+had already been paid twice. The meal-preset chips had to be placed above it because underneath they
+fell below the fold; and every entry dialog that also carries a date row, an amount stepper and a
+delete button was reduced to scrolling to reach its own Save button. Typing the time is about a third
+of the height, so the rest of the dialog stays visible while the time is being set.
+
+It is also fewer gestures for what these dialogs are actually for. **Every caller is *correcting* a
+time that is already close to right** — a meal the source stamped at 10:00, a drink logged an hour
+after it was drunk — so the reader arrives already knowing the four digits they want. The dial costs
+two drags and a mode switch to say what typing says outright. That would be the wrong trade for a
+control used to *explore* a time; none here is.
+
+Shared rather than copied to the five sites for `IntakeEntryDialog`'s reason: the traps in a time
+control are the same everywhere, and five copies are five things to fix each time one of them turns
+out to be wrong. `InstantPickerDialog` still splits date from time across two steps — that is about
+the `DatePicker`, which is unchanged and genuinely does not fit beside anything.
 
 ### Sleep
 

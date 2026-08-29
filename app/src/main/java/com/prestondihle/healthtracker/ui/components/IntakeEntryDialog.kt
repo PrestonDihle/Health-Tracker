@@ -11,7 +11,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -115,7 +114,7 @@ fun IntakeEntryDialog(
                     }
                 }
 
-                TimePicker(state = timeState, modifier = Modifier.fillMaxWidth())
+                CompactTimeField(state = timeState, modifier = Modifier.fillMaxWidth())
 
                 if (onDelete != null) {
                     TextButton(onClick = onDelete) { Text(deleteLabel) }

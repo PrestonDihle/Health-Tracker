@@ -927,6 +927,16 @@ This exists because of a specific incident. An automated tap, scaled wrongly fro
 a screenshot, landed on a logging button and wrote 100 ml of water that had never
 been drunk — and for a long time no screen in the app could remove it.
 
+**Setting a time is typed, not dialled.** Every dialog that asks for a time — the
+two intake dialogs, a meal, a feeding window, the meal presets in Settings — uses
+a pair of number fields rather than a clock face. The clock face was about 250dp
+tall, most of a phone dialog, which pushed the Save button of anything carrying a
+date row and an amount stepper below the fold. It is also the wrong control for
+the job: every one of these is *correcting* a time you already know — a meal your
+food app stamped 10:00, a drink logged an hour late — so you arrive knowing the
+four digits, and dialling them costs two drags and a mode switch to say what
+typing says outright.
+
 ## Units
 
 Everything is **stored in metric** to match Health Connect, and converted at the
