@@ -625,6 +625,70 @@ The **profile** on `UserSettings` — `maxHeartRateBpm`, `ageYears`, `sex`, `hei
 card at the top of Settings. Max HR is the one with teeth: it zones the runs chart. Height is stored
 in cm like everything else and stepped in inches or centimetres by the unit setting.
 
+### The plank timer
+
+`PlankSession` is one hold, timed on Log and plotted on Activity. `UserGoals.plankHoldSecondsGoal`
+is the target it is drawn against.
+
+**Its own table, not an `ExerciseSet` with a `movement` of PLANK.** That table's quantity column is
+`reps`, and a held time living in a column named for repetitions is the kind of thing that reads fine
+for a year and then gets summed by something that trusted the name.
+
+**Separate from `AftAttempt.plankSeconds` as well, and that is not duplication.** An attempt is one
+event of a formal test taken twice a year; these are training. Feeding a Tuesday morning hold into
+the scorecard would report a test that never happened, on the card whose entire value is that its
+figures were earned under test conditions.
+
+**Two rules carry the trend, and both look arbitrary until the wrong one is drawn.**
+
+- **The day's figure is its longest hold, never the sum.** Three one-minute planks are not a
+  three-minute plank; the single longest is what the AFT scores and what the goal is set against.
+  Summed, a day of easy repeats outranks a day that set a record — the exercise measured backwards.
+- **A day with no plank is null, not zero — the opposite of `repSeries` beside it.** The difference
+  is what the number *is*. A rep count is a quantity accumulated, so no rows means none were done and
+  zero is true. A longest hold is a measurement of *capacity*, and nobody's plank capacity fell to
+  zero on the days they did not train; it went unmeasured. This is ground rule 6 landing where two
+  neighbouring charts need opposite answers. One wanted consequence follows: at the weekly ranges a
+  bucket is the mean of the days that *were* measured, so a week with one hard hold reports that hold
+  rather than a seventh of it.
+
+It is a line rather than the rep counters' bars for the same reason: bars are a quantity accumulated
+over an interval, this is a capacity measured at a moment — the grip-strength shape.
+
+**The middle state of the timer is the feature.** Start, Stop, then *Save this hold* or *Discard*,
+with nothing written until one of those is pressed. A hold that went straight to the database on Stop
+would put every fumbled start and every plank abandoned at ten seconds onto the chart — and since the
+chart plots the day's *best*, a stray row is not noise, it is a personal best nobody performed. A
+zero-second hold is dropped without being offered: that is a Start immediately followed by a Stop,
+and offering to save it puts a decision in front of somebody who has already said twice that they are
+not planking.
+
+**The timer state lives in `WellnessViewModel`, and its ticker runs only while a plank is running.**
+Held in the card it would not survive a tab switch, which is the one moment this control cannot
+afford to lose. But an unconditional ticker would make Log the third permanently un-idle screen in
+this app, and this file records what that costs — a screen that never reaches idle cannot be scrolled
+in a test, which is why the sleep and mood cards are composed on their own. `plank` is therefore its
+own flow, `flatMapLatest` over the start instant: it emits once and stops whenever nothing is
+running, so Log stays idle for every test that is not deliberately holding a plank, and none is.
+`flatMapLatest` rather than a flag-guarded loop so a second Start cancels the first ticker instead of
+leaving it running behind the new one.
+
+`Units.formatHold` exists because `formatDuration` floors to whole minutes and renders every hold
+between one and two minutes as `1m`. It is deliberately **not** shared with `formatPace`, whose
+output is identical today: a pace and a hold are different quantities that happen to agree on a
+format, and the first of them to want an hours field would silently reformat the other.
+
+The Settings stepper opens on the reader's **own AFT 60-point row** where the profile can supply one
+(`AftScoring.minimumFor`), which is `AftCard`'s argument for its own steppers, and prints that figure
+underneath. The goal itself is null until set, for `heartRateReferenceBpm`'s reason: the figure worth
+aiming at depends on an age and a sex this app is not always told, so it says theirs rather than
+seeding a guess.
+
+`MIGRATION_24_25` is `MIGRATION_5_6`'s combination — a new table *and* an `ALTER TABLE` column — and
+that is what makes it easy to get wrong: **it reads as a "new table" migration and alters an existing
+one on its third line.** The table's DDL is diffed directly; the goal column joins the `UserGoals`
+replay in both of that table's existing tests, rather than taking one of its own.
+
 ### Scoring the food logging
 
 `domain/FoodLogConfidence.kt` is five named levels, 1 to 5, stored as an integer on
@@ -1519,7 +1583,7 @@ is two measurements and a comparison, start to finish.
 
 ### Room
 
-Version 24, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
+Version 25, `exportSchema = false`. **Write a real `Migration` for any schema change** — there is
 live data on the author's phone, so a version bump that falls through to the destructive path
 destroys real fasting history and body measurements. `MIGRATION_2_3` is the worked example for adding
 columns (three nullable `ALTER TABLE ADD COLUMN` statements); `MIGRATION_3_4` is the one for adding

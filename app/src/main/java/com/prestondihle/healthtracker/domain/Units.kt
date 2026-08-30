@@ -76,6 +76,19 @@ object Units {
     /** `7:42` from a mile time in seconds. */
     fun formatPace(seconds: Int): String = "%d:%02d".format(seconds / 60, seconds % 60)
 
+    /**
+     * `2:05` from a held time in seconds.
+     *
+     * Separate from [formatDuration], which floors to whole minutes and would
+     * render a 90-second plank as `1m` -- fine for a fast measured in hours,
+     * useless for the thing being watched on a running clock. Identical output to
+     * [formatPace] and deliberately not shared with it: a pace and a hold are
+     * different quantities that happen to agree on a format today, and the first
+     * of them to want an hours field would silently reformat the other.
+     */
+    fun formatHold(seconds: Int): String =
+        "%d:%02d".format(seconds.coerceAtLeast(0) / 60, seconds.coerceAtLeast(0) % 60)
+
     /** `6h 20m` from a minute count, for sleep. */
     fun formatMinutes(minutes: Int): String =
         if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"

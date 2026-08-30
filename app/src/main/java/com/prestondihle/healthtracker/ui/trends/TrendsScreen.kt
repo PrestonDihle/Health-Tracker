@@ -134,6 +134,11 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
                             )
                         }
                     },
+                    // With the other bodyweight work rather than beside the AFT
+                    // card, even though the plank is an AFT event: these are the
+                    // holds trained day to day, and the scorecard's plank is one
+                    // event of a test taken twice a year.
+                    ReorderableCard("plank") { PlankTrendCard(state) },
                     ReorderableCard("airSquats") {
                         TrendCard(title = "Air squats", subtitle = state.subtitle("reps per day")) {
                             BarChart(

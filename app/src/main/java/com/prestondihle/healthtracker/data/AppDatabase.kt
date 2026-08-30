@@ -18,6 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WaistEntry::class,
         HydrationEntry::class,
         ExerciseSet::class,
+        PlankSession::class,
         CaffeineIntake::class,
         CreatineIntake::class,
         FastingSession::class,
@@ -40,7 +41,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CardOrderEntry::class,
         AftAttempt::class,
     ],
-    version = 24,
+    version = 25,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -720,6 +721,44 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
         /**
+         * Planks, and a hold to aim at.
+         *
+         * A new table plus one nullable `UserGoals` column, the `MIGRATION_5_6`
+         * combination -- so the table's DDL is diffed directly, while the added
+         * column has to be checked through `PRAGMA table_info` like every other
+         * `ALTER TABLE` addition, since Room's `CREATE TABLE` omits a default the
+         * entity does not spell out.
+         *
+         * The column carries **no** SQLite default. A seeded plank target would
+         * be a number nobody chose, drawn as a rule across a chart on the first
+         * launch after upgrading -- and the figure worth aiming at is the
+         * reader's own AFT row, which depends on an age and a sex this app is not
+         * always told. NULL means no rule, and the Settings stepper prints their
+         * published requirement where it can work it out.
+         *
+         * `PlankSession` is deliberately not a `movement` on `ExerciseSet`: that
+         * table's quantity column is `reps`, and a held time living in it is the
+         * kind of thing that reads fine until something sums it.
+         */
+        internal val migration24To25Statements =
+            listOf(
+                "CREATE TABLE IF NOT EXISTS `PlankSession` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`timestamp` INTEGER NOT NULL, " +
+                    "`seconds` INTEGER NOT NULL)",
+                "CREATE INDEX IF NOT EXISTS `index_PlankSession_timestamp` " +
+                    "ON `PlankSession` (`timestamp`)",
+                "ALTER TABLE `UserGoals` ADD COLUMN `plankHoldSecondsGoal` INTEGER",
+            )
+
+        private val MIGRATION_24_25 =
+            object : Migration(24, 25) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    migration24To25Statements.forEach(db::execSQL)
+                }
+            }
+
+        /**
          * Destructive fallback remains only for the v1 schema, which kept steps,
          * sleep, macros and rep counts on DailyLog and has no sensible
          * column-wise mapping to today's tables. Anything from v2 onward
@@ -757,6 +796,7 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_21_22,
                                 MIGRATION_22_23,
                                 MIGRATION_23_24,
+                                MIGRATION_24_25,
                             )
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()

@@ -214,6 +214,32 @@ interface TrackerDao {
 
     @Delete suspend fun deleteExerciseSet(set: ExerciseSet)
 
+    // ----- Planks ------------------------------------------------------------
+
+    @Query(
+        "SELECT * FROM PlankSession WHERE timestamp >= :start AND timestamp < :end " +
+            "ORDER BY timestamp ASC"
+    )
+    fun getPlanksBetween(start: Long, end: Long): Flow<List<PlankSession>>
+
+    /**
+     * The longest hold in the window, or null where nothing was held.
+     *
+     * MAX rather than SUM, unlike [getRepTotal] beside it, and the difference is
+     * the exercise rather than a style choice: three one-minute planks are not a
+     * three-minute plank, and it is the single longest hold the AFT scores and
+     * the reader is training for. Null rather than a COALESCE to zero, because
+     * "no plank today" is not "held for zero seconds" -- see the trend series.
+     */
+    @Query(
+        "SELECT MAX(seconds) FROM PlankSession WHERE timestamp >= :start AND timestamp < :end"
+    )
+    fun getBestPlankSeconds(start: Long, end: Long): Flow<Int?>
+
+    @Insert suspend fun insertPlank(session: PlankSession)
+
+    @Delete suspend fun deletePlank(session: PlankSession)
+
     // ----- Supplements -------------------------------------------------------
 
     @Query("SELECT * FROM CaffeineIntake WHERE timestamp >= :start AND timestamp < :end ORDER BY timestamp ASC")

@@ -9,6 +9,7 @@ import com.prestondihle.healthtracker.data.CsvBackup
 import com.prestondihle.healthtracker.data.DailyLog
 import com.prestondihle.healthtracker.data.DataSourceEnum
 import com.prestondihle.healthtracker.data.ExerciseSet
+import com.prestondihle.healthtracker.data.PlankSession
 import com.prestondihle.healthtracker.data.FastingPlanDay
 import com.prestondihle.healthtracker.data.FastingSession
 import com.prestondihle.healthtracker.data.FastingType
@@ -343,6 +344,23 @@ class TrackerRepository(
         dao.insertExerciseSet(ExerciseSet(timestamp = at, movement = movement, reps = reps))
 
     suspend fun deleteExerciseSet(set: ExerciseSet) = dao.deleteExerciseSet(set)
+
+    // ----- Planks ------------------------------------------------------------
+
+    fun getPlanksForDate(date: LocalDate): Flow<List<PlankSession>> =
+        dao.getPlanksBetween(startOfDayMillis(date), endOfDayMillis(date))
+
+    fun getPlanksBetween(start: LocalDate, end: LocalDate): Flow<List<PlankSession>> =
+        dao.getPlanksBetween(startOfDayMillis(start), endOfDayMillis(end))
+
+    /** The day's longest hold, or null on a day nothing was held. */
+    fun getBestPlankSecondsForDate(date: LocalDate): Flow<Int?> =
+        dao.getBestPlankSeconds(startOfDayMillis(date), endOfDayMillis(date))
+
+    suspend fun addPlank(seconds: Int, at: Instant = Instant.now()) =
+        dao.insertPlank(PlankSession(timestamp = at, seconds = seconds))
+
+    suspend fun deletePlank(session: PlankSession) = dao.deletePlank(session)
 
     // ----- Supplements -------------------------------------------------------
 

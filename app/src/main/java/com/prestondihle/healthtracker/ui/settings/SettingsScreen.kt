@@ -48,6 +48,8 @@ import com.prestondihle.healthtracker.data.ThemeMode
 import com.prestondihle.healthtracker.data.UnitSystemEnum
 import kotlin.math.roundToInt
 import com.prestondihle.healthtracker.data.WeightSubGoal
+import com.prestondihle.healthtracker.domain.AftEvent
+import com.prestondihle.healthtracker.domain.AftScoring
 import com.prestondihle.healthtracker.domain.Glucose
 import com.prestondihle.healthtracker.domain.HeartRate
 import com.prestondihle.healthtracker.domain.Units
@@ -86,6 +88,15 @@ private const val DEFAULT_BEDTIME_LIMIT_MG = 25
  * requirement rather than on zero.
  */
 private const val DEFAULT_HEART_RATE_RULE_BPM = 100
+
+/**
+ * Where the plank goal opens when the profile cannot supply an AFT row.
+ *
+ * Two minutes: comfortably past the 60-point requirement on every published age
+ * band, so it reads as a target rather than as a pass mark, and a round number
+ * to move away from rather than a precise-looking one to trust.
+ */
+private const val DEFAULT_PLANK_GOAL_SECONDS = 120
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewModel) {
@@ -394,6 +405,58 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                     step = 10,
                     range = 0..1_000,
                 )
+                HorizontalDivider()
+                // A hold rather than a daily total, unlike every other goal in
+                // this card, and the label says so: three one-minute planks are
+                // not a three-minute plank, and the chart plots the day's longest.
+                //
+                // Off until it is set. The figure worth aiming at is the reader's
+                // own AFT row, which needs an age and a sex this app may not have
+                // been told -- so it prints theirs where it can rather than
+                // seeding a guess, which is the same trade the heart-rate rule
+                // makes.
+                run {
+                    val plankGoal = state.goals.plankHoldSecondsGoal
+                    val settings = state.settings
+                    val pass =
+                        AftScoring.minimumFor(
+                            AftEvent.PLANK,
+                            settings.ageYears,
+                            settings.sex,
+                            settings.aftLane,
+                        )
+                    IntStepper(
+                        label = "Plank hold",
+                        // Opens on the reader's own pass mark where it is known,
+                        // which is AftCard's argument for its steppers: the 60-
+                        // point row is the figure being aimed at, and zero is a
+                        // long way from anywhere useful on a timed event.
+                        value = plankGoal ?: pass ?: DEFAULT_PLANK_GOAL_SECONDS,
+                        onValueChange = {
+                            viewModel.saveGoals(state.goals.copy(plankHoldSecondsGoal = it))
+                        },
+                        step = 5,
+                        range = 0..600,
+                        supportingText =
+                            when {
+                                plankGoal == null -> "off -- nudge to set a target"
+                                pass != null -> "your AFT 60-point row is ${Units.formatHold(pass)}"
+                                else -> "longest hold per day, on the Activity chart"
+                            },
+                        valueFormatter = { Units.formatHold(it) },
+                    )
+                    if (plankGoal != null) {
+                        TextButton(
+                            onClick = {
+                                viewModel.saveGoals(
+                                    state.goals.copy(plankHoldSecondsGoal = null)
+                                )
+                            }
+                        ) {
+                            Text("Remove the plank goal")
+                        }
+                    }
+                }
                 HorizontalDivider()
                 IntStepper(
                     label = "Pages read",

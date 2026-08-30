@@ -1061,6 +1061,92 @@ internal fun FoodLogConfidenceCard(state: WellnessUiState, onRate: (Int?) -> Uni
     }
 }
 
+/**
+ * A plank, timed rather than typed, with a decision before anything is written.
+ *
+ * **The middle state is the feature.** A hold that went straight to the database
+ * on Stop would put every fumbled start and every plank abandoned at ten seconds
+ * onto the chart -- and the chart plots the day's *longest* hold, so a stray row
+ * is not noise, it is a personal best nobody performed. Stop offers the time;
+ * Save keeps it and Discard throws it away, and neither has touched the data
+ * until then.
+ *
+ * The clock is a plain read-out, not a stepper. What is being recorded is a
+ * measurement rather than a quantity chosen, and every other timed thing here
+ * (the fast timer, the caffeine curve) reads out rather than steps. A hold can
+ * still be corrected afterwards on the row it becomes.
+ */
+@Composable
+internal fun PlankCard(
+    plank: PlankTimerState,
+    goalSeconds: Int?,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onSave: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    TrackerCard(title = "Plank", subtitle = "hold, then keep it or throw it away") {
+        val held = plank.heldSeconds
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                Units.formatHold(held),
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color =
+                    if (plank.running) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+            )
+            Metric(
+                label = "Best today",
+                // An em dash rather than "0:00": nothing held today is not a
+                // hold of zero, and this card is where that distinction is set.
+                value =
+                    plank.bestTodaySeconds
+                        ?.let { Units.formatHold(it) } ?: "--",
+                supporting = goalSeconds?.let { "goal ${Units.formatHold(it)}" },
+            )
+        }
+
+        if (goalSeconds != null && goalSeconds > 0) {
+            LinearProgressIndicator(
+                progress = { (held.toFloat() / goalSeconds).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(BarHeight),
+            )
+        }
+
+        when {
+            // Stop first and alone: a Save button sitting beside a running clock
+            // is a button that means nothing yet, and on a phone it is the one
+            // under the thumb.
+            plank.running -> LogButton("Stop", onClick = onStop)
+
+            plank.awaitingDecision ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = onSave, contentPadding = CompactButtonPadding) {
+                        Text("Save this hold")
+                    }
+                    // Outlined rather than filled, and second. Discarding is the
+                    // rarer answer and the destructive one, so it should not be
+                    // the button a thumb lands on by default -- but it is not
+                    // hidden behind a confirm either, because nothing has been
+                    // written yet and there is nothing to undo.
+                    OutlinedButton(onClick = onDiscard, contentPadding = CompactButtonPadding) {
+                        Text("Discard")
+                    }
+                }
+
+            else -> LogButton("Start", onClick = onStart)
+        }
+    }
+}
+
 @Composable
 internal fun MovementCard(state: WellnessUiState, onLog: (MovementType, Int) -> Unit) {
     TrackerCard(title = "Movement") {

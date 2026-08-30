@@ -346,6 +346,34 @@ internal fun BloodPressureTrendCard(state: TrendsUiState) {
     }
 }
 
+/**
+ * The longest plank held each day, against the hold being aimed at.
+ *
+ * A line rather than the bars the rep counters get, and that follows from what
+ * the number is. Bars are for a quantity accumulated over an interval; this is a
+ * capacity measured at a moment, which is the grip-strength chart's shape, and it
+ * breaks on the days nothing was measured instead of dropping to the floor.
+ *
+ * The subtitle says *longest hold* rather than "seconds" because the unit is the
+ * least surprising thing about it -- somebody who planked three times today is
+ * owed an explanation of which of the three is drawn.
+ */
+@Composable
+internal fun PlankTrendCard(state: TrendsUiState) {
+    val readings = state.plankSeries
+    TrendCard(
+        title = "Plank",
+        subtitle = state.subtitle("longest hold, minutes and seconds"),
+    ) {
+        TrendWithAverage(
+            readings = readings,
+            average = state.trailingAverage(readings),
+            label = "Plank",
+            goalLine = state.goals.plankHoldSecondsGoal?.toFloat(),
+        )
+    }
+}
+
 @Composable
 internal fun RestingHeartRateTrendCard(state: TrendsUiState) {
     val readings = state.snapshotSeries { it.restingHeartRateBpm?.toFloat() }

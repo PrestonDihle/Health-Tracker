@@ -598,6 +598,11 @@ class MigrationSchemaTest {
             // seeded with the figures that axis was hard-coded at, the reference
             // rule left NULL because nothing was ever drawn there.
             AppDatabase.migration22To23Statements.forEach { raw.execSQL(it) }
+            // The plank goal, the sixth alteration to UserGoals. That migration
+            // also creates a table, which is harmless here (IF NOT EXISTS) and is
+            // the reason it is easy to forget: it reads as a "new table"
+            // migration, and it alters an existing one on its third line.
+            AppDatabase.migration24To25Statements.forEach { raw.execSQL(it) }
 
             assertEquals(expectedGoals, columnsOf(raw, "UserGoals"))
             assertEquals(expectedSettings, columnsOf(raw, "UserSettings"))
@@ -639,13 +644,14 @@ class MigrationSchemaTest {
             AppDatabase.migration17To18Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration21To22Statements.forEach { raw.execSQL(it) }
             AppDatabase.migration22To23Statements.forEach { raw.execSQL(it) }
+            AppDatabase.migration24To25Statements.forEach { raw.execSQL(it) }
 
             raw.query(
                     "SELECT `dailyStepGoal`, `glucoseTargetLowMgDl`, `glucoseTargetHighMgDl`, " +
                         "`glucoseReferenceMgDl`, `glucosePlotMinMgDl`, `glucosePlotMaxMgDl`, " +
                         "`bloodPressureSystolicReference`, `bloodPressureDiastolicReference`, " +
                         "`sleepMinutesGoal`, `heartRatePlotMinBpm`, `heartRatePlotMaxBpm`, " +
-                        "`heartRateReferenceBpm` FROM `UserGoals`"
+                        "`heartRateReferenceBpm`, `plankHoldSecondsGoal` FROM `UserGoals`"
                 )
                 .use {
                     it.moveToNext()
@@ -673,6 +679,10 @@ class MigrationSchemaTest {
                     // disk and draws what is drawn now -- nothing. A seeded value
                     // would put a line on a chart nobody asked for one on.
                     assertTrue(it.isNull(11))
+                    // Same policy, same reason: a seeded plank target would draw
+                    // a rule nobody set, and the figure actually worth aiming at
+                    // is the reader's own AFT row.
+                    assertTrue(it.isNull(12))
                 }
             raw.query(
                     "SELECT `smoothGlucose`, `sex`, `aftLane`, `mealPresetBreakfast`, " +
@@ -758,6 +768,41 @@ class MigrationSchemaTest {
                 // nobody was asked, which is true of all of them.
                 assertTrue(it.isNull(1))
             }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * The plank table itself.
+     *
+     * Only the table. The `plankHoldSecondsGoal` half of the same migration is
+     * checked in the two `UserGoals` tests above, where that table's whole replay
+     * already lives -- a new migration that alters an existing table belongs in
+     * that table's existing test, not in a fresh one beside it.
+     *
+     * That split is also what makes `MIGRATION_24_25` easy to get wrong: it reads
+     * as a "new table" migration and alters an existing one on its third line.
+     */
+    @Test
+    fun `the plank table lands on the shape Room expects`() {
+        val expected = roomColumns("PlankSession")
+
+        val db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        try {
+            val raw = db.openHelper.writableDatabase
+            raw.execSQL("DROP TABLE IF EXISTS `PlankSession`")
+            // The ALTER in this list would fail on a UserGoals that already has
+            // the column, which it does here -- so only the table's own
+            // statements are replayed.
+            AppDatabase.migration24To25Statements
+                .filterNot { it.startsWith("ALTER TABLE") }
+                .forEach { raw.execSQL(it) }
+
+            assertEquals(expected, columnsOf(raw, "PlankSession"))
         } finally {
             db.close()
         }

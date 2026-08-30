@@ -126,6 +126,36 @@ carries eight possible lines and dropped its own blood sugar band for that
 reason: a wash behind that many series stops reading as one line's target and
 starts reading as a region of the chart.
 
+## Planks
+
+A card on Log with a clock on it. **Start**, hold, **Stop** — and then the hold
+sits there with two buttons under it, *Save this hold* and *Discard*. Nothing
+reaches the database until one of them is pressed.
+
+That pause is the whole point. The chart plots each day's **longest** hold, so a
+fumbled start or a plank abandoned at ten seconds would not be noise on it — it
+would be a personal best you never performed, sitting at the top of the day. A
+hold of zero seconds is thrown away without asking, since a Start immediately
+followed by a Stop is a mis-tap in every reading.
+
+The trend lives on Activity with the other bodyweight work, and the goal is set
+under **Settings → Daily goals → Plank hold**. It is a *hold* rather than a daily
+total, unlike everything else in that card: three one-minute planks are not a
+three-minute plank, and it is the second of those the Army scores. Where your
+age and sex are in the profile, the stepper opens on your own AFT 60-point
+requirement and prints it underneath, since that is usually the number you are
+actually aiming at.
+
+**A day you did not plank is a gap in the line, not a zero.** Your plank capacity
+did not fall to nothing on your rest days — it went unmeasured, and the chart says
+so by breaking rather than dropping to the floor. That is the opposite of the
+pushup and air-squat charts beside it, where a day with no rows really does mean
+no reps were done.
+
+Training holds are kept entirely separate from the plank on your AFT scorecard.
+A Tuesday morning hold is not a test result, and feeding it into that card would
+report a test that never happened.
+
 ## How well did today get logged?
 
 A card under the meal list on Log, with five levels: *Barely*, *Guessed*,

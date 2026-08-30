@@ -14,6 +14,7 @@ import com.prestondihle.healthtracker.data.GripStrengthEntry
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.HydrationEntry
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.PlankSession
 import com.prestondihle.healthtracker.data.Sex
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
@@ -494,6 +495,22 @@ data class AftUiState(
                 }
 }
 
+/**
+ * The four hand-logged activity sources, bundled.
+ *
+ * A named class rather than a `Triple` because there are four of them now, and
+ * rather than four more sources on the outer combine because that one is already
+ * at the typed overloads' limit of five. Named fields also stop the read sites
+ * saying `activity.second`, which is a positional reference to a list whose type
+ * would happily accept the wrong one.
+ */
+private data class ActivityBundle(
+    val hydration: List<HydrationEntry>,
+    val sets: List<ExerciseSet>,
+    val bloodPressure: List<BloodPressureReading>,
+    val planks: List<PlankSession>,
+)
+
 data class TrendsUiState(
     val range: TrendsRange = TrendsRange.TWO_WEEKS,
     val startDate: LocalDate = LocalDate.now().minusDays(13),
@@ -506,6 +523,7 @@ data class TrendsUiState(
     val hydration: List<HydrationEntry> = emptyList(),
     val exerciseSets: List<ExerciseSet> = emptyList(),
     val bloodPressure: List<BloodPressureReading> = emptyList(),
+    val planks: List<PlankSession> = emptyList(),
     val goals: UserGoals = UserGoals(),
     /** Staged weights on the way to the goal, heaviest first. */
     val weightSubGoals: List<WeightSubGoal> = emptyList(),
@@ -741,6 +759,36 @@ data class TrendsUiState(
      * bucket "reps per day" rather than "reps per day trained" -- a week with one
      * hard session in it did not average that session's count.
      */
+    /**
+     * The longest plank held on each day, null on a day nothing was held.
+     *
+     * **The longest, not the total**, and that is the exercise deciding it rather
+     * than a preference: three one-minute planks are not a three-minute plank, and
+     * the single longest hold is what the AFT scores and what the goal beside this
+     * chart is set against. Summing them would let a day of easy repeats outrank a
+     * day that set a record.
+     *
+     * **Null rather than zero on an untrained day, which is the opposite of
+     * [repSeries] beside it**, and the difference is what the number *is*. A rep
+     * count is a quantity accumulated, so no rows means none were done and zero is
+     * true. A longest hold is a measurement of capacity, and nobody's plank
+     * capacity fell to zero seconds on the days they did not train -- it simply
+     * went unmeasured. Ground rule 6 at the point where two neighbouring charts
+     * need opposite answers.
+     *
+     * One consequence follows and is wanted: at the weekly ranges a bucket is the
+     * mean of the days that *were* measured, so a week with one hard hold in it
+     * reports that hold rather than a seventh of it.
+     */
+    val plankSeries: List<DayPoint>
+        get() {
+            val bestByDate =
+                planks
+                    .groupBy { it.timestamp.atZone(zoneId).toLocalDate() }
+                    .mapValues { (_, held) -> held.maxOf { it.seconds }.toFloat() }
+            return bucketed(days.map { DayPoint(it, bestByDate[it]) })
+        }
+
     fun repSeries(movement: MovementType): List<DayPoint> {
         val byDate =
             exerciseSets
@@ -849,13 +897,16 @@ class TrendsViewModel(
                     ) { weights, waists, grips ->
                         Triple(weights, waists, grips)
                     },
+                    // A bundle rather than a Triple now that planks make it four.
+                    // The outer combine is already at its typed limit of five, so
+                    // this group is where a fourth activity source has to go.
                     combine(
                         repository.getHydrationBetween(start, end),
                         repository.getExerciseSetsBetween(start, end),
                         repository.getBloodPressureBetween(start, end),
-                    ) { hydration, sets, bloodPressure ->
-                        Triple(hydration, sets, bloodPressure)
-                    },
+                        repository.getPlanksBetween(start, end),
+                        ::ActivityBundle,
+                    ),
                     // Paired with the goals rather than given a source of its own:
                     // the outer combine's typed overloads stop at five, and a
                     // staged weight is a goal in every sense but the table it
@@ -877,9 +928,10 @@ class TrendsViewModel(
                         weights = body.first,
                         waists = body.second,
                         grips = body.third,
-                        hydration = activity.first,
-                        exerciseSets = activity.second,
-                        bloodPressure = activity.third,
+                        hydration = activity.hydration,
+                        exerciseSets = activity.sets,
+                        bloodPressure = activity.bloodPressure,
+                        planks = activity.planks,
                         goals = targets.first ?: UserGoals(),
                         weightSubGoals = targets.second,
                         settings = targets.third ?: UserSettings(),

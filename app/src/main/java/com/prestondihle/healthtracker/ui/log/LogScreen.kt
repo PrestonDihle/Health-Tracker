@@ -36,6 +36,7 @@ import com.prestondihle.healthtracker.ui.wellness.FoodLogConfidenceCard
 import com.prestondihle.healthtracker.ui.wellness.GripStrengthCard
 import com.prestondihle.healthtracker.ui.wellness.MoodCard
 import com.prestondihle.healthtracker.ui.wellness.MovementCard
+import com.prestondihle.healthtracker.ui.wellness.PlankCard
 import com.prestondihle.healthtracker.ui.wellness.ReadingCard
 import com.prestondihle.healthtracker.ui.wellness.UsualIntakeState
 import com.prestondihle.healthtracker.ui.wellness.WellnessUiState
@@ -58,6 +59,10 @@ fun LogScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val usual by viewModel.usual.collectAsStateWithLifecycle()
+    // Its own flow, and it only ticks while a plank is actually running -- see
+    // WellnessViewModel.plank. A ticker that ran unconditionally would make this
+    // the third screen in the app that never reaches idle in a test.
+    val plank by viewModel.plank.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -193,6 +198,27 @@ fun LogScreen(
                                 toast("Logged $it pages")
                             },
                             onSetPages = viewModel::setPages,
+                        )
+                    },
+                    // Beside the rep counters, which is the other bodyweight work
+                    // logged here -- and directly after them rather than before,
+                    // because those are typed in a second and this one holds the
+                    // reader's attention for two minutes.
+                    ReorderableCard("plank") {
+                        PlankCard(
+                            plank = plank,
+                            goalSeconds = state.goals.plankHoldSecondsGoal,
+                            onStart = viewModel::startPlank,
+                            onStop = viewModel::stopPlank,
+                            onSave = {
+                                val held = plank.pendingSeconds
+                                viewModel.savePlank()
+                                held?.let { toast("Logged a ${Units.formatHold(it)} plank") }
+                            },
+                            onDiscard = {
+                                viewModel.discardPlank()
+                                toast("Plank discarded")
+                            },
                         )
                     },
                     ReorderableCard("movement") {

@@ -236,6 +236,31 @@ data class HydrationEntry(
     val milliliters: Int,
 )
 
+/**
+ * One plank, held for [seconds].
+ *
+ * Its own table rather than an [ExerciseSet] with a `movement` of PLANK, because
+ * the column would have to be `reps` and a plank has none. A held time in a
+ * column named for repetitions is the kind of thing that reads fine for a year
+ * and then gets summed by something that trusted the name.
+ *
+ * Separate from [AftAttempt.plankSeconds] as well, and that separation is the
+ * point rather than duplication: an attempt is one event of a formal test taken
+ * twice a year, and these are training. Feeding a Tuesday morning hold into the
+ * scorecard would report a test that never happened, on the card whose whole
+ * value is that its figures were earned under test conditions.
+ *
+ * Timestamped like every other hand-logged intake so a hold can be corrected
+ * onto the day it belongs to, and because two holds in one session are two rows
+ * rather than one that has to be edited.
+ */
+@Entity(indices = [Index("timestamp")])
+data class PlankSession(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Instant,
+    val seconds: Int,
+)
+
 /** One logged set of bodyweight reps, with the time it was performed. */
 @Entity(indices = [Index("timestamp")])
 data class ExerciseSet(
@@ -655,6 +680,21 @@ data class UserGoals(
     val weeklySquatGoal: Int? = null,
     val weeklyRunMinutesGoal: Int? = null,
     val dailyStepGoal: Int? = 10_000,
+    /**
+     * A plank hold to aim at, in seconds, or null for none.
+     *
+     * A **hold**, not a daily total, which is why it is not named like the rep
+     * goals above it. Planking three times for a minute is not the same
+     * achievement as holding one for three, and it is the second that the AFT
+     * scores and that this goal is about. The trend it is drawn on plots the
+     * day's longest hold for the same reason.
+     *
+     * Null rather than seeded: the useful figure is the reader's own AFT
+     * requirement, which depends on an age and a sex this app may not have been
+     * told. The Settings stepper prints their 60- and 100-point rows where the
+     * profile allows it, which is a better answer than a guessed default.
+     */
+    val plankHoldSecondsGoal: Int? = null,
     /** 100 fl oz, rounded to the nearest millilitre. */
     val dailyWaterMlGoal: Int? = 2957,
     val dailyCalorieTarget: Int? = null,

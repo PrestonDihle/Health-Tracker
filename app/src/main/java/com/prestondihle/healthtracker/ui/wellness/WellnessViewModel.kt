@@ -45,7 +45,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -165,6 +168,55 @@ private const val MEAL_STAMP_HISTORY_DAYS = 14L
  * not coffee gets one button, not a broken pair.
  */
 data class UsualIntakeState(val lastCaffeineMg: Int? = null, val usualWaterMl: Int? = null)
+
+/**
+ * How often the running plank clock is redrawn.
+ *
+ * A quarter second rather than a full one, because the read-out is the thing the
+ * reader is watching: at a one-second tick the digits visibly lag the moment the
+ * Stop button is pressed, and a timer whose figure arrives late is a timer that
+ * reads as inaccurate whether or not it is. The stored value is still whole
+ * seconds -- this only governs the drawing.
+ */
+private const val PLANK_TICK_MILLIS = 250L
+
+/**
+ * The plank timer, in one of its three states.
+ *
+ * The middle state is the feature. A hold that went straight to the database on
+ * Stop would make every fumbled start, every phone picked up to check the time
+ * and every plank abandoned at ten seconds into a row on the chart -- and the
+ * chart plots the day's *best*, so a bad row is not merely noise, it is a
+ * personal best nobody performed. [heldSeconds] with [running] false is a hold
+ * waiting to be kept or thrown away.
+ *
+ * Held in the view model rather than in the card so it survives a tab switch: a
+ * reader who starts a plank and glances at Today would otherwise come back to a
+ * stopped clock, which is the one moment this control cannot afford to lose.
+ */
+data class PlankTimerState(
+    /** When the current hold began, or null when nothing is running. */
+    val startedAt: Instant? = null,
+    /** A finished hold awaiting Save or Discard, in seconds. */
+    val pendingSeconds: Int? = null,
+    val now: Instant = Instant.now(),
+    /** The day's longest hold so far, for the read-out under the clock. */
+    val bestTodaySeconds: Int? = null,
+) {
+    val running: Boolean
+        get() = startedAt != null
+
+    /** Seconds on the clock right now: the live hold, or the one awaiting a decision. */
+    val heldSeconds: Int
+        get() =
+            startedAt?.let { Duration.between(it, now).seconds.coerceAtLeast(0L).toInt() }
+                ?: pendingSeconds
+                ?: 0
+
+    /** True while a finished hold is on screen with neither button pressed yet. */
+    val awaitingDecision: Boolean
+        get() = startedAt == null && pendingSeconds != null
+}
 
 data class WellnessUiState(
     val today: LocalDate = LocalDate.now(),
@@ -802,6 +854,89 @@ class WellnessViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = UsualIntakeState(),
             )
+
+    private val plankStartedAt = MutableStateFlow<Instant?>(null)
+    private val plankPendingSeconds = MutableStateFlow<Int?>(null)
+
+    /**
+     * The plank timer, ticking **only while a plank is running**.
+     *
+     * That conditional tick is the whole reason this is not folded into
+     * [uiState]. A ticker that ran unconditionally would put a third permanently
+     * un-idle screen in this app, and this file's own history says what that
+     * costs: a screen that never reaches idle cannot be scrolled in a test, which
+     * is why the sleep and mood cards have to be composed on their own. Here the
+     * flow emits once and stops whenever no plank is in progress, so Log stays
+     * idle for every test that is not deliberately holding one -- and none is.
+     *
+     * `flatMapLatest` rather than a `while` loop guarded by a flag: starting a
+     * second plank cancels the first ticker rather than leaving it running
+     * behind the new one, which is a leak a flag would not prevent.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val plank: StateFlow<PlankTimerState> =
+        combine(
+                plankStartedAt.flatMapLatest { started ->
+                    if (started == null) flowOf(Instant.now())
+                    else flow {
+                        while (true) {
+                            emit(Instant.now())
+                            delay(PLANK_TICK_MILLIS)
+                        }
+                    }
+                },
+                plankStartedAt,
+                plankPendingSeconds,
+                repository.getBestPlankSecondsForDate(LocalDate.now(zoneId)),
+            ) { now, started, pending, bestToday ->
+                PlankTimerState(
+                    startedAt = started,
+                    pendingSeconds = pending,
+                    now = now,
+                    bestTodaySeconds = bestToday,
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = PlankTimerState(),
+            )
+
+    /** Begins a hold, discarding any decision still on screen. */
+    fun startPlank() {
+        plankPendingSeconds.value = null
+        plankStartedAt.value = Instant.now()
+    }
+
+    /**
+     * Stops the clock and offers the hold, rather than writing it.
+     *
+     * Nothing reaches the database here. The decision the reader is about to make
+     * is the point of the whole control -- see [PlankTimerState].
+     *
+     * A hold of zero seconds is dropped outright rather than offered: that is a
+     * Start immediately followed by a Stop, which is a mis-tap in both plausible
+     * readings, and offering to save it would put a dialog in front of somebody
+     * who has already told us twice that they are not planking.
+     */
+    fun stopPlank() {
+        val started = plankStartedAt.value ?: return
+        val held = Duration.between(started, Instant.now()).seconds.coerceAtLeast(0L).toInt()
+        plankStartedAt.value = null
+        plankPendingSeconds.value = held.takeIf { it > 0 }
+    }
+
+    /** Keeps the hold waiting on screen, timestamped at the moment it is saved. */
+    fun savePlank() {
+        val seconds = plankPendingSeconds.value ?: return
+        plankPendingSeconds.value = null
+        viewModelScope.launch { repository.addPlank(seconds) }
+    }
+
+    /** Throws the hold away. Nothing was ever written, so there is nothing to undo. */
+    fun discardPlank() {
+        plankPendingSeconds.value = null
+    }
 
     init {
         seedPlanIfMissing()
