@@ -47,6 +47,9 @@ import com.prestondihle.healthtracker.ui.components.EntryList
 import com.prestondihle.healthtracker.ui.components.LocalCardFold
 import com.prestondihle.healthtracker.ui.components.ScatterChart
 import com.prestondihle.healthtracker.ui.trends.CompareCard
+import com.prestondihle.healthtracker.ui.trends.MetabolicScatterCard
+import com.prestondihle.healthtracker.ui.trends.MetabolicUiState
+import com.prestondihle.healthtracker.ui.trends.ScatterBucket
 import com.prestondihle.healthtracker.ui.trends.CompareUiState
 import com.prestondihle.healthtracker.ui.trends.ComparableMetric
 import com.prestondihle.healthtracker.ui.trends.NetCaloriesTrendCard
@@ -878,5 +881,56 @@ class ScreenRenderTest {
         }
 
         composeRule.onNodeWithText("↑ Weight lost (g/day)").assertIsDisplayed()
+    }
+
+    /**
+     * "1 weeks", which every test passed and the phone caught in one screenshot.
+     *
+     * The count of one is not an edge case on this card -- it is the state it
+     * spends its early life in, because a reader needs a week of *both* weight
+     * and food logging before a second point exists. So the ungrammatical
+     * sentence was the first thing the card ever said, under a plot with one dot
+     * on it.
+     */
+    @Test
+    fun `the scatter counts one week without an s`() {
+        val single =
+            listOf(ScatterPoint(java.time.LocalDate.of(2026, 8, 24), x = 1_700f, y = 285f))
+
+        render {
+            MetabolicScatterCard(
+                state = MetabolicUiState(points = single, bucket = ScatterBucket.WEEKLY),
+                onPickAxes = { _, _ -> },
+                onBucket = {},
+            )
+        }
+
+        composeRule
+            .onNodeWithText("1 week with both figures", substring = true)
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `the scatter counts several weeks with one`() {
+        val several =
+            (0..2).map {
+                ScatterPoint(
+                    java.time.LocalDate.of(2026, 8, 3).plusDays(it * 7L),
+                    x = 1_700f + it * 200f,
+                    y = 285f - it * 40f,
+                )
+            }
+
+        render {
+            MetabolicScatterCard(
+                state = MetabolicUiState(points = several, bucket = ScatterBucket.WEEKLY),
+                onPickAxes = { _, _ -> },
+                onBucket = {},
+            )
+        }
+
+        composeRule
+            .onNodeWithText("3 weeks with both figures", substring = true)
+            .assertIsDisplayed()
     }
 }

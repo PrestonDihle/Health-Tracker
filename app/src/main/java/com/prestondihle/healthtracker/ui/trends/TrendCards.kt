@@ -1055,10 +1055,14 @@ internal fun MetabolicScatterCard(
 private fun MetabolicReadout(state: MetabolicUiState) {
     val fit = state.fit
     val slot = if (state.bucket == ScatterBucket.WEEKLY) "week" else "day"
+    // "1 weeks" is what a bare `${slot}s` prints, and the count of one is the
+    // state this card spends most of its early life in -- a reader with a week
+    // of food logging sees that sentence before they see anything else it says.
+    fun slots(n: Int) = if (n == 1) slot else "${slot}s"
 
     if (state.points.size < EnergyBalance.MIN_POINTS) {
         Text(
-            "${state.points.size} ${slot}s with both figures. A line needs at least " +
+            "${state.points.size} ${slots(state.points.size)} with both figures. A line needs at least " +
                 "${EnergyBalance.MIN_POINTS}, and is worth believing at rather more.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1068,7 +1072,7 @@ private fun MetabolicReadout(state: MetabolicUiState) {
 
     Text(
         buildString {
-            append("${state.points.size} ${slot}s plotted")
+            append("${state.points.size} ${slots(state.points.size)} plotted")
             fit?.let { append(", ${(it.rSquared * 100).roundToInt()}% of the spread explained") }
             append(".")
         },
