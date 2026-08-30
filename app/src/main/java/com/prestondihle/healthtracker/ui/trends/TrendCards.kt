@@ -18,6 +18,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -32,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.prestondihle.healthtracker.domain.BodyComposition
+import com.prestondihle.healthtracker.domain.EnergyBalance
 import com.prestondihle.healthtracker.domain.MovingAverage
 import com.prestondihle.healthtracker.domain.Readiness
 import com.prestondihle.healthtracker.domain.ReadinessFacts
@@ -50,6 +52,7 @@ import com.prestondihle.healthtracker.ui.components.LineSeries
 import com.prestondihle.healthtracker.ui.components.LineStyle
 import com.prestondihle.healthtracker.ui.components.LocalCardFold
 import com.prestondihle.healthtracker.ui.components.MultiLineChart
+import com.prestondihle.healthtracker.ui.components.ScatterChart
 import com.prestondihle.healthtracker.ui.components.StackedBar
 import com.prestondihle.healthtracker.ui.components.StackedBarChart
 import com.prestondihle.healthtracker.ui.components.TimePoint
@@ -963,5 +966,190 @@ internal fun ReadinessCard(readiness: Readiness) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Weight change against whatever might explain it, on axes that cross at zero.
+ *
+ * The only chart in this app with a measurement on *both* axes. Every other one
+ * is indexed by time and answers "what did this do"; this one answers "do these
+ * two move together", which is a question a pair of lines can only ever hint at.
+ *
+ * **The crossing is the point.** With grams lost on y and calories eaten on x,
+ * the fitted line crosses zero at the intake where the weight holds -- this
+ * reader's own maintenance, measured rather than predicted from a population
+ * formula. Against *net* calories it answers a different question just as
+ * usefully: a watch whose burn estimate were right would put that crossing at
+ * zero, so wherever it lands is how far the watch is out.
+ *
+ * **It says maintenance and never BMR**, though that is what gets asked for.
+ * Basal metabolic rate is what a body burns at complete rest; this figure
+ * includes every step walked and every session trained on the days that went
+ * into it. They differ by hundreds of calories, and printing one under the
+ * other's name would make this the most confidently wrong number in the app.
+ */
+@Composable
+internal fun MetabolicScatterCard(
+    state: MetabolicUiState,
+    onPickAxes: (MetabolicMetric, MetabolicMetric) -> Unit,
+    onBucket: (ScatterBucket) -> Unit,
+) {
+    val chartColors = LocalChartColors.current
+    TrendCard(
+        title = "Weight against everything else",
+        subtitle =
+            "${state.yMetric.label} (${state.yMetric.unit}) vs " +
+                "${state.xMetric.label} (${state.xMetric.unit})",
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetabolicPicker(
+                selected = state.yMetric,
+                exclude = state.xMetric,
+                onSelect = { onPickAxes(state.xMetric, it) },
+            )
+            MetabolicPicker(
+                selected = state.xMetric,
+                exclude = state.yMetric,
+                onSelect = { onPickAxes(it, state.yMetric) },
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScatterBucket.entries.forEach { option ->
+                FilterChip(
+                    selected = state.bucket == option,
+                    onClick = { onBucket(option) },
+                    label = { Text(option.label) },
+                )
+            }
+        }
+
+        ScatterChart(
+            points = state.points,
+            xLabel = "${state.xMetric.label} (${state.xMetric.unit})",
+            yLabel = "${state.yMetric.label} (${state.yMetric.unit})",
+            fit = state.fit,
+            pointColor = MaterialTheme.colorScheme.primary,
+            // The fit's own family rather than the points': it is a model drawn
+            // over measurements, the same separation the moving average keeps.
+            fitColor = chartColors.movingAverage,
+            modifier = Modifier.fillMaxWidth().height(220.dp),
+            contentDescription =
+                "${state.yMetric.label} against ${state.xMetric.label}, " +
+                    "${state.points.size} ${state.bucket.label.lowercase()} points",
+        )
+
+        MetabolicReadout(state)
+    }
+}
+
+/**
+ * What the fit is allowed to claim, which on most windows is nothing.
+ *
+ * The refusals live in [EnergyBalance]; this only has to print them honestly.
+ * The count of points comes first, because that is what a reader needs in order
+ * to weigh everything after it.
+ */
+@Composable
+private fun MetabolicReadout(state: MetabolicUiState) {
+    val fit = state.fit
+    val slot = if (state.bucket == ScatterBucket.WEEKLY) "week" else "day"
+
+    if (state.points.size < EnergyBalance.MIN_POINTS) {
+        Text(
+            "${state.points.size} ${slot}s with both figures. A line needs at least " +
+                "${EnergyBalance.MIN_POINTS}, and is worth believing at rather more.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    Text(
+        buildString {
+            append("${state.points.size} ${slot}s plotted")
+            fit?.let { append(", ${(it.rSquared * 100).roundToInt()}% of the spread explained") }
+            append(".")
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    val maintenance = state.maintenanceCalories
+    when {
+        maintenance != null && state.xMetric == MetabolicMetric.CALORIES_EATEN ->
+            Text(
+                "Your weight holds at about $maintenance kcal a day. That is " +
+                    "maintenance, not BMR — it includes everything you did on these " +
+                    "days, where BMR is what you would burn at rest.",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+
+        maintenance != null ->
+            Text(
+                // Net calories. A perfect burn estimate would cross at zero, so
+                // the offset is that estimate's error and not a target.
+                "Your weight holds at a net of $maintenance kcal rather than zero, " +
+                    "which is roughly how far your burn estimate is out.",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+
+        state.xMetric.isIntake ->
+            Text(
+                // The most likely reading of this card, so it says why rather
+                // than leaving a blank where a number was expected.
+                "No maintenance figure from this window: the line either points " +
+                    "the wrong way, fits too loosely, or crosses somewhere no diet " +
+                    "goes. More ${slot}s, or better-logged ones, is the only fix.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+        else ->
+            Text(
+                "Put calories eaten on the bottom axis to get a maintenance figure. " +
+                    "A crossing means nothing against a heart rate or a glucose average.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+    }
+
+    Text(
+        "Two things moving together is not one causing the other. This is a sample " +
+            "of one with nothing controlled, weight off a bathroom scale against food " +
+            "logged by hand.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun MetabolicPicker(
+    selected: MetabolicMetric,
+    exclude: MetabolicMetric,
+    onSelect: (MetabolicMetric) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(onClick = { open = true }, label = { Text(selected.label) })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            // A metric cannot be plotted against itself: every point would land
+            // on one diagonal and the fit would report a perfect correlation
+            // between a number and itself.
+            MetabolicMetric.entries
+                .filter { it != exclude }
+                .forEach { metric ->
+                    DropdownMenuItem(
+                        text = { Text(metric.label) },
+                        onClick = {
+                            onSelect(metric)
+                            open = false
+                        },
+                    )
+                }
+        }
     }
 }

@@ -625,6 +625,84 @@ The **profile** on `UserSettings` — `maxHeartRateBpm`, `ageYears`, `sex`, `hei
 card at the top of Settings. Max HR is the one with teeth: it zones the runs chart. Height is stored
 in cm like everything else and stepped in inches or centimetres by the unit setting.
 
+### The metabolic scatter
+
+`ui/components/ScatterChart.kt` is the **only chart here with a measurement on both axes**. Every
+other one is indexed by time and answers *what did this do*; this answers *do these two move
+together*, which a pair of lines can only hint at. Nothing is reusable from the day-indexed charts —
+their x axis is a list of dates and the tick maths assumes it, which is why `niceTicks` is duplicated
+rather than shared.
+
+`MetabolicMetric` is the menu (twelve, `ComparableMetric`'s rule: figures that are one number per
+day, so any two line up with no resampling), `MetabolicSource` turns rows into points, and
+`domain/EnergyBalance.kt` fits the line.
+
+**The crossing is the whole feature.** With grams lost on y and calories eaten on x, the fitted line
+crosses `y = 0` at the intake where the weight holds — this reader's own maintenance, measured rather
+than predicted from a population equation. Against *net* calories it answers a different question
+equally well: a watch whose burn estimate were right would put that crossing at zero, so wherever it
+lands is how far the watch is out.
+
+**It says maintenance and never BMR, and that distinction is not pedantry.** Basal metabolic rate is
+what a body burns at complete rest; this figure includes every step walked and every session trained
+on the days that went into it. They differ by hundreds of calories. Printing one under the other's
+name would make this the most confidently wrong number in the app, which is exactly the shape
+`GoalProjection` exists to warn about — **a wrong figure here does not look wrong, it looks like a
+plan.**
+
+`EnergyBalance` is therefore mostly refusals, and each catches a different failure:
+
+- **Fewer than `MIN_POINTS` (5)**, `GoalProjection`'s figure. Two points fit a line perfectly and say
+  nothing.
+- **Zero variance in x** — a column of points at one intake has no slope, and the arithmetic divides
+  by zero to find that out.
+- **A slope pointing the wrong way.** More food has to mean less lost. A positive slope is a window
+  in which something else moved, and its crossing would be a maintenance figure below everything
+  actually eaten. Only safe to apply where x is an intake, which is what `isIntake` gates.
+- **`rSquared` below `MIN_R_SQUARED` (0.33).** The line is still *drawn* — seeing it lie flat through
+  a scatter is how a reader learns not to trust it — and only the number is withheld.
+- **A crossing outside `PLAUSIBLE_MAINTENANCE` (1,000–6,000).** Arithmetically fine and about
+  something other than energy balance. This is the one a correlation threshold cannot catch.
+
+**Weekly is the default bucket and daily is the option needing justification.** The scale moves ~700 g
+on water and glycogen where a 500 kcal deficit weighs about 65, so a day's points are noise an order
+of magnitude larger than the signal and a line through them fits the water. Weight is also **smoothed
+before differencing**, never taken raw, for the same reason.
+
+Three quieter rules, each of which would still draw a plausible chart if reversed:
+
+- **Losing is positive**, because the axis says *weight lost*. Inverted, every point lands in the
+  wrong quadrant and the slope flips — which the wrong-way refusal then catches, turning a working
+  card into a permanently silent one.
+- **A weekly bucket reports grams per *day*.** Per week differs by a factor of seven and looks just
+  as plausible; per day is what lets the two bucket settings be read against each other.
+- **A bucket missing a smoothed weight at either end is dropped, never plotted at zero.** A row of
+  points along `y = 0` is a run of weeks that "held steady" and never happened, and it would drag the
+  line flat and put the crossing wherever those weeks sat on x. `MetabolicScatterTest` pins the
+  consequence too: the week *after* a gap in weighing is also dropped, because its left edge is the
+  first morning back on the scale and the trailing window holds one reading there. Closing the bucket
+  over the nearest available day instead would attribute a fortnight's loss to one week.
+
+**Weight is read a `MovingAverage.WINDOW_DAYS` lead-in earlier than the window drawn.** Without it the
+earliest bucket has no smoothed value at its left edge and vanishes — silently, looking exactly like
+a window that starts later, and on the short ranges that is a material share of the points.
+
+`AVG_HEART_RATE` is the **whole day's** mean, sleep included, and is labelled so. A daytime-only
+average would be the more useful figure and cannot be built: it would come from `HeartRateBucket`,
+which is only synced `HEART_RATE_SYNC_HORIZON` (48 h) back, so the series would be empty for all but
+the last two days of any window worth fitting. A chart silently drawing two points under a chip
+saying ninety days is worse than one that says plainly what it has.
+
+`boundsIncludingZero` is what makes the plot *four-quadrant* rather than merely scattered: a cloud
+sitting entirely in deficit would otherwise be drawn on an axis with no zero line anywhere on it, and
+the crossing is the one landmark the chart has. It does not force the origin onto an axis genuinely
+far from it — padding 2,000-to-3,000 calories down to zero would squash every point into the top
+third for a gridline nobody reads.
+
+`MetabolicSource` is `internal` rather than private, unlike `MetricSource`, for `SleepCard`'s reason:
+its arithmetic has three ways of being wrong that all still draw a plausible chart, and reaching it
+through the flow would mean testing them against a live clock.
+
 ### The plank timer
 
 `PlankSession` is one hold, timed on Log and plotted on Activity. `UserGoals.plankHoldSecondsGoal`

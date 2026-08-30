@@ -32,6 +32,8 @@ import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
 import com.prestondihle.healthtracker.data.WeightEntry
 import com.prestondihle.healthtracker.data.WeightSubGoal
+import com.prestondihle.healthtracker.domain.EnergyBalance
+import com.prestondihle.healthtracker.domain.ScatterPoint
 import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.chartBounds
 import com.prestondihle.healthtracker.health.MockHealthDataSource
@@ -43,6 +45,7 @@ import com.prestondihle.healthtracker.ui.components.CardFold
 import com.prestondihle.healthtracker.ui.components.DayPoint
 import com.prestondihle.healthtracker.ui.components.EntryList
 import com.prestondihle.healthtracker.ui.components.LocalCardFold
+import com.prestondihle.healthtracker.ui.components.ScatterChart
 import com.prestondihle.healthtracker.ui.trends.CompareCard
 import com.prestondihle.healthtracker.ui.trends.CompareUiState
 import com.prestondihle.healthtracker.ui.trends.ComparableMetric
@@ -793,5 +796,87 @@ class ScreenRenderTest {
         assertEquals(false, resolved["light"])
         assertEquals(true, resolved["dark"])
         assertEquals(resolved["system"], resolved["unread"])
+    }
+
+    /**
+     * The scatter's canvas arithmetic, which only runs under a real layout pass.
+     *
+     * Three shapes, and the last two are the ones that crash rather than look
+     * wrong: an empty list has no min or max to scale against, and a single point
+     * gives a span of zero to divide by. Both are reachable on a first run and
+     * neither is visible to a pure-JVM test of the fit.
+     */
+    @Test
+    fun `the scatter draws a cloud, a fit and the zero rules`() {
+        val points =
+            (0..7).map {
+                val eaten = 1_800f + it * 200f
+                ScatterPoint(
+                    date = java.time.LocalDate.of(2026, 1, 1).plusDays(it * 7L),
+                    x = eaten,
+                    // Crosses zero inside the plotted span, so both zero rules
+                    // are on the canvas and the fit runs edge to edge past them.
+                    y = (2_800f - eaten) / 7.7f,
+                )
+            }
+
+        render {
+            ScatterChart(
+                points = points,
+                xLabel = "Calories eaten (kcal)",
+                yLabel = "Weight lost (g/day)",
+                fit = EnergyBalance.fit(points),
+                pointColor = androidx.compose.ui.graphics.Color.Blue,
+                fitColor = androidx.compose.ui.graphics.Color.Red,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // The axis names are the only text on this card; the canvas itself is a
+        // blank to the tree, which is what the spoken description is for.
+        composeRule.onNodeWithText("↑ Weight lost (g/day)").assertIsDisplayed()
+        composeRule.onNodeWithText("Calories eaten (kcal) →").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage("build/screenshots/metabolic-scatter.png")
+    }
+
+    @Test
+    fun `an empty scatter says so instead of dividing by nothing`() {
+        render {
+            ScatterChart(
+                points = emptyList(),
+                xLabel = "Calories eaten (kcal)",
+                yLabel = "Weight lost (g/day)",
+                fit = null,
+                pointColor = androidx.compose.ui.graphics.Color.Blue,
+                fitColor = androidx.compose.ui.graphics.Color.Red,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        composeRule.onNodeWithText("Not enough days with both figures recorded").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a single point still gets a plot to sit in`() {
+        // One point has no span on either axis. Left alone that is a divide by
+        // zero in the pixel mapping, which is a crash rather than a bad-looking
+        // chart -- and one point is what this card holds after a reader's first
+        // week.
+        render {
+            ScatterChart(
+                points =
+                    listOf(ScatterPoint(java.time.LocalDate.of(2026, 1, 1), x = 2_400f, y = 60f)),
+                xLabel = "Calories eaten (kcal)",
+                yLabel = "Weight lost (g/day)",
+                // No fit either: one point is below MIN_POINTS, so this is the
+                // combination a real first week actually produces.
+                fit = null,
+                pointColor = androidx.compose.ui.graphics.Color.Blue,
+                fitColor = androidx.compose.ui.graphics.Color.Red,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        composeRule.onNodeWithText("↑ Weight lost (g/day)").assertIsDisplayed()
     }
 }

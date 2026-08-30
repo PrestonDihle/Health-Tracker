@@ -237,6 +237,44 @@ The supplement chip follows the clock rather than always offering the morning,
 and says how many it will tick — it is the one button here that writes several
 rows at once.
 
+## Weight against everything else
+
+A card on Wellness with a measurement on **both** axes — the only chart here that
+drops time entirely. Grams lost per day up the side, and whatever you think might
+explain it along the bottom: calories eaten, net calories, calories burned,
+protein, average or resting heart rate, average blood glucose, steps, sleep, body
+weight. Both axes carry their zero line, so the plot reads as four quadrants and
+you can see which of them your weeks are landing in.
+
+**The crossing is what it is for.** Put calories eaten along the bottom and the
+fitted line crosses zero at the intake where your weight holds — your own
+maintenance, measured from your data instead of predicted by a formula built on
+somebody else's. Put *net* calories there and it answers a different question
+just as usefully: if your watch's burn estimate were right the crossing would be
+at zero, so wherever it actually lands is roughly how far the watch is out.
+
+**That figure is maintenance, not BMR, and the card says so every time it prints
+one.** Basal metabolic rate is what you would burn lying still all day. This
+number includes every step and every session on the days it was measured over,
+and the two differ by hundreds of calories.
+
+**Weekly is the default grouping and it matters.** A day's weight moves about
+700 g on water and glycogen; a day's 500-calorie deficit weighs about 65. Daily
+points are noise ten times the size of the signal, and a line through them is
+fitting the water. Weight is smoothed before any difference is taken, for the
+same reason. Daily is still there — it is the honest way to *see* that noise.
+
+**Most windows get no number, and the card says why.** A line needs at least five
+points; it has to slope the right way; it has to fit well enough to read
+something off; and its crossing has to land somewhere a human diet actually goes.
+Fail any of those and the line is still drawn — seeing it lie flat through a
+scattered cloud is how you learn not to trust it — but the figure is withheld.
+
+A week you did not weigh yourself is left out rather than plotted at zero. So is
+the week straight after it, because the first morning back on the scale is not
+enough to smooth against yet, and closing the gap would credit a fortnight of
+loss to a single week.
+
 ## Records and streaks
 
 On Activity: the best of each thing you have logged, with the day you did it —

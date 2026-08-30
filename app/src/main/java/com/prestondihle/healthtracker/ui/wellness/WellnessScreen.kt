@@ -79,6 +79,7 @@ import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.theme.Pine
 import com.prestondihle.healthtracker.ui.trends.BloodPressureTrendCard
 import com.prestondihle.healthtracker.ui.trends.CompareCard
+import com.prestondihle.healthtracker.ui.trends.MetabolicScatterCard
 import com.prestondihle.healthtracker.ui.trends.ReadinessCard
 import com.prestondihle.healthtracker.ui.trends.RestingHeartRateTrendCard
 import com.prestondihle.healthtracker.ui.trends.SleepTrendCard
@@ -108,6 +109,10 @@ fun WellnessScreen(
     // not change when the reader moves a chart's range chip.
     val readiness by trendsViewModel.readiness.collectAsStateWithLifecycle()
     val compare by trendsViewModel.compare.collectAsStateWithLifecycle()
+    // Keyed on its own axis selection as well as the range, so it is its own flow
+    // for the reason `compare` is: the glucose average behind one of its twelve
+    // options costs a CGM archive to load.
+    val metabolic by trendsViewModel.metabolic.collectAsStateWithLifecycle()
     val savedOrder by orderViewModel.savedOrder.collectAsStateWithLifecycle()
     val collapsedCards by orderViewModel.collapsed.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -190,6 +195,17 @@ fun WellnessScreen(
                             state = compare,
                             onPick = trendsViewModel::setComparison,
                             onLag = trendsViewModel::setComparisonLag,
+                        )
+                    },
+                    // Directly under Compare, which is its nearest relative: both
+                    // put two chosen metrics together, and the difference is that
+                    // this one drops time from the axes entirely to ask whether
+                    // they move with each other rather than what each one did.
+                    ReorderableCard("metabolic") {
+                        MetabolicScatterCard(
+                            state = metabolic,
+                            onPickAxes = trendsViewModel::setMetabolicAxes,
+                            onBucket = trendsViewModel::setMetabolicBucket,
                         )
                     },
                     ReorderableCard("moodTrend") { MoodTrendCard(state = state) },

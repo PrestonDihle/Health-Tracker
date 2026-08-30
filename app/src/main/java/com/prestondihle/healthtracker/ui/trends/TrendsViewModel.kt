@@ -29,6 +29,9 @@ import com.prestondihle.healthtracker.domain.MealDuplicates
 import com.prestondihle.healthtracker.domain.GlucoseAnalysis
 import com.prestondihle.healthtracker.domain.GoalEta
 import com.prestondihle.healthtracker.domain.GoalProjection
+import com.prestondihle.healthtracker.domain.EnergyBalance
+import com.prestondihle.healthtracker.domain.LinearFit
+import com.prestondihle.healthtracker.domain.ScatterPoint
 import com.prestondihle.healthtracker.domain.MealResponses
 import com.prestondihle.healthtracker.domain.MovingAverage
 import com.prestondihle.healthtracker.domain.PersonalBests
@@ -335,6 +338,248 @@ enum class ComparableMetric(
 
     internal val needsCaffeine: Boolean
         get() = this == CAFFEINE
+}
+
+/**
+ * What can go on either axis of the metabolic scatter.
+ *
+ * A fixed menu, [ComparableMetric]'s rule and for its reason: these are the
+ * figures that are *one number per day*, so any two line up slot for slot with
+ * no resampling. What is different here is the question -- these are the
+ * quantities that plausibly explain a change in body mass, which is why the
+ * menu carries three calorie figures and no pages-read.
+ */
+enum class MetabolicMetric(
+    val label: String,
+    val unit: String,
+    /**
+     * True where a crossing of y = 0 is a number worth printing.
+     *
+     * Only an *intake* has one. Where x is calories eaten, the crossing is the
+     * intake at which the weight holds -- this reader's own maintenance. Where
+     * it is net calories, the crossing is how far the watch's burn estimate is
+     * out, since a perfect one would put it at zero. Against a heart rate or a
+     * glucose average a crossing is arithmetic with no meaning attached, and
+     * [EnergyBalance.maintenanceCalories] refuses it outright.
+     */
+    val isIntake: Boolean = false,
+) {
+    /**
+     * Grams lost per day, from the *smoothed* weight and not the morning's
+     * reading.
+     *
+     * Raw daily weights move a pound and a half on water and glycogen -- around
+     * 700 g -- where a 500 kcal deficit is worth about 65. Plotted raw, every
+     * point on this chart is noise an order of magnitude larger than the signal,
+     * and a line fitted through it would be fitting the water.
+     */
+    WEIGHT_LOST("Weight lost", "g/day"),
+    CALORIES_EATEN("Calories eaten", "kcal", isIntake = true),
+    NET_CALORIES("Net calories", "kcal", isIntake = true),
+    CALORIES_BURNED("Calories burned", "kcal"),
+    ACTIVE_CALORIES("Active calories", "kcal"),
+    PROTEIN("Protein", "g"),
+    /**
+     * The whole day's mean, sleep included, which is what the source reports.
+     *
+     * Deliberately not a *daytime* average, though that is the more useful
+     * figure: a per-day waking mean would have to be built from `HeartRateBucket`,
+     * and those are only synced [HEART_RATE_SYNC_HORIZON] back, so the series
+     * would be empty for all but the last two days of any window worth fitting.
+     * A chart that silently draws two points where the chip says ninety days is
+     * worse than one that says plainly what it has.
+     */
+    AVG_HEART_RATE("Average heart rate", "bpm"),
+    RESTING_HR("Resting HR", "bpm"),
+    AVG_GLUCOSE("Average glucose", "mg/dL"),
+    STEPS("Steps", "steps"),
+    SLEEP("Sleep", "h"),
+    BODY_WEIGHT("Body weight", "lb"),
+    ;
+
+    /** The one metric that needs the glucose table, which the others do not. */
+    internal val needsGlucose: Boolean
+        get() = this == AVG_GLUCOSE
+}
+
+/**
+ * How the scatter's points are grouped before being plotted.
+ *
+ * **Weekly is the default and daily is the one that needs justifying.** A day's
+ * energy balance against a day's weight change is a ratio of two noisy figures:
+ * the scale moves on water by ten times what a day's deficit weighs, and food
+ * logging is least accurate at the daily scale. Grouping into weeks divides the
+ * scale noise by roughly the square root of seven and averages the logging
+ * error, which is the difference between a cloud with a slope in it and a cloud.
+ *
+ * Daily stays available because it is the honest way to *see* that noise, and
+ * because somebody weighing several times a day has a better scale signal than
+ * this assumes.
+ */
+enum class ScatterBucket(val label: String, val days: Long) {
+    DAILY("Daily", 1),
+    WEEKLY("Weekly", 7),
+}
+
+/**
+ * The metabolic scatter: what is on each axis, the points, and what the fit says.
+ */
+data class MetabolicUiState(
+    val xMetric: MetabolicMetric = MetabolicMetric.CALORIES_EATEN,
+    val yMetric: MetabolicMetric = MetabolicMetric.WEIGHT_LOST,
+    val bucket: ScatterBucket = ScatterBucket.WEEKLY,
+    val points: List<ScatterPoint> = emptyList(),
+    val fit: LinearFit? = null,
+    /**
+     * The intake at which the weight holds, where that is a figure worth
+     * printing at all. Null far more often than not, by design.
+     */
+    val maintenanceCalories: Int? = null,
+    val startDate: LocalDate = LocalDate.now(),
+    val endDate: LocalDate = LocalDate.now(),
+)
+
+/**
+ * Rows in, scatter points out.
+ *
+ * Kept apart from [TrendsUiState] for [MetricSource]'s reason: everything here
+ * has to be derived the same way its own card derives it, and two derivations of
+ * one number is how two cards come to disagree about one day.
+ *
+ * `internal` rather than private, unlike [MetricSource], and for `SleepCard`'s
+ * reason: the arithmetic in here has three ways of being wrong that all still
+ * draw a plausible chart -- the sign of a loss, a bucket closed over a gap in
+ * the weighing, and a week that is not seven days -- and reaching it through the
+ * flow would mean testing them against a live clock.
+ */
+internal class MetabolicSource(
+    val snapshots: List<HealthDaySnapshot>,
+    val weights: List<WeightEntry>,
+    val glucose: List<BloodSugarReading>,
+    val zoneId: ZoneId,
+) {
+    private val snapshotByDate = snapshots.associateBy { it.date }
+
+    /**
+     * Weight per day in kilograms, manual over synced, then smoothed.
+     *
+     * The merge is `TrendsUiState.weightByDay`'s rule -- a hand-typed weight wins
+     * on any day that has both -- and the smoothing is what makes a daily
+     * difference readable at all. See [MetabolicMetric.WEIGHT_LOST].
+     */
+    private val smoothedWeightKg: Map<LocalDate, Float> by lazy {
+        val merged = sortedMapOf<LocalDate, Float>()
+        snapshots.forEach { snap -> snap.weightKg?.let { merged[snap.date] = it } }
+        weights.forEach { merged[it.date] = it.weightKg }
+        MovingAverage.trailing(merged.map { it.key to it.value }).toMap()
+    }
+
+    /** Mean of every glucose reading on a day, or null where there were none. */
+    private val glucoseByDate: Map<LocalDate, Float> by lazy {
+        glucose
+            .groupBy { it.timestamp.atZone(zoneId).toLocalDate() }
+            .mapValues { (_, readings) -> readings.map { it.mgDl }.average().toFloat() }
+    }
+
+    /**
+     * One day's value for a metric, or null where the day did not record it.
+     *
+     * [MetabolicMetric.WEIGHT_LOST] is absent here on purpose: it is a
+     * *difference between* two days rather than a figure belonging to one, so it
+     * cannot be averaged over a bucket the way the others are and is built in
+     * [scatter] instead.
+     */
+    internal fun daily(metric: MetabolicMetric, date: LocalDate): Float? {
+        val snap = snapshotByDate[date]
+        return when (metric) {
+            MetabolicMetric.WEIGHT_LOST -> null
+            MetabolicMetric.CALORIES_EATEN -> snap?.dietaryCalories?.toFloat()
+            // Both halves or nothing, which is the rule the net-calorie trend
+            // already follows on a finished day: counting absent food as zero
+            // fabricates a deficit the size of the whole day's burn.
+            MetabolicMetric.NET_CALORIES -> {
+                val eaten = snap?.dietaryCalories
+                val burned = snap?.totalCalories
+                if (eaten == null || burned == null) null else (eaten - burned).toFloat()
+            }
+            MetabolicMetric.CALORIES_BURNED -> snap?.totalCalories?.toFloat()
+            MetabolicMetric.ACTIVE_CALORIES -> snap?.activeCalories?.toFloat()
+            MetabolicMetric.PROTEIN -> snap?.proteinGrams
+            MetabolicMetric.AVG_HEART_RATE -> snap?.averageHeartRateBpm?.toFloat()
+            MetabolicMetric.RESTING_HR -> snap?.restingHeartRateBpm?.toFloat()
+            MetabolicMetric.AVG_GLUCOSE -> glucoseByDate[date]
+            MetabolicMetric.STEPS -> snap?.steps?.toFloat()
+            MetabolicMetric.SLEEP -> snap?.sleepMinutes?.let { it / 60f }
+            MetabolicMetric.BODY_WEIGHT -> smoothedWeightKg[date]?.let(Units::kgToLbs)
+        }
+    }
+
+    /**
+     * A metric's value across one bucket: the mean of the days that recorded it.
+     *
+     * Days with nothing are left out of the divisor rather than counted as zero,
+     * which is `TrendsUiState.bucketed`'s rule and ground rule 6 arriving at the
+     * arithmetic -- a week the watch synced on three days holds three days of
+     * evidence, and dividing by seven would report a fortnight of fasting.
+     */
+    private fun mean(metric: MetabolicMetric, days: List<LocalDate>): Float? {
+        val values = days.mapNotNull { daily(metric, it) }
+        return if (values.isEmpty()) null else values.average().toFloat()
+    }
+
+    /**
+     * Grams lost per day across a bucket, from the smoothed weight at each end.
+     *
+     * **Positive is lost**, which is what the axis says and the direction the
+     * whole card is read in. It needs a smoothed weight at *both* ends -- a
+     * bucket missing either is dropped rather than closed over the nearest
+     * available day, since a gap silently spanned would attribute a fortnight's
+     * loss to one week.
+     */
+    private fun gramsLostPerDay(days: List<LocalDate>): Float? {
+        if (days.size < 2) {
+            // A one-day bucket still has a difference, taken against the day
+            // before it -- otherwise the daily view has no y value at all.
+            val today = days.firstOrNull() ?: return null
+            val now = smoothedWeightKg[today] ?: return null
+            val before = smoothedWeightKg[today.minusDays(1)] ?: return null
+            return (before - now) * 1000f
+        }
+        val first = smoothedWeightKg[days.first()] ?: return null
+        val last = smoothedWeightKg[days.last()] ?: return null
+        val spanDays = ChronoUnit.DAYS.between(days.first(), days.last()).toFloat()
+        if (spanDays <= 0f) return null
+        return (first - last) * 1000f / spanDays
+    }
+
+    /**
+     * The plotted pairs, dropping any bucket that cannot supply both.
+     *
+     * Dropped rather than plotted at zero, for the reason every other refusal
+     * here exists: a bucket with no weight readings did not hold steady, it went
+     * unweighed, and a row of points along y = 0 would drag any fitted line flat
+     * and put the crossing wherever those days happened to sit on x.
+     */
+    fun scatter(
+        xMetric: MetabolicMetric,
+        yMetric: MetabolicMetric,
+        bucket: ScatterBucket,
+        start: LocalDate,
+        end: LocalDate,
+    ): List<ScatterPoint> {
+        val allDays = (0..ChronoUnit.DAYS.between(start, end)).map { start.plusDays(it) }
+        val buckets = allDays.chunked(bucket.days.toInt())
+
+        fun valueOf(metric: MetabolicMetric, days: List<LocalDate>): Float? =
+            if (metric == MetabolicMetric.WEIGHT_LOST) gramsLostPerDay(days)
+            else mean(metric, days)
+
+        return buckets.mapNotNull { days ->
+            val x = valueOf(xMetric, days) ?: return@mapNotNull null
+            val y = valueOf(yMetric, days) ?: return@mapNotNull null
+            ScatterPoint(date = days.first(), x = x, y = y)
+        }
+    }
 }
 
 /**
@@ -944,6 +1189,78 @@ class TrendsViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = TrendsUiState(),
             )
+
+    private val metabolicChoice = MutableStateFlow(MetabolicUiState())
+
+    /**
+     * The metabolic scatter's points, its fitted line and what the line implies.
+     *
+     * Keyed on the selection as well as the range, [compare]'s argument exactly:
+     * the glucose average needs every reading in the window, which at a year is
+     * six figures of rows, and loading it so one option in a menu of twelve can
+     * be quick would put the cost of a CGM archive behind a card most readers
+     * will open on calories.
+     *
+     * Weight is read a fit-window wider than the range for [GoalProjection]'s
+     * reason: the smoothing is trailing, so the first week of any window has no
+     * average until there are seven days behind it, and without the lead-in the
+     * earliest bucket would silently lose its y value.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val metabolic: StateFlow<MetabolicUiState> =
+        combine(metabolicChoice, range) { choice, selected -> choice to selected }
+            .flatMapLatest { (choice, selected) ->
+                val end = LocalDate.now(zoneId)
+                val start = end.minusDays(selected.days - 1)
+                val weightStart = start.minusDays(MovingAverage.WINDOW_DAYS)
+                val wanted = listOf(choice.xMetric, choice.yMetric)
+
+                combine(
+                    repository.getHealthSnapshots(weightStart, end),
+                    repository.getWeights(weightStart, end),
+                    if (wanted.any { it.needsGlucose })
+                        repository.getBloodSugarBetween(start, end)
+                    else flowOf(emptyList()),
+                ) { snapshots, weights, glucose ->
+                    val source =
+                        MetabolicSource(
+                            snapshots = snapshots,
+                            weights = weights,
+                            glucose = glucose,
+                            zoneId = zoneId,
+                        )
+                    val points =
+                        source.scatter(
+                            xMetric = choice.xMetric,
+                            yMetric = choice.yMetric,
+                            bucket = choice.bucket,
+                            start = start,
+                            end = end,
+                        )
+                    val fit = EnergyBalance.fit(points)
+                    choice.copy(
+                        points = points,
+                        fit = fit,
+                        maintenanceCalories =
+                            EnergyBalance.maintenanceCalories(fit, choice.xMetric.isIntake),
+                        startDate = start,
+                        endDate = end,
+                    )
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = MetabolicUiState(),
+            )
+
+    fun setMetabolicAxes(x: MetabolicMetric, y: MetabolicMetric) {
+        metabolicChoice.value = metabolicChoice.value.copy(xMetric = x, yMetric = y)
+    }
+
+    fun setMetabolicBucket(bucket: ScatterBucket) {
+        metabolicChoice.value = metabolicChoice.value.copy(bucket = bucket)
+    }
 
     private val comparison = MutableStateFlow(CompareUiState())
 
