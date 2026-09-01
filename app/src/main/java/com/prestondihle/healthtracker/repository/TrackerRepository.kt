@@ -83,6 +83,29 @@ private val HEART_RATE_SYNC_HORIZON: Duration = Duration.ofHours(48)
 private const val FINISHED_DAY_LOOKBACK = 7L
 
 /**
+ * How long after a day ends [TrackerRepository.syncFinishedDay] goes on being
+ * willing to re-read it.
+ *
+ * The guard this replaces was once-ever: a day qualified only while `syncedAt`
+ * predated its own end, and the re-read stamped a time past that end, so
+ * whatever Health Connect happened to hold at that one moment became the day's
+ * figure for the rest of time. A watch that syncs its evening after the app's
+ * first post-midnight open, or a companion app that flushes to Health Connect on
+ * its own schedule, lands after the stamp and is invisible for ever.
+ *
+ * 31 August 2026 is the story: the sweep re-read it at 15:47 CEST on 1 September
+ * and anything the watch flushed later that afternoon would never have been
+ * seen. Two days is long enough to cover a watch left on the charger over a
+ * night and a day, and it is a window rather than a permanent openness because
+ * the point of the guard is that a converged history costs one indexed row read
+ * per date and stops.
+ *
+ * Steady-state cost: at most two extra day reads per refresh, yesterday and the
+ * day before. Bounded and constant.
+ */
+private val FINISHED_DAY_SETTLE: Duration = Duration.ofHours(48)
+
+/**
  * Single entry point for data. Owns the conversion between the domain's
  * [Instant]/[LocalDate] vocabulary and the epoch-millisecond bounds the DAO
  * expects, so no caller has to repeat that arithmetic.
@@ -1021,9 +1044,18 @@ class TrackerRepository(
      * so the two halves of one screen were quietly answering different questions.
      *
      * The guard is what makes this cheap rather than a second full sync on every
-     * refresh. A day is stale exactly while `syncedAt` predates its own end, and
-     * re-reading it stamps a time after that end -- so a day is re-read once,
-     * ever, and every later pass costs one indexed row read and stops.
+     * refresh, and it is a **settle window** rather than a single read. A day
+     * qualifies until it has been read at least [FINISHED_DAY_SETTLE] past its
+     * own end; after that it is finished with, permanently. So a day is read on
+     * the first refresh after it ends *and* on refreshes over the next two days,
+     * which is what catches a watch that synced its evening late — and then it
+     * stops, so a converged history costs one indexed row read per date.
+     *
+     * Read once, ever, was the previous rule and it is the third of the three
+     * faults this work is about: whatever Health Connect happened to hold at the
+     * one moment of the re-read became the day's figure for good, and the only
+     * recovery was the walk-back refresh, which the reader should not have to
+     * know exists.
      *
      * Returns whether a read was actually spent, so the caller can say what it
      * changed rather than silently redrawing a chart the reader was looking at.
@@ -1039,7 +1071,9 @@ class TrackerRepository(
         // Absent counts as stale, deliberately: a day the app was never opened on
         // has no row at all, which draws as a hole in every chart on Activity and
         // Wellness rather than as the day it was.
-        if (cached != null && !cached.syncedAt.isBefore(dayEnd)) return false
+        if (cached != null && !cached.syncedAt.isBefore(dayEnd.plus(FINISHED_DAY_SETTLE))) {
+            return false
+        }
 
         return syncHealthData(date, now).isSuccess
     }

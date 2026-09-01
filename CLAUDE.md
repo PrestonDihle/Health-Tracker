@@ -1333,13 +1333,28 @@ is drawn from `StepBucket`, which `syncTimeSeries` re-reads over its rolling win
 halves of Today were answering the same question with different numbers, and the backup bears it out
 (29 Aug: snapshot 1,819, buckets 9,319).
 
-`TrackerRepository.syncFinishedDay` re-reads a date **only when what is cached for it was written
-before that date ended**, or when nothing is cached at all — a day nobody opened the app on has no
-row, which draws as a hole rather than as the day it was. `resyncFinishedDays` walks the last seven.
-The guard is the whole design: a re-read stamps `syncedAt` past the day's own end, so a day is read
-again once, ever, and every later refresh costs one indexed row read and stops. Without it this
-would be a week of Health Connect round trips on every refresh. `FinishedDaySyncTest` pins both
-halves, and the count is reported on the Activity card for `backfillGlucoseGaps`' reason — a figure
+`TrackerRepository.syncFinishedDay` re-reads a date **until it has been read at least
+`FINISHED_DAY_SETTLE` (48 h) past that date's own end**, or whenever nothing is cached at all — a day
+nobody opened the app on has no row, which draws as a hole rather than as the day it was.
+`resyncFinishedDays` walks the last seven. The guard is the whole design: past the settle window a
+day is finished with permanently, and every later refresh costs one indexed row read and stops.
+Without it this would be a week of Health Connect round trips on every refresh. Steady-state cost is
+**two extra day reads per refresh** — yesterday and the day before — bounded and constant.
+
+**It was read-once-ever for one release, and that was the third fault behind the step mismatch.** A
+re-read stamped `syncedAt` past the day's end, so whatever Health Connect happened to hold at that
+one moment became the day's figure for the rest of time. A watch that syncs its evening after the
+app's first post-midnight open, or a companion app flushing on its own schedule, lands after the
+stamp and is invisible for ever; 31 August was re-read at 15:47 the following afternoon, and anything
+arriving later that day would never have been seen. The only recovery was the walk-back refresh,
+which the reader should not have to know exists. **The Changes API is the right long-term mechanism
+and is deliberately out of scope** — token persistence, expiry resweeps and delete handling for a
+failure the settle window already covers. Revisit only if writes later than 48 h are ever actually
+observed.
+
+`FinishedDaySyncTest` pins both sides of the window — a day read an hour after it ended still
+qualifies a day later, one read 49 hours after never qualifies again — plus the steady-state count of
+two. The recovered count is reported on the Activity card for `backfillGlucoseGaps`' reason: a figure
 that grew by four thousand between two glances, with nothing on screen to say why, is
 indistinguishable from one that had been wrong all along.
 

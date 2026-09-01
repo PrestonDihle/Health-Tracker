@@ -16,6 +16,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -124,21 +125,73 @@ class FinishedDaySyncTest {
         assertEquals(2_000, repository.getHealthSnapshot(yesterday).first()?.steps)
     }
 
+    /**
+     * The settle window's near side: a day read an hour after it ended is still
+     * open to a later look.
+     *
+     * This is the fault that made the previous guard wrong. A watch that syncs
+     * its evening after the app's first post-midnight open lands *after* the
+     * stamp, and under a read-once-ever rule it was invisible for ever. 31
+     * August was re-read at 15:47 the next afternoon; anything flushed later
+     * that day would never have been seen.
+     */
     @Test
-    fun `a day already read after it ended is not read again`() = runBlocking {
+    fun `a day read soon after it ended is still read again the next day`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        val dayEnd = today.atStartOfDay(zone).toInstant()
+
+        repository.syncHealthData(yesterday, now = dayEnd.plus(Duration.ofHours(1)))
+        assertEquals(1_000, repository.getHealthSnapshot(yesterday).first()?.steps)
+
+        assertTrue(repository.syncFinishedDay(yesterday, dayEnd.plus(Duration.ofHours(25))))
+        assertEquals(2_000, repository.getHealthSnapshot(yesterday).first()?.steps)
+    }
+
+    /**
+     * The far side: once a day has been read past its settle window it is
+     * finished with, permanently.
+     *
+     * That half is what keeps this from being a week of Health Connect round
+     * trips on every refresh, and it is why the window is a window rather than
+     * simply leaving every past day open.
+     */
+    @Test
+    fun `a day read past its settle window is never read again`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        val dayEnd = today.atStartOfDay(zone).toInstant()
+
+        repository.syncHealthData(yesterday, now = dayEnd.plus(Duration.ofHours(49)))
+        val readsAfterSettling = source.reads.size
+
+        assertFalse(repository.syncFinishedDay(yesterday, dayEnd.plus(Duration.ofHours(50))))
+        assertFalse(repository.syncFinishedDay(yesterday, dayEnd.plus(Duration.ofDays(30))))
+        assertEquals(readsAfterSettling, source.reads.size)
+    }
+
+    /**
+     * The steady-state cost, which is the number worth pinning rather than the
+     * mechanism.
+     *
+     * After a full sweep, a second sweep at the same moment re-reads exactly the
+     * days still inside their settle window -- yesterday and the day before --
+     * and leaves the other five alone. Bounded and constant, which is what makes
+     * it affordable on every refresh.
+     */
+    @Test
+    fun `a settled week costs two re-reads a refresh, not seven`() = runBlocking {
         val source = CountingSource(zone)
         val repository = repository(source)
 
-        repository.syncHealthData(yesterday, now = yesterdayAfternoon)
         assertEquals(7, repository.resyncFinishedDays(today, thisMorning).getOrThrow())
 
-        // The guard is what makes this cheap enough to run on every refresh: a
-        // re-read stamps a time after the day's own end, so the day stops
-        // qualifying and every later pass costs one local query and stops.
-        val readsAfterFirstPass = source.reads.size
-        assertEquals(0, repository.resyncFinishedDays(today, thisMorning).getOrThrow())
-        assertEquals(0, repository.resyncFinishedDays(today, thisMorning).getOrThrow())
-        assertEquals(readsAfterFirstPass, source.reads.size)
+        assertEquals(2, repository.resyncFinishedDays(today, thisMorning).getOrThrow())
+        assertEquals(2, repository.resyncFinishedDays(today, thisMorning).getOrThrow())
+        // And they are the two youngest finished days, not any two.
+        assertEquals(3, source.reads.count { it == today.minusDays(1) })
+        assertEquals(3, source.reads.count { it == today.minusDays(2) })
+        assertEquals(1, source.reads.count { it == today.minusDays(3) })
     }
 
     @Test
@@ -186,15 +239,15 @@ class FinishedDaySyncTest {
     }
 
     /**
-     * The stamp that both proves the re-read happened and stops it happening
-     * twice.
+     * The stamp that proves the re-read happened, and that the settle window is
+     * then measured from.
      *
      * Steps are the figure this was reported against, but the fault is in the row
      * rather than in the column: every field on the snapshot froze together, and
      * `syncedAt` is the one that says so.
      */
     @Test
-    fun `a re-read day is stamped past its own end, and so is finished with`() = runBlocking {
+    fun `a re-read day is stamped past its own end`() = runBlocking {
         val repository = repository(MockHealthDataSource(zone))
         val midnight = today.atStartOfDay(zone).toInstant()
 
