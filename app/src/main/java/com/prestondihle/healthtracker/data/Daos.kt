@@ -238,6 +238,8 @@ interface TrackerDao {
 
     @Insert suspend fun insertPlank(session: PlankSession)
 
+    @Update suspend fun updatePlank(session: PlankSession)
+
     @Delete suspend fun deletePlank(session: PlankSession)
 
     // ----- Supplements -------------------------------------------------------

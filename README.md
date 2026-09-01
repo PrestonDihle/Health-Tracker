@@ -146,6 +146,18 @@ age and sex are in the profile, the stepper opens on your own AFT 60-point
 requirement and prints it underneath, since that is usually the number you are
 actually aiming at.
 
+**Holds you have saved are listed under the card for a week**, newest first, each
+one tappable to fix its length or its time and each with a bin. Discard only
+catches the mistake you notice in the moment; the hold you saved by accident —
+phone picked up mid-plank, Stop pressed late — is the one you notice on the chart
+the next day, and those are the only two ways a wrong number gets in.
+
+This matters more for a plank than for a glass of water. A stray drink inflates a
+*total*, which is wrong by one glass. A stray plank becomes that day's
+**longest**, which is wrong by however long it was and never averages out against
+the days either side of it. Delete the only hold on a day and that day goes back
+to unmeasured rather than to zero.
+
 **A day you did not plank is a gap in the line, not a zero.** Your plank capacity
 did not fall to nothing on your rest days — it went unmeasured, and the chart says
 so by breaking rather than dropping to the floor. That is the opposite of the
@@ -1064,8 +1076,8 @@ The maths is in `domain/Caffeine.kt` and covered by `CaffeineTest`.
 
 ## Fixing what was logged by mistake
 
-Water and caffeine are both listed under their cards, newest first, and every
-row can be tapped to correct its amount or its time or binned outright. The
+Water, caffeine and planks are all listed under their cards, newest first, and
+every row can be tapped to correct its amount or its time or binned outright. The
 rows are deleted for real, unlike a synced meal: nothing upstream has ever heard
 of them, so there is no record waiting to arrive again and nothing for a hidden
 flag to keep out.

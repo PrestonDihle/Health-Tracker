@@ -17,6 +17,7 @@ import com.prestondihle.healthtracker.data.HeartRateBucket
 import com.prestondihle.healthtracker.data.KetoneReading
 import com.prestondihle.healthtracker.data.MealEntry
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.PlankSession
 import com.prestondihle.healthtracker.data.PlannedExtendedFast
 import com.prestondihle.healthtracker.data.UserGoals
 import com.prestondihle.healthtracker.data.UserSettings
@@ -181,20 +182,41 @@ data class UsualIntakeState(val lastCaffeineMg: Int? = null, val usualWaterMl: I
 private const val PLANK_TICK_MILLIS = 250L
 
 /**
- * The plank timer, in one of its three states.
+ * How far back the plank card offers a hold for correction.
  *
- * The middle state is the feature. A hold that went straight to the database on
- * Stop would make every fumbled start, every phone picked up to check the time
- * and every plank abandoned at ten seconds into a row on the chart -- and the
- * chart plots the day's *best*, so a bad row is not merely noise, it is a
- * personal best nobody performed. [heldSeconds] with [running] false is a hold
- * waiting to be kept or thrown away.
+ * A week, which is `HYDRATION_EDITABLE_DAYS`' figure and its argument: a wrong
+ * entry is noticed a day or two later, from a figure that looks too high rather
+ * than at the moment it is written. It matters more here than for a drink,
+ * because the chart plots each day's **maximum** -- so a hold saved by mistake
+ * does not average away with the days around it, it stands as that day's number
+ * for ever.
+ */
+private const val PLANK_EDITABLE_DAYS = 7L
+
+/**
+ * Everything the plank card draws: the timer, and the holds it can still correct.
+ *
+ * Named for the card rather than the timer because it stopped being only a timer
+ * when the correction list arrived -- the rule this codebase keeps for
+ * `WellnessViewModel` itself: name a thing after what it now is.
+ *
+ * The timer's middle state is the feature. A hold that went straight to the
+ * database on Stop would make every fumbled start, every phone picked up to
+ * check the time and every plank abandoned at ten seconds into a row on the
+ * chart -- and the chart plots the day's *best*, so a bad row is not merely
+ * noise, it is a personal best nobody performed. [heldSeconds] with [running]
+ * false is a hold waiting to be kept or thrown away.
+ *
+ * [recent] is the second half of that same argument, arriving after the fact.
+ * Discard covers the mistake caught in the moment; the list covers the one
+ * noticed on the chart a day later, which is the only other way a wrong maximum
+ * gets in.
  *
  * Held in the view model rather than in the card so it survives a tab switch: a
  * reader who starts a plank and glances at Today would otherwise come back to a
  * stopped clock, which is the one moment this control cannot afford to lose.
  */
-data class PlankTimerState(
+data class PlankCardState(
     /** When the current hold began, or null when nothing is running. */
     val startedAt: Instant? = null,
     /** A finished hold awaiting Save or Discard, in seconds. */
@@ -202,6 +224,8 @@ data class PlankTimerState(
     val now: Instant = Instant.now(),
     /** The day's longest hold so far, for the read-out under the clock. */
     val bestTodaySeconds: Int? = null,
+    /** Holds still open to correction, newest first. See [PLANK_EDITABLE_DAYS]. */
+    val recent: List<PlankSession> = emptyList(),
 ) {
     val running: Boolean
         get() = startedAt != null
@@ -874,7 +898,7 @@ class WellnessViewModel(
      * behind the new one, which is a leak a flag would not prevent.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    val plank: StateFlow<PlankTimerState> =
+    val plank: StateFlow<PlankCardState> =
         combine(
                 plankStartedAt.flatMapLatest { started ->
                     if (started == null) flowOf(Instant.now())
@@ -888,18 +912,25 @@ class WellnessViewModel(
                 plankStartedAt,
                 plankPendingSeconds,
                 repository.getBestPlankSecondsForDate(LocalDate.now(zoneId)),
-            ) { now, started, pending, bestToday ->
-                PlankTimerState(
+                repository.getPlanksBetween(
+                    LocalDate.now(zoneId).minusDays(PLANK_EDITABLE_DAYS - 1),
+                    LocalDate.now(zoneId),
+                ),
+            ) { now, started, pending, bestToday, recent ->
+                PlankCardState(
                     startedAt = started,
                     pendingSeconds = pending,
                     now = now,
                     bestTodaySeconds = bestToday,
+                    // Newest first, like every other correction list here: the
+                    // row most likely to be wrong is the one just written.
+                    recent = recent.sortedByDescending { it.timestamp },
                 )
             }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = PlankTimerState(),
+                initialValue = PlankCardState(),
             )
 
     /** Begins a hold, discarding any decision still on screen. */
@@ -912,7 +943,7 @@ class WellnessViewModel(
      * Stops the clock and offers the hold, rather than writing it.
      *
      * Nothing reaches the database here. The decision the reader is about to make
-     * is the point of the whole control -- see [PlankTimerState].
+     * is the point of the whole control -- see [PlankCardState].
      *
      * A hold of zero seconds is dropped outright rather than offered: that is a
      * Start immediately followed by a Stop, which is a mis-tap in both plausible
@@ -936,6 +967,31 @@ class WellnessViewModel(
     /** Throws the hold away. Nothing was ever written, so there is nothing to undo. */
     fun discardPlank() {
         plankPendingSeconds.value = null
+    }
+
+    /**
+     * Corrects a hold already on disk -- its length, its time, or both.
+     *
+     * The counterpart to Discard rather than a duplicate of it: Discard catches
+     * the mistake noticed in the moment, this catches the one noticed on the
+     * chart a day later. Both exist because the trend plots each day's
+     * *maximum*, so a wrong hold does not average away with its neighbours.
+     */
+    fun updatePlank(session: PlankSession, seconds: Int, at: Instant) {
+        viewModelScope.launch { repository.updatePlank(session, seconds, at) }
+    }
+
+    /**
+     * Removes a hold outright.
+     *
+     * Deleted for real rather than hidden, which is `HydrationEntry`'s rule and
+     * its reason: a plank is hand-timed end to end, so there is no upstream
+     * record to arrive again on the next sync and nothing for a hidden flag to
+     * keep out. A `hidden` column here would only leave the row to be counted by
+     * something that forgot to filter.
+     */
+    fun deletePlank(session: PlankSession) {
+        viewModelScope.launch { repository.deletePlank(session) }
     }
 
     init {

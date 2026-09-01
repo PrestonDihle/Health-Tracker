@@ -741,6 +741,33 @@ zero-second hold is dropped without being offered: that is a Start immediately f
 and offering to save it puts a decision in front of somebody who has already said twice that they are
 not planking.
 
+**Discard is only half the correction, and the list under the card is the other half.** Discard
+catches the mistake noticed in the moment; a hold saved by accident — the phone picked up mid-plank,
+a Stop pressed late — is noticed on the chart a day later, and those are the only two ways a wrong
+maximum gets in. So the card carries the same correction list every other hand-logged intake here
+has: the last `PLANK_EDITABLE_DAYS` (7) of holds, newest first, each tappable to fix a length or a
+time and each with a bin. The week is `HYDRATION_EDITABLE_DAYS`' figure and its argument — a wrong
+entry is spotted a day or two later from a figure that looks too high.
+
+**It matters more here than for a drink, and that is worth being precise about.** A stray hydration
+row inflates a *total*, which is wrong by one glass and dilutes as the day goes on. A stray plank
+becomes that day's **maximum**, which is wrong by however long it was and never averages away with
+the days either side of it. That asymmetry is the whole case for the list existing.
+
+It reuses `IntakeEntryDialog` rather than growing a dialog of its own: a plank is an amount and a
+time exactly as a drink is, and the traps are the ones that dialog already owns — clamping a saved
+time to now, refusing a future date, rebuilding the `Instant` in the right zone. The seconds range
+stops at 3,600, the point at which a figure is a mis-entry rather than an achievement.
+
+`updatePlank` rewrites the row **in place, keyed on its id**, rather than deleting and re-inserting.
+Both would work, which is why it is spelled out: on a chart that plots a maximum, a correction that
+briefly leaves two rows in the table is a maximum nobody held. Deletes are for real rather than
+hidden, `HydrationEntry`'s rule — a plank is hand-timed end to end, so there is no upstream record to
+arrive again and nothing for a `hidden` flag to keep out.
+
+Deleting a day's only hold returns it to **null, not zero**: it goes back to being a day nobody
+planked, which is what the trend has to break on rather than draw at the floor.
+
 **The timer state lives in `WellnessViewModel`, and its ticker runs only while a plank is running.**
 Held in the card it would not survive a tab switch, which is the one moment this control cannot
 afford to lose. But an unconditional ticker would make Log the third permanently un-idle screen in
@@ -750,6 +777,10 @@ own flow, `flatMapLatest` over the start instant: it emits once and stops whenev
 running, so Log stays idle for every test that is not deliberately holding a plank, and none is.
 `flatMapLatest` rather than a flag-guarded loop so a second Start cancels the first ticker instead of
 leaving it running behind the new one.
+
+That state is `PlankCardState` and **was `PlankTimerState` for one commit**, renamed when the
+correction list arrived and it stopped being only a timer. This file's own rule: name a thing after
+what it now is, not after what it was when it was written — `WellnessViewModel` is the precedent.
 
 `Units.formatHold` exists because `formatDuration` floors to whole minutes and renders every hold
 between one and two minutes as `1m`. It is deliberately **not** shared with `formatPace`, whose

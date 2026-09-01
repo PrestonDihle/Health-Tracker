@@ -208,6 +208,7 @@ fun LogScreen(
                         PlankCard(
                             plank = plank,
                             goalSeconds = state.goals.plankHoldSecondsGoal,
+                            zoneId = state.zoneId,
                             onStart = viewModel::startPlank,
                             onStop = viewModel::stopPlank,
                             onSave = {
@@ -218,6 +219,14 @@ fun LogScreen(
                             onDiscard = {
                                 viewModel.discardPlank()
                                 toast("Plank discarded")
+                            },
+                            onUpdate = { session, seconds, at ->
+                                viewModel.updatePlank(session, seconds, at)
+                                toast("Hold corrected to ${Units.formatHold(seconds)}")
+                            },
+                            onDelete = { session ->
+                                viewModel.deletePlank(session)
+                                toast("Deleted the ${Units.formatHold(session.seconds)} hold")
                             },
                         )
                     },

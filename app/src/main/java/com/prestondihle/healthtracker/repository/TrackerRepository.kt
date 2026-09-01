@@ -360,6 +360,17 @@ class TrackerRepository(
     suspend fun addPlank(seconds: Int, at: Instant = Instant.now()) =
         dao.insertPlank(PlankSession(timestamp = at, seconds = seconds))
 
+    /**
+     * Rewrites a hold in place, rather than adding a corrected second one.
+     *
+     * Keyed on the row's own id, so a corrected hold keeps its identity. The
+     * alternative -- delete and re-insert -- would work and is the reason this
+     * is spelled out: the day's figure is a *maximum*, so a correction that
+     * briefly left two rows in the table would be a maximum nobody held.
+     */
+    suspend fun updatePlank(session: PlankSession, seconds: Int, at: Instant) =
+        dao.updatePlank(session.copy(seconds = seconds, timestamp = at))
+
     suspend fun deletePlank(session: PlankSession) = dao.deletePlank(session)
 
     // ----- Supplements -------------------------------------------------------

@@ -131,4 +131,77 @@ class PlankTest {
         assertEquals("2:05", Units.formatHold(125))
         assertEquals("0:00", Units.formatHold(0))
     }
+
+    /**
+     * Correcting a hold rather than logging a second one.
+     *
+     * `HydrationEditTest`'s case, and it matters more here: hydration's stray
+     * entry inflates a *total*, which is wrong by one drink. A stray plank
+     * becomes that day's **maximum**, which is wrong by however long it was and
+     * does not average away with the days either side of it.
+     */
+    @Test
+    fun `an edit rewrites the hold rather than adding a second one`() = runBlocking {
+        val repository = repository()
+        repository.addPlank(45, at(today, 9))
+        val session = repository.getPlanksForDate(today).first().single()
+
+        repository.updatePlank(session, seconds = 75, at = at(today, 10))
+
+        val after = repository.getPlanksForDate(today).first()
+        assertEquals(1, after.size)
+        assertEquals(75, after.single().seconds)
+        // The row keeps its identity, which is what stops a correction briefly
+        // being two rows -- and on a chart that plots the maximum, two rows for
+        // one hold is a maximum nobody held.
+        assertEquals(session.id, after.single().id)
+        assertEquals(75, repository.getBestPlankSecondsForDate(today).first())
+    }
+
+    @Test
+    fun `a deleted hold stays deleted and stops counting`() = runBlocking {
+        val repository = repository()
+        repository.addPlank(30, at(today, 8))
+        repository.addPlank(150, at(today, 18))
+        assertEquals(150, repository.getBestPlankSecondsForDate(today).first())
+
+        val stray = repository.getPlanksForDate(today).first().first { it.seconds == 150 }
+        repository.deletePlank(stray)
+
+        // Deleted for real rather than hidden, HydrationEntry's rule: a plank is
+        // hand-timed end to end, so there is no upstream record to arrive again
+        // and nothing for a hidden flag to keep out.
+        val after = repository.getPlanksForDate(today).first()
+        assertEquals(1, after.size)
+        assertEquals(30, after.single().seconds)
+        // And the day's figure follows it down, which is the whole point of
+        // being able to delete one at all.
+        assertEquals(30, repository.getBestPlankSecondsForDate(today).first())
+    }
+
+    @Test
+    fun `deleting the only hold leaves the day unmeasured, not zero`() = runBlocking {
+        val repository = repository()
+        repository.addPlank(60, at(today, 9))
+        repository.deletePlank(repository.getPlanksForDate(today).first().single())
+
+        // Null rather than 0. A day whose only hold was a mistake did not become
+        // a day of zero capacity -- it went back to being a day nobody planked,
+        // and the trend has to break there rather than dropping to the floor.
+        assertNull(repository.getBestPlankSecondsForDate(today).first())
+    }
+
+    @Test
+    fun `a hold moved to another day leaves the first one`() = runBlocking {
+        val repository = repository()
+        repository.addPlank(90, at(today, 9))
+        val session = repository.getPlanksForDate(today).first().single()
+
+        // The dialog can move a time across midnight, which is the correction
+        // for a late-night hold logged after the date rolled over.
+        repository.updatePlank(session, seconds = 90, at = at(today.minusDays(1), 23))
+
+        assertNull(repository.getBestPlankSecondsForDate(today).first())
+        assertEquals(90, repository.getBestPlankSecondsForDate(today.minusDays(1)).first())
+    }
 }

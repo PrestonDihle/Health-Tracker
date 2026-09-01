@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -30,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -42,6 +45,7 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.HealthDaySnapshot
 import com.prestondihle.healthtracker.data.MovementType
+import com.prestondihle.healthtracker.data.PlankSession
 import com.prestondihle.healthtracker.domain.BodyComposition
 import com.prestondihle.healthtracker.domain.FoodLogConfidence
 import com.prestondihle.healthtracker.domain.Glucose
@@ -60,7 +64,9 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
+import com.prestondihle.healthtracker.ui.components.EntryList
 import com.prestondihle.healthtracker.ui.components.InlineLogButton
+import com.prestondihle.healthtracker.ui.components.IntakeEntryDialog
 import com.prestondihle.healthtracker.ui.components.IntStepper
 import com.prestondihle.healthtracker.ui.components.LabeledSlider
 import com.prestondihle.healthtracker.ui.components.LineSeries
@@ -90,6 +96,7 @@ import com.prestondihle.healthtracker.ui.trends.WeightTrendCard
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
@@ -1094,13 +1101,17 @@ internal fun FoodLogConfidenceCard(state: WellnessUiState, onRate: (Int?) -> Uni
  */
 @Composable
 internal fun PlankCard(
-    plank: PlankTimerState,
+    plank: PlankCardState,
     goalSeconds: Int?,
+    zoneId: ZoneId,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onSave: () -> Unit,
     onDiscard: () -> Unit,
+    onUpdate: (PlankSession, Int, Instant) -> Unit,
+    onDelete: (PlankSession) -> Unit,
 ) {
+    var editing by remember { mutableStateOf<PlankSession?>(null) }
     TrackerCard(title = "Plank", subtitle = "hold, then keep it or throw it away") {
         val held = plank.heldSeconds
         Row(
@@ -1160,8 +1171,89 @@ internal fun PlankCard(
 
             else -> LogButton("Start", onClick = onStart)
         }
+
+        // Recent holds, each tappable to fix a length or a time and each with a
+        // bin. Discard covers the mistake caught in the moment; this covers the
+        // one noticed on the chart a day later, and without it a hold saved by
+        // accident is that day's number for ever -- the trend plots the maximum,
+        // so a wrong row does not average away with its neighbours the way a
+        // stray glass of water does.
+        if (plank.recent.isNotEmpty()) {
+            HorizontalDivider()
+            EntryList(entries = plank.recent, header = "Last 7 days") { session ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        modifier =
+                            Modifier.weight(1f)
+                                .clickable { editing = session }
+                                .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            Units.formatHold(session.seconds),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            PLANK_ROW_FORMAT.format(session.timestamp.atZone(zoneId)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(
+                        onClick = { onDelete(session) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription =
+                                "Delete the ${Units.formatHold(session.seconds)} hold at " +
+                                    PLANK_ROW_FORMAT.format(session.timestamp.atZone(zoneId)),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    editing?.let { session ->
+        // The same dialog water and caffeine use. A plank is an amount and a
+        // time like they are, and the traps are the ones that dialog already
+        // owns -- clamping a saved time to now, refusing a future date,
+        // rebuilding the Instant in the right zone.
+        IntakeEntryDialog(
+            newTitle = "Log a plank",
+            editTitle = "Edit this hold",
+            deleteLabel = "Delete this hold",
+            initialAmount = session.seconds,
+            step = 5,
+            // An hour is far past any plank anybody holds, and is the point at
+            // which a figure is a mis-entry rather than an achievement.
+            range = 0..3_600,
+            supporting = { Units.formatHold(it) },
+            initialTime = session.timestamp,
+            zoneId = zoneId,
+            onDismiss = { editing = null },
+            onConfirm = { seconds, at ->
+                onUpdate(session, seconds, at)
+                editing = null
+            },
+            onDelete = {
+                onDelete(session)
+                editing = null
+            },
+        )
     }
 }
+
+/** `Mon 14:05` on a plank row, matching the intake lists on Fuel. */
+private val PLANK_ROW_FORMAT = DateTimeFormatter.ofPattern("EEE h:mm a")
 
 @Composable
 internal fun MovementCard(state: WellnessUiState, onLog: (MovementType, Int) -> Unit) {
