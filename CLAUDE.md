@@ -14,6 +14,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 | --- | --- |
 | Build debug APK | `.\gradlew.bat :app:assembleDebug` |
 | Unit tests | `.\gradlew.bat :app:testDebugUnitTest` |
+| Fast gate (no Compose) | `powershell -File tools\fast-gate.ps1` |
 | One test class | `.\gradlew.bat :app:testDebugUnitTest --tests "*FastingAdherenceTest"` |
 | One test method | `.\gradlew.bat :app:testDebugUnitTest --tests "*FastingAdherenceTest.a feeding window crossing midnight is handled"` |
 | Android lint | `.\gradlew.bat :app:lintDebug` |
@@ -2380,11 +2381,19 @@ idle and Activity is the densest tab. And **`lintDebug` stretched from about a m
 is the clearest tell that the machine and not the code is the problem: lint composes nothing. When
 both appear together, gate on the named non-Compose classes and say so in the commit.
 
-When the render suites cannot be trusted, the other **42 classes and 365 tests run in well under a
-minute** and are unaffected — they render no Compose. Naming them explicitly with repeated `--tests` flags
-gives a real gate for everything except whether a screen draws, which no test here was answering
-anyway. Say plainly in the commit which of the two was verified; a test count that quietly means
-something narrower than usual is worse than no count.
+When the render suites cannot be trusted, the other classes run in well under a minute and are
+unaffected — they render no Compose, so `AppNotIdleException` cannot reach them. **`tools/fast-gate.ps1`
+is that gate**, and it names every class explicitly because Gradle has no "exclude these two". It
+prints its own class and test counts at the end, so the figure quoted in a commit is one the run
+produced rather than one remembered — currently **47 classes, 409 tests**. Keep the list in step when
+a test class is added: a class missing from it silently stops being gated on. Say plainly in the
+commit which of the two was verified; a test count that quietly means something narrower than usual
+is worse than no count.
+
+**The check that settles a render failure is a known-good commit in a throwaway worktree**, and the
+script's header carries the exact incantation. Run on 2026-08-30 it answered *the machine* — the AFT
+test failed at `27197cb`, which predated every change being blamed for it, and a single test took
+three minutes.
 
 **A click on an off-screen node is clamped into view and lands on nothing, silently.** It does not
 throw. Eight series switches wrap onto three rows and the chart card no longer fits the screen, so
