@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.prestondihle.healthtracker.data.AftAttempt
 import com.prestondihle.healthtracker.domain.AftEvent
@@ -276,29 +278,62 @@ private fun EventScores(attempt: AftAttempt, card: AftScorecard, state: AftUiSta
         val points = card.scores[event]
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(event.label, style = MaterialTheme.typography.bodyMedium)
+            // Three columns rather than three items pushed apart. Under
+            // SpaceBetween the raw figure landed wherever its event's name
+            // stopped -- "Plank" is five characters and "Hand-release push-ups"
+            // twenty-one -- so five results that should have read as a column of
+            // performances were scattered across the middle of the card in a
+            // zigzag. The name is the only part that varies in length, so it is
+            // the only part given the flexible column.
+            Text(
+                event.label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
             Text(
                 if (raw == null) "not done" else event.format(raw),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Left within its own column, so `2:31` and `250 lb` start at the
+                // same place down the card rather than each being trailed off the
+                // end of a different name.
+                textAlign = TextAlign.Start,
+                maxLines = 1,
+                modifier = Modifier.width(RawColumnWidth),
             )
             Text(
                 points?.toString() ?: "--",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
+                // The one column that reads as a number to be compared and added,
+                // so it is right-aligned: 100 and 60 line up on their units.
+                textAlign = TextAlign.End,
                 color =
                     if (points != null && points < AftScoring.MINIMUM_EVENT_SCORE) {
                         MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     },
+                modifier = Modifier.width(PointsColumnWidth),
             )
         }
     }
 }
+
+/**
+ * Width of the raw-performance column.
+ *
+ * Sized on the widest thing it holds -- `not done`, which is longer than any
+ * result -- so nothing in it ever ellipsises and the column never changes width
+ * between one test and the next.
+ */
+private val RawColumnWidth = 68.dp
+
+/** Three digits and no more: the events are scored out of a hundred. */
+private val PointsColumnWidth = 34.dp
 
 /**
  * Total score across attempts.
