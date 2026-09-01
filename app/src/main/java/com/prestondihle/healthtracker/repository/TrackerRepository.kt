@@ -861,16 +861,30 @@ class TrackerRepository(
      * Glucose samples are inserted rather than cached on the snapshot because
      * they are a time series, not a daily total. Duplicate CGM samples are
      * rejected by the unique index on `externalId`.
+     *
+     * **The day's steps are the sum of the day's own step buckets, written here
+     * in the same pass.** They were two pipelines with two refresh policies --
+     * this wrote the snapshot from a day-level aggregate while [syncTimeSeries]
+     * wrote the buckets over a rolling window -- and they drifted apart exactly
+     * as far as the gap between the two policies allowed. On the author's phone
+     * that reached 9,040 steps on one day (snapshot 2,043, buckets 11,083), with
+     * the card and the chart directly under it reporting different walks. One
+     * read now feeds both, so their agreement is by construction rather than by
+     * the coincidence of having run in the same minute.
+     *
+     * It also closes a gap the diagnosis exposed: [syncFinishedDay] refreshed a
+     * day's snapshot and not its chart, so healing a frozen day left the bars
+     * under it as they were.
      */
     suspend fun syncHealthData(date: LocalDate, now: Instant = Instant.now()): Result<Unit> =
         runCatching {
-            val preferredSteps = dao.getUserSettings().first()?.preferredStepsPackage
-            val day = healthDataSource.readDay(date, preferredSteps)
+            val day = healthDataSource.readDay(date)
+            val steps = syncStepBuckets(date)
 
             dao.upsertHealthSnapshot(
                 HealthDaySnapshot(
                     date = date,
-                    steps = day.steps,
+                    steps = steps,
                     restingHeartRateBpm = day.restingHeartRateBpm,
                     averageHeartRateBpm = day.averageHeartRateBpm,
                     sleepMinutes = day.sleepMinutes,
@@ -912,6 +926,86 @@ class TrackerRepository(
                 if (fresh.isNotEmpty()) dao.insertBloodSugarReadings(fresh)
             }
         }
+
+    /**
+     * Reads one local day's merged step slices into [StepBucket] and returns the
+     * day's total, or null when the read came back with nothing.
+     *
+     * Null rather than zero for ground rule 6's reason, and it matters more here
+     * than usual: a day Health Connect has no records for is a day nobody's
+     * tracker synced, and reporting it as zero steps puts a floor point on the
+     * trend, breaks the step-goal streak and drags every weekly mean down. The
+     * distinction is carried all the way to [HealthDaySnapshot.steps].
+     *
+     * A slice list that came back empty also leaves the cache alone -- the delete
+     * is bounded by what was actually read, so a failed or unpermitted read
+     * cannot empty a day's chart.
+     */
+    private suspend fun syncStepBuckets(date: LocalDate): Int? {
+        val preferredSteps = dao.getUserSettings().first()?.preferredStepsPackage
+        val dayStart = date.atStartOfDay(zoneId).toInstant().toEpochMilli()
+        val dayEnd = date.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
+
+        val slices =
+            runCatching {
+                    healthDataSource.readStepsByHour(
+                        Instant.ofEpochMilli(dayStart),
+                        Instant.ofEpochMilli(dayEnd),
+                        preferredSteps,
+                    )
+                }
+                .getOrDefault(emptyList())
+
+        if (slices.isNotEmpty()) {
+            // Cleared before it is rewritten, bounded by what was actually read:
+            // a quarter hour's count can legitimately fall to zero between syncs
+            // -- the pin changed in Settings, a duplicate walk removed upstream
+            // -- and an upsert cannot express "this slice no longer holds what it
+            // did". Bounded by the extremes rather than the ends of the list, so
+            // nothing outside the read span can be deleted whatever order the
+            // source returned.
+            dao.deleteStepBucketsBetween(
+                slices.minOf { it.hourStart.toEpochMilli() },
+                slices.maxOf { it.hourStart.toEpochMilli() } + 1,
+            )
+            dao.upsertStepBuckets(
+                slices.map {
+                    StepBucket(bucketStartMillis = it.hourStart.toEpochMilli(), steps = it.steps)
+                }
+            )
+        }
+
+        // Totalled from the table rather than from the slice list, which is what
+        // makes the card and the chart the same number rather than two numbers
+        // that agree. It also decides the read-failed case correctly: an empty
+        // read leaves the stored day alone above, and reporting null here would
+        // blank the card over a chart still drawing the very walk it could not
+        // report -- the split this whole change exists to close, arriving from
+        // the one direction the new pipeline could still produce it.
+        val stored = dao.getStepBucketsBetween(dayStart, dayEnd).first()
+        return stored.takeIf { it.isNotEmpty() }?.sumOf { it.steps }
+    }
+
+    /**
+     * Today's merged step total, for the source picker in settings to show
+     * beside the per-app breakdown.
+     *
+     * Read live rather than off the snapshot because the picker's whole job is
+     * to let the reader compare what pinning one app would give them against
+     * what merging gives them, and the snapshot only ever holds one of those.
+     */
+    suspend fun mergedSteps(date: LocalDate): Int? {
+        val slices =
+            runCatching {
+                    healthDataSource.readStepsByHour(
+                        date.atStartOfDay(zoneId).toInstant(),
+                        date.plusDays(1).atStartOfDay(zoneId).toInstant(),
+                        null,
+                    )
+                }
+                .getOrDefault(emptyList())
+        return slices.takeIf { it.isNotEmpty() }?.sumOf { it.steps }
+    }
 
     /**
      * Re-reads [date] if what is cached for it was written before the day ended.

@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.prestondihle.healthtracker.data.AppDatabase
 import com.prestondihle.healthtracker.health.HealthDataSource
 import com.prestondihle.healthtracker.health.HealthDay
+import com.prestondihle.healthtracker.health.HourlySteps
 import com.prestondihle.healthtracker.health.MockHealthDataSource
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import java.time.Duration
@@ -57,13 +58,34 @@ class FinishedDaySyncTest {
      * "goes back for it every time", which is the difference between a fix and a
      * week of Health Connect round trips on every refresh.
      */
-    private class CountingSource(zone: ZoneId) : HealthDataSource by MockHealthDataSource(zone) {
+    private class CountingSource(private val zone: ZoneId) :
+        HealthDataSource by MockHealthDataSource(zone) {
         val reads = mutableListOf<LocalDate>()
+        private val stepReads = mutableListOf<LocalDate>()
 
-        override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
+        override suspend fun readDay(date: LocalDate): HealthDay {
             reads += date
-            // 1,000 the first time a given day is asked for, 2,000 the second.
-            return HealthDay(date = date, steps = 1_000 * reads.count { it == date })
+            return HealthDay(date = date)
+        }
+
+        /**
+         * Steps come from here rather than from [readDay] now, because the day's
+         * total is the sum of its merged slices.
+         *
+         * One slice per read, worth 1,000 the first time a given day is asked
+         * for and 2,000 the second -- the growth standing in for the rest of a
+         * day arriving after the app was last open on it. Counted separately
+         * from [reads] so the two assertions stay independent of which of the
+         * two the sync happens to call first.
+         */
+        override suspend fun readStepsByHour(
+            from: Instant,
+            to: Instant,
+            preferredStepsPackage: String?,
+        ): List<HourlySteps> {
+            val date = from.atZone(zone).toLocalDate()
+            stepReads += date
+            return listOf(HourlySteps(from, 1_000 * stepReads.count { it == date }))
         }
     }
 

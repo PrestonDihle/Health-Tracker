@@ -27,6 +27,7 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.prestondihle.healthtracker.domain.SleepStage
 import com.prestondihle.healthtracker.domain.SleepStageInterval
+import com.prestondihle.healthtracker.domain.StepMerge
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -131,7 +132,7 @@ class HealthConnectDataSource(
         return PERMISSIONS - granted
     }
 
-    override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
+    override suspend fun readDay(date: LocalDate): HealthDay {
         val active = client ?: return HealthDay(date)
         val start = date.atStartOfDay(zoneId).toInstant()
         val end = date.plusDays(1).atStartOfDay(zoneId).toInstant()
@@ -154,7 +155,6 @@ class HealthConnectDataSource(
 
         return HealthDay(
             date = date,
-            steps = active.readSteps(range, preferredStepsPackage),
             restingHeartRateBpm = restingHr,
             averageHeartRateBpm = avgHr,
             sleepMinutes = sleep?.toMinutes()?.toInt(),
@@ -222,26 +222,6 @@ class HealthConnectDataSource(
                 perSource?.get(StepsRecord.COUNT_TOTAL)?.toInt()?.let { packageName to it }
             }
             .toMap()
-    }
-
-    private suspend fun HealthConnectClient.readSteps(
-        range: TimeRangeFilter,
-        preferredPackage: String?,
-    ): Int? {
-        if (preferredPackage != null) {
-            val pinned =
-                aggregateResultOrNull(
-                        StepsRecord.COUNT_TOTAL,
-                        range,
-                        setOf(DataOrigin(preferredPackage)),
-                    )
-                    ?.get(StepsRecord.COUNT_TOTAL)
-                    ?.toInt()
-            // A pinned app that wrote nothing today falls through to the
-            // combined total rather than reporting a flat zero.
-            if (pinned != null && pinned > 0) return pinned
-        }
-        return aggregateOrNull(StepsRecord.COUNT_TOTAL, range)?.toInt()
     }
 
     /**
@@ -387,7 +367,15 @@ class HealthConnectDataSource(
     }
 
     /**
-     * Steps split into wall-clock hours.
+     * Steps split into quarter-hour slices, merged across the apps that wrote
+     * them.
+     *
+     * This is now the *only* step read in the app: the day's total is the sum of
+     * what this returns rather than a day-level aggregate of its own. A day-level
+     * maximum would be wrong in a way that is hard to see -- it would pick one
+     * origin's entire day, `max(5607, 7658) = 7658`, when the truth is the
+     * watch's daytime plus the phone's evening run. The merge has to happen at
+     * the slice, and the day has to be built from the slices.
      *
      * Aggregated per slice rather than read as raw [StepsRecord]s for the same
      * reason [stepsByPackage] is: the client validates every record it converts,
@@ -411,11 +399,43 @@ class HealthConnectDataSource(
         if (preferredStepsPackage != null) {
             val pinned =
                 active.hourlySteps(alignedFrom, to, setOf(DataOrigin(preferredStepsPackage)))
-            // A pinned app that wrote nothing across the whole window falls back
-            // to the combined total, matching how the daily count behaves.
             if (pinned.any { it.steps > 0 }) return pinned
+            // A pinned app that wrote nothing across the whole window falls
+            // through to the *merged* series, never to the raw combined
+            // aggregate. Falling back to the sum was the app's second documented
+            // way of disagreeing with the watch: on a day the pinned app was
+            // silent it quietly reported every app added together, which
+            // double-counts every walk two of them saw -- and it looked exactly
+            // like an ordinary figure.
         }
-        return active.hourlySteps(alignedFrom, to, emptySet())
+        return active.mergedSteps(alignedFrom, to)
+    }
+
+    /**
+     * The highest figure any writing app reported for each slice.
+     *
+     * The contributing origins come from the combined aggregate's own
+     * `dataOrigins`, exactly as [stepsByPackage] derives them, so this costs one
+     * aggregate plus one sliced read per app that actually wrote something rather
+     * than a fixed list of packages to keep in step with what is installed.
+     *
+     * One origin short-circuits to the plain combined read: with nothing to merge
+     * against, the merge would be a second round trip for the same numbers.
+     */
+    private suspend fun HealthConnectClient.mergedSteps(
+        from: Instant,
+        to: Instant,
+    ): List<HourlySteps> {
+        val combined =
+            aggregateResultOrNull(StepsRecord.COUNT_TOTAL, TimeRangeFilter.between(from, to))
+        val origins =
+            combined?.dataOrigins?.map { it.packageName }?.filter { it.isNotBlank() }.orEmpty()
+        if (origins.size <= 1) return hourlySteps(from, to, emptySet())
+
+        // Each origin read independently and its failure swallowed by
+        // [hourlySteps], so one app whose permission was revoked leaves the
+        // others merged rather than emptying the window.
+        return StepMerge.merge(origins.map { hourlySteps(from, to, setOf(DataOrigin(it))) })
     }
 
     private suspend fun HealthConnectClient.hourlySteps(

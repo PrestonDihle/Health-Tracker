@@ -899,6 +899,11 @@ Steps, sleep, calories and macros deliberately live only on the snapshot. Do not
 column for anything Health Connect supplies — the split exists to prevent two writable sources of
 truth for the same number.
 
+**Steps are the one figure on the snapshot that is not read as a daily total.** `HealthDaySnapshot.steps`
+is the sum of that day's `StepBucket` rows, written in the same pass — see *Health Connect* below.
+That is not a violation of the rule above but the same rule one level down: there was more than one
+source of truth for the day's steps, and this collapses them to one.
+
 Glucose is the exception to the snapshot pattern: it is a time series, not a daily total, so samples
 are inserted as `BloodSugarReading` rows. Re-sync safety comes from the unique index on
 `externalId` (SQLite treats NULLs as distinct, so manual readings are unaffected).
@@ -1011,6 +1016,13 @@ legitimately fall to zero between syncs — the pinned source changes in Setting
 is removed upstream — and an upsert has no way to express "this hour no longer holds what it did".
 The delete is bounded by what the read actually returned, so a failed read leaves the cache alone
 rather than emptying it.
+
+**It has two writers, and they are no longer allowed to disagree.** `syncTimeSeries` writes it over
+the rolling window the master graph draws; `syncHealthData` writes it over one calendar day and then
+totals the table into `HealthDaySnapshot.steps`. Both go through the same merged `readStepsByHour`,
+so identical slices carry identical values and the overlap is harmless by construction. Before that
+it was harmless only when the two happened to have run in the same minute — which is exactly what
+made the drift invisible on the days it mattered.
 
 Raw heart rate is re-read over at most `HEART_RATE_SYNC_HORIZON` (48 h) however wide the window being
 drawn is, because a week of raw samples is hundreds of thousands of records fetched only to be
@@ -1243,27 +1255,66 @@ The manifest also needs the `<queries>` entry for `com.google.android.apps.healt
 visibility on Android 13 and below) and the exported `ViewPermissionUsageActivity` alias (the
 Android 14+ rationale entry point the platform launches from the system permission screen).
 
-**Steps are attributed per writing app, not summed blindly.** Several apps commonly write steps at
-once (a watch's companion app plus the phone's own health app), and an unfiltered aggregate sums them
-all — counting the same walk twice. `stepsByPackage` derives the contributing packages from the
-combined aggregate's own `dataOrigins` and re-aggregates per source, so
-`UserSettings.preferredStepsPackage` can pin one, with Settings showing the per-app breakdown. Doing
-this by reading raw `StepsRecord`s is not survivable: the client validates every record as it
-converts it, a zero-count step record is rejected outright, and one such record from any installed
-app throws away the entire page. Aggregates never construct records, so they are immune. Raw reads
-elsewhere are paginated; `readAllRecords` loops `pageToken` because a single day from a watch exceeds
-one page and taking only the first would silently undercount.
+**Steps are merged across writing apps, never summed and never pinned by default.** Several apps
+write steps at once — on the author's phone a watch's companion app, the phone's own tracking, and
+AllTrails and a fitness app both holding Health Connect access and able to start at any time. Both
+obvious readings are wrong, in opposite directions and by thousands:
 
-`readStepsByHour` (named for what it once did — it now slices at fifteen minutes) slices the same
-aggregate with `AggregateGroupByDurationRequest` and honours the same pinned source: bars that summed
-every app while the daily total trusted one would be two different step counts on two screens. **The
-window's start is snapped down to the hour in the local zone before slicing**, because the slicer
-counts forward from whatever instant it is handed — an hour boundary is also a fifteen-minute one, so
-the quarter-hour slices still land on :00/:15/:30/:45, where a sync begun at 14:37 would otherwise
-produce buckets no later sync lines up with and `StepBucket`'s primary key could never overwrite.
-Health Connect omits a slice entirely when it has no records in it, so a quarter-hour with no walking
-arrives as a *hole*, not a zero — which is why a bar series has to declare its own `barWidth` rather
-than infer one from the spacing.
+- **Summing** double-counts. A watch and a phone in the same pocket record the same walk, and an
+  unfiltered aggregate adds them. 31 August 2026 came to 13,265 combined against the watch app's own
+  12,656, on a day the phone mostly sat on a desk; carried all day it approaches 2×.
+- **Pinning** one app drops what only the others saw. **Garmin Connect writes per-minute monitoring
+  steps to Health Connect and writes no step records at all for a tracked activity.** Verified
+  directly: that same 31 August has a Garmin-written `ExerciseSessionRecord` (running, 22:41–23:16
+  CEST) and *zero* Garmin-origin step records inside it, while the phone's own tracking counted
+  roughly 7,600 steps through the same window. Pinned to Garmin the app reported 5,607 for a 12,656
+  day — and the bitter part is that the Runs card reads the very session whose steps the step count
+  is missing.
+
+`domain/StepMerge.kt` is the answer: **for each quarter-hour slice, the maximum across origins.** Two
+apps watching the same legs report near-identical figures for a slice, so the larger never
+double-counts; an app that saw a stretch nothing else did carries that slice alone, so nothing is
+dropped. **Its known under-read is documented and accepted**: a quarter hour in which two origins
+recorded *different* walking reports the larger rather than the total. Recovering that would mean
+deciding which overlaps are the same walk from two counts and a timestamp, and every rule for doing
+so double-counts the ordinary case to rescue the rare one.
+
+**Exactness with the watch app's own total is not reachable and must not be claimed.** Garmin exposes
+no local API and does not put its daily total into Health Connect. The goal is the most honest figure
+Health Connect can support, clearly derived — expect a few percent, and let the UI say *from Health
+Connect* rather than pretend otherwise.
+
+`stepsByPackage` derives the contributing packages from the combined aggregate's own `dataOrigins`
+and re-aggregates per source, which is what both the merge and the Settings breakdown are built on,
+and `UserSettings.preferredStepsPackage` can still pin one deliberately. Doing any of this by reading
+raw `StepsRecord`s is not survivable: the client validates every record as it converts it, a
+zero-count step record is rejected outright, and one such record from any installed app throws away
+the entire page. Aggregates never construct records, so they are immune. Raw reads elsewhere are
+paginated; `readAllRecords` loops `pageToken` because a single day from a watch exceeds one page and
+taking only the first would silently undercount.
+
+`readStepsByHour` (named for what it once did — it now slices at fifteen minutes) is **the only step
+read in the app.** It slices with `AggregateGroupByDurationRequest` once per contributing origin and
+merges the results; one origin short-circuits to the plain combined read. **The window's start is
+snapped down to the hour in the local zone before slicing**, because the slicer counts forward from
+whatever instant it is handed — an hour boundary is also a fifteen-minute one, so the quarter-hour
+slices still land on :00/:15/:30/:45, where a sync begun at 14:37 would otherwise produce buckets no
+later sync lines up with and `StepBucket`'s primary key could never overwrite. Health Connect omits a
+slice entirely when it has no records in it, so a quarter-hour with no walking arrives as a *hole*,
+not a zero — which is why a bar series has to declare its own `barWidth` rather than infer one from
+the spacing.
+
+**There is no day-level step aggregate any more, and reintroducing one would be a subtle mistake.**
+`HealthDay` carries no `steps` field and `readDay` takes no pinned package. A day-level *max* picks
+one origin's entire day — `max(5607, 7658) = 7658` — when the truth is the watch's daytime plus the
+phone's evening run. The merge has to happen at the slice and the day has to be summed from the
+slices, which is what `syncHealthData` does.
+
+**A pinned source that wrote nothing falls through to the merged series, never to the sum.** That
+fallback-to-sum was the app's second documented way of disagreeing with Garmin: on a day the pinned
+app was silent it quietly reported every app added together, double-counting every walk two of them
+saw, and it looked exactly like an ordinary figure. It is gone from both the daily total and the
+sliced read.
 
 Health Connect has no mile-split concept. `bestMileSeconds` is elapsed time divided by distance,
 normalised to a mile, over runs of at least a mile — so it is *average pace*, not a PR, and is
@@ -1292,11 +1343,20 @@ halves, and the count is reported on the Activity card for `backfillGlucoseGaps`
 that grew by four thousand between two glances, with nothing on screen to say why, is
 indistinguishable from one that had been wrong all along.
 
-**The steps figure has a second way to disagree with Garmin, and it is not this one.** `readSteps`
-falls through to the *combined* aggregate when the pinned source wrote nothing for the window —
-deliberately, so a watch that has not synced yet does not report a flat zero. On a day the pinned app
-genuinely wrote nothing, that silently reports the sum of every app instead, which double-counts a
-walk two apps both recorded. Check `preferredStepsPackage` before reading a mismatch as this one.
+**The step count and the chart under it can no longer disagree, and that is by construction rather
+than by timing.** `syncHealthData` reads the day's merged slices, writes them to `StepBucket`, and
+sets `HealthDaySnapshot.steps` to the sum of what the table then holds — one read feeding both. It
+was two pipelines with two refresh policies (a day-level aggregate for the card, the rolling
+time-series sync for the bars) and they drifted exactly as far apart as the gap between those
+policies allowed: 2,043 against 11,083 on 19 August. It also closes a gap the same diagnosis
+exposed — `syncFinishedDay` used to refresh a day's snapshot but not its chart, so healing a frozen
+day left the bars under it as they were.
+
+**The total is summed from the stored buckets, not from the slice list just read**, and that decides
+the read-failed case correctly. An empty read leaves the table alone (the delete is bounded by what
+came back), so totalling the read would blank the card over a chart still drawing the very walk it
+could not report — the same split, arriving from the one direction the new pipeline could still
+produce it.
 
 **Runs are the one Activity chart read live rather than cached.** The Runs card stacks each running
 session by the minutes it spent in each heart-rate zone — Easy below 60% of max, Moderate to 75%,
@@ -2216,14 +2276,14 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 
 ## Testing
 
-`FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
+`StepMergeTest`, `FastingAdherenceTest`, `FastingStatsTest`, `CaffeineTest`, `MacroAbsorptionTest`,
 `GlucoseSmoothingTest`, `MealDuplicatesTest`, `SeriesGapsTest`, `AxisSelectionTest`,
 `GlucoseGapsTest`, `TimeGridlinesTest`, `ChartBoundsTest`, `WaypointSeedTest`, `PanWindowTest`,
 `SleepTest`, `CsvTest`, `RunZonesTest`, `RunPaceTest`, `AftScoringTest`, `BodyCompositionTest`,
 `GlucoseMetricsTest`, `MealResponseTest`, `TrainingVolumeTest`, `ReadinessTest`,
 `TrendsBucketsTest`, `MovingAverageTest`, `StreaksTest`, `PersonalRecordsTest`,
 `GoalProjectionTest`, `UsualIntakeTest` and
-`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest`, `CardFoldTest` and `SleepSyncTest`
+`CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest`, `CardFoldTest`, `SleepSyncTest` and `StepPipelineTest`
 are Robolectric
 repository suites alongside
 `MealDeletionTest` and `FinishedDaySyncTest`, pinning the behaviour that lives between two tables
@@ -2343,6 +2403,23 @@ the test re-scores between syncs. It pins that a re-scored night *replaces* its 
 accumulating them — the case the per-night delete exists for, where the second scoring has fewer
 stretches than the first and an upsert alone leaves the vanished ones on disk to be counted twice.
 
+`StepMergeTest` is pure and carries the day the merge was diagnosed on as a named case, because the
+useful assertion is not a target figure — Garmin's total is not reachable, and asserting it would be
+the claim this file says not to make — but the **ordering**: merged has to land strictly between the
+pinned figure and the sum, which is the one statement that says it fixed something rather than traded
+one error for another. Beside it: two origins on one slice take the maximum and not the total,
+disjoint stretches are a union, three origins fold rather than two, and a slice every origin reports
+as zero survives *as* a zero, since dropping it would leave the cache unable to overwrite a stale
+figure for that quarter hour.
+
+`StepPipelineTest` is the repository half, and its first test is the two-sources-of-truth regression
+pin: `HealthDaySnapshot.steps` equals the sum of that day's stored buckets after a sync. It also
+holds the three settings against each other on a fixture where the two mock origins overlap all day
+and diverge in the evening — pinned answers for one app, merged beats it, and merged stays under the
+sum of both. The last two are the failure modes: a source returning nothing leaves the steps **null**
+rather than zero, and a read that fails after a good one leaves both the buckets and the card as they
+were.
+
 **The sleep card is composed directly, not through Wellness.** A `LazyColumn` builds only what
 is on screen and this screen cannot be scrolled in a test, so the third card down is never
 constructed at all — the hypnogram's canvas arithmetic would go entirely unexercised while the
@@ -2436,7 +2513,7 @@ When the render suites cannot be trusted, the other classes run in well under a 
 unaffected — they render no Compose, so `AppNotIdleException` cannot reach them. **`tools/fast-gate.ps1`
 is that gate**, and it names every class explicitly because Gradle has no "exclude these two". It
 prints its own class and test counts at the end, so the figure quoted in a commit is one the run
-produced rather than one remembered — currently **47 classes, 409 tests**. Keep the list in step when
+produced rather than one remembered — currently **50 classes, 430 tests**. Keep the list in step when
 a test class is added: a class missing from it silently stops being gated on. Say plainly in the
 commit which of the two was verified; a test count that quietly means something narrower than usual
 is worse than no count.

@@ -45,6 +45,15 @@ data class SettingsUiState(
     val latestWeight: WeightEntry? = null,
     /** Today's per-app step totals, loaded on demand. */
     val stepSources: List<StepSource> = emptyList(),
+    /**
+     * What today comes to once the sources are merged, which is what clearing
+     * the pin produces.
+     *
+     * Shown beside the per-app figures rather than left to be inferred: the
+     * whole decision this card asks for is between one app's number and the
+     * merged one, and only one of the two used to be on screen.
+     */
+    val mergedSteps: Int? = null,
     val isLoadingStepSources: Boolean = false,
     /** True while a backup is being written, so the button cannot be pressed twice. */
     val isExporting: Boolean = false,
@@ -80,6 +89,7 @@ data class SettingsUiState(
 /** Bundled because combine's typed overloads stop at five sources. */
 private data class StepSourceBundle(
     val sources: List<StepSource>,
+    val merged: Int?,
     val isLoading: Boolean,
     val isExporting: Boolean,
 )
@@ -87,13 +97,18 @@ private data class StepSourceBundle(
 class SettingsViewModel(private val repository: TrackerRepository) : ViewModel() {
 
     private val stepSources = MutableStateFlow<List<StepSource>>(emptyList())
+    private val mergedSteps = MutableStateFlow<Int?>(null)
     private val loadingStepSources = MutableStateFlow(false)
 
     private val exporting = MutableStateFlow(false)
 
     private val stepSourceState =
-        combine(stepSources, loadingStepSources, exporting) { sources, loading, isExporting ->
-            StepSourceBundle(sources, loading, isExporting)
+        combine(stepSources, mergedSteps, loadingStepSources, exporting) {
+            sources,
+            merged,
+            loading,
+            isExporting ->
+            StepSourceBundle(sources, merged, loading, isExporting)
         }
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -109,6 +124,7 @@ class SettingsViewModel(private val repository: TrackerRepository) : ViewModel()
             weightSubGoals = subGoals,
             latestWeight = latestWeight,
             stepSources = steps.sources,
+            mergedSteps = steps.merged,
             isLoadingStepSources = steps.isLoading,
             isExporting = steps.isExporting,
         )
@@ -126,17 +142,21 @@ class SettingsViewModel(private val repository: TrackerRepository) : ViewModel()
     fun refreshStepSources() {
         viewModelScope.launch {
             loadingStepSources.value = true
-            stepSources.value = repository.stepSources(LocalDate.now())
+            val today = LocalDate.now()
+            stepSources.value = repository.stepSources(today)
+            mergedSteps.value = repository.mergedSteps(today)
             loadingStepSources.value = false
         }
     }
 
     /**
-     * Pins the app whose steps are trusted, or clears the pin to sum every source.
+     * Pins the app whose steps are trusted, or clears the pin back to merged.
      *
-     * Re-syncs immediately: the cached snapshot still holds the step count from
-     * the old preference, and leaving it there would make the setting look
-     * broken until the next manual refresh.
+     * Re-syncs immediately: the cached snapshot *and the day's step buckets*
+     * still hold the figures the old preference produced, and leaving them there
+     * would make the setting look broken until the next manual refresh. Since
+     * the day sync now rewrites the buckets too, one call fixes the card and the
+     * chart together.
      */
     fun setPreferredStepsPackage(packageName: String?) {
         viewModelScope.launch {

@@ -60,13 +60,12 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
         return samples.filter { !it.time.isBefore(from) && !it.time.isAfter(to) }.sortedBy { it.time }
     }
 
-    override suspend fun readDay(date: LocalDate, preferredStepsPackage: String?): HealthDay {
+    override suspend fun readDay(date: LocalDate): HealthDay {
         val random = Random(date.toEpochDay())
         val samples = glucoseFor(date)
 
         return HealthDay(
             date = date,
-            steps = random.nextInt(3_000, 14_000),
             restingHeartRateBpm = random.nextInt(52, 64),
             averageHeartRateBpm = random.nextInt(66, 82),
             sleepMinutes = random.nextInt(320, 480),
@@ -143,12 +142,44 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
     }
 
     /**
-     * A waking day of walking: nothing overnight, a commute-shaped morning and
-     * evening, and a trickle in between.
+     * A waking day of walking as the *watch* saw it: nothing overnight, a
+     * commute-shaped morning and evening, and a trickle in between.
      *
      * Zero hours are emitted rather than omitted, because a chart that draws a
      * gap where the answer is "none" is saying something different.
      */
+    private fun watchSteps(hourStart: Instant): Int {
+        val local = hourStart.atZone(zoneId)
+        val random = Random(hourStart.epochSecond)
+        return when (local.hour) {
+            in 0..5 -> 0
+            7, 8, 17, 18 -> random.nextInt(900, 2_200)
+            in 6..21 -> random.nextInt(60, 700)
+            else -> random.nextInt(0, 120)
+        }
+    }
+
+    /**
+     * The same day as the *phone* saw it: most of the walking at a discount,
+     * plus a late evening block the watch has nothing at all for.
+     *
+     * That block is the fixture's whole point, and it is the shape of the real
+     * fault this merge exists for. A watch's companion app writes per-minute
+     * monitoring steps and writes **no step records for a tracked activity**, so
+     * an evening run reaches Health Connect only under the phone's own origin.
+     * Pinned to the watch the app cannot see it; summed, every ordinary daytime
+     * hour is counted twice. Merged, both survive.
+     *
+     * The discount is deliberate too: it makes the phone lose every hour it did
+     * not lead, so a merge that quietly took the wrong side would show up as the
+     * whole day changing rather than one evening.
+     */
+    private fun phoneSteps(hourStart: Instant): Int {
+        val local = hourStart.atZone(zoneId)
+        if (local.hour == 22 || local.hour == 23) return Random(hourStart.epochSecond).nextInt(3_400, 4_200)
+        return (watchSteps(hourStart) * 0.6f).toInt()
+    }
+
     override suspend fun readStepsByHour(
         from: Instant,
         to: Instant,
@@ -157,20 +188,19 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
         val start = from.atZone(zoneId).truncatedTo(ChronoUnit.HOURS).toInstant()
         if (!start.isBefore(to)) return emptyList()
 
+        // Pinned reads answer for that origin alone, exactly as the real source
+        // does -- which is what lets a repository test say "two apps wrote" and
+        // then check what each of the three settings makes of it.
+        val counter: (Instant) -> Int =
+            when (preferredStepsPackage) {
+                WATCH_PACKAGE -> ::watchSteps
+                PHONE_PACKAGE -> ::phoneSteps
+                else -> { hour -> maxOf(watchSteps(hour), phoneSteps(hour)) }
+            }
+
         return generateSequence(start) { it.plus(Duration.ofHours(1)) }
             .takeWhile { it.isBefore(to) }
-            .map { hourStart ->
-                val local = hourStart.atZone(zoneId)
-                val random = Random(hourStart.epochSecond)
-                val steps =
-                    when (local.hour) {
-                        in 0..5 -> 0
-                        7, 8, 17, 18 -> random.nextInt(900, 2_200)
-                        in 6..21 -> random.nextInt(60, 700)
-                        else -> random.nextInt(0, 120)
-                    }
-                HourlySteps(hourStart, steps)
-            }
+            .map { HourlySteps(it, counter(it)) }
             .toList()
     }
 
@@ -237,13 +267,26 @@ class MockHealthDataSource(private val zoneId: ZoneId = ZoneId.systemDefault()) 
     override suspend fun readExerciseSessions(from: Instant, to: Instant): List<ExerciseSession> =
         emptyList()
 
-    /** Two sources that disagree, which is the situation the picker exists to resolve. */
+    /**
+     * Two sources that disagree, which is the situation the picker exists to
+     * resolve.
+     *
+     * Totalled from the same per-hour fixtures the sliced read uses rather than
+     * invented separately, so the breakdown on the settings card and the figure
+     * the app actually stores are answers about one day.
+     */
     override suspend fun readStepSources(date: LocalDate): List<StepSource> {
-        val random = Random(date.toEpochDay())
-        val watch = random.nextInt(3_000, 14_000)
+        val start = date.atStartOfDay(zoneId).toInstant()
+        val hours = generateSequence(start) { it.plus(Duration.ofHours(1)) }.take(24).toList()
         return listOf(
-            StepSource("com.garmin.android.apps.connectmobile", "Garmin Connect", watch),
-            StepSource("com.sec.android.app.shealth", "Samsung Health", (watch * 0.8f).toInt()),
+            StepSource(WATCH_PACKAGE, "Garmin Connect", hours.sumOf { watchSteps(it) }),
+            StepSource(PHONE_PACKAGE, "Samsung Health", hours.sumOf { phoneSteps(it) }),
         )
+    }
+
+    companion object {
+        /** The two origins this fixture writes steps under. */
+        const val WATCH_PACKAGE = "com.garmin.android.apps.connectmobile"
+        const val PHONE_PACKAGE = "com.sec.android.app.shealth"
     }
 }

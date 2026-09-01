@@ -419,16 +419,37 @@ Each metric is fetched independently and failures degrade to a blank field, so
 granting only some permissions still produces a working dashboard. Results are
 cached per day in `HealthDaySnapshot` so trends and history survive offline.
 
-### Steps and the source picker
+### Steps, and the two ways of getting them wrong
 
 More than one app usually writes steps -- a watch's companion app and the phone's
-own health app both counting the same walk. An unfiltered aggregate sums them,
-which double-counts. The app instead derives the contributing packages from the
-aggregate's own data origins and re-aggregates per source, and
-**Settings -> Step source** shows the per-app totals for today so one can be
-pinned as the one that counts. The same pinned source drives the hourly step
-bars on the master graph, so the daily total and the timeline can never disagree
+own tracking, often a mapping or fitness app as well. Both of the obvious ways to
+read that are wrong, in opposite directions:
+
+- **Adding them up** counts the same walk twice. A watch and a phone in one
+  pocket see the same legs, and the combined figure approaches double.
+- **Trusting one app** loses whatever that app did not see. A watch's companion
+  app writes minute-by-minute step records all day and writes **none at all for a
+  tracked activity** -- so an evening run reaches Health Connect only under the
+  phone's own name, and an app pinned to the watch cannot see it. On the day this
+  was diagnosed that was seven and a half thousand steps missing from a
+  twelve-thousand-step day.
+
+So the app **merges**: for each quarter hour it takes the highest figure any app
+reported. Two apps watching the same walk agree closely, so the larger of them is
+not a second walk; an app that saw a stretch nothing else did carries that
+stretch alone. The one thing it can still under-read is a quarter hour in which
+two apps recorded genuinely *different* walking, which is accepted -- every rule
+for recovering that double-counts the ordinary case to rescue the rare one.
+
+**Settings -> Step source** shows what merging comes to today next to each app's
+own total, so the choice can be made against real numbers, and one app can still
+be pinned deliberately. The daily figure is the sum of the same quarter-hour
+buckets the timeline draws, so the card and the chart under it cannot disagree
 about how far you walked.
+
+It will not match your watch app's own total exactly, and it does not pretend to:
+that number is not published to Health Connect and there is no local API to ask
+for it. Expect a few percent.
 
 ### Calories
 

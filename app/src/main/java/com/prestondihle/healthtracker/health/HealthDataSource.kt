@@ -102,7 +102,10 @@ data class StepSource(val packageName: String, val appLabel: String, val steps: 
  */
 data class HealthDay(
     val date: LocalDate,
-    val steps: Int? = null,
+    // No step count. Steps are the one metric here with more than one writer, so
+    // they cannot be read as a day-level aggregate at all -- see
+    // [HealthDataSource.readStepsByHour], whose merged slices the day's total is
+    // now summed from.
     val restingHeartRateBpm: Int? = null,
     val averageHeartRateBpm: Int? = null,
     val sleepMinutes: Int? = null,
@@ -147,13 +150,14 @@ interface HealthDataSource {
     suspend fun missingPermissions(): Set<String>
 
     /**
-     * Reads one day.
+     * Reads one day's single-writer metrics.
      *
-     * [preferredStepsPackage] restricts the step count to a single writing app.
-     * Null sums every source, which double-counts when more than one app tracks
-     * the same walk.
+     * Steps are deliberately not among them. Every other figure here comes from
+     * one source and a day-level aggregate is the right shape for it; steps come
+     * from two or three apps at once, and reconciling them is a decision that has
+     * to be made a slice at a time. See [readStepsByHour].
      */
-    suspend fun readDay(date: LocalDate, preferredStepsPackage: String? = null): HealthDay
+    suspend fun readDay(date: LocalDate): HealthDay
 
     /** Per-app step totals for [date], for choosing which source to trust. */
     suspend fun readStepSources(date: LocalDate): List<StepSource>
@@ -183,15 +187,20 @@ interface HealthDataSource {
     suspend fun readGlucose(from: Instant, to: Instant): List<GlucoseSample>
 
     /**
-     * Steps in a window, split into wall-clock hours.
+     * Steps in a window, split into quarter-hour slices and reconciled across
+     * the apps that wrote them.
      *
-     * Aligned to the hour rather than to [from] so the same hour always produces
+     * Aligned to the hour rather than to [from] so the same slice always produces
      * the same bucket, which is what lets a re-sync overwrite rows instead of
      * accumulating shifted duplicates of the same walk.
      *
-     * [preferredStepsPackage] pins one writing app, exactly as [readDay] does --
-     * hourly bars that summed every source while the daily total trusted one
-     * would be two different step counts on two screens.
+     * The only step read in the app: the daily total is the sum of these slices,
+     * so the card and the chart under it cannot report different walks.
+     *
+     * [preferredStepsPackage] pins one writing app and is a deliberate narrowing
+     * of what the app can see; null takes the highest figure each slice was given
+     * by any origin (see [com.prestondihle.healthtracker.domain.StepMerge]),
+     * which is what a pinned source that wrote nothing falls through to.
      */
     suspend fun readStepsByHour(
         from: Instant,

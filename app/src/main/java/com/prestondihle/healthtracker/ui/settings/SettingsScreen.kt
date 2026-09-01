@@ -291,8 +291,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                     ReorderableCard("stepSource") {
                         SettingsCard(title = "Step source") {
                 Text(
-                    "Several apps can write steps to Health Connect at once, and their totals " +
-                        "get summed — which counts the same walk twice. Pick the one to trust.",
+                    "Several apps can write steps to Health Connect at once. Adding them up " +
+                        "counts the same walk twice; trusting only one loses whatever that " +
+                        "one did not see — a watch records no steps at all for a tracked " +
+                        "run, and the phone in your pocket does.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -300,11 +302,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, orderViewModel: CardOrderViewMo
                 val preferred = state.settings.preferredStepsPackage
 
                 StepSourceRow(
-                    label = "Sum every source",
+                    label = "Merged (recommended)",
                     supporting =
-                        if (state.stepSources.size > 1) {
-                            "${state.stepSources.sumOf { it.steps }} steps today, combined"
-                        } else null,
+                        listOfNotNull(
+                                state.mergedSteps?.let { "$it steps today" },
+                                "highest of your sources for each quarter-hour — " +
+                                    "avoids double counting",
+                            )
+                            .joinToString(" · "),
                     selected = preferred == null,
                     onClick = { viewModel.setPreferredStepsPackage(null) },
                 )
