@@ -1358,6 +1358,40 @@ two. The recovered count is reported on the Activity card for `backfillGlucoseGa
 that grew by four thousand between two glances, with nothing on screen to say why, is
 indistinguishable from one that had been wrong all along.
 
+**Everything older than that week was frozen for ever, and `deepResyncStaleDays` is the catch-up.**
+The sweep walks seven days; before this, nothing ever asked about day eight again, so those snapshots
+held whatever the last same-day sync happened to see — and every figure fed by the daily cache reads
+them: the steps trend, the step-goal streak, the records, the metabolic scatter, the compare card. On
+the author's phone the worst was 19 August at 2,043 against 11,083 in its own step buckets.
+
+It **walks dates, not rows**, which is the part that is easy to get wrong: a day the app was never
+opened on has no row at all, and a row-driven walk skips exactly the days that are missing. Each date
+goes through the same `syncFinishedDay`, so there is one staleness rule rather than two that could
+disagree. The **floor** is the oldest date anything says was lived — `min` of the earliest `DailyLog`,
+`HealthDaySnapshot` and `StepBucket` — capped at `DEEP_RESYNC_MAX_DAYS` (90), because Health Connect
+returns nothing from before thirty days prior to the first permission grant and a walk into that void
+is round trips for guaranteed nulls.
+
+**`DEEP_RESYNC_BUDGET` (10) bounds the reads, not the walk**, and the difference is the trap. Giving
+up after a run of settled dates looks like the obvious optimisation and *cannot converge*: the walk
+heals a prefix of exactly the budget's length per call, so from the second call onward the front of
+the walk is a settled run of precisely that length and every later call stops in the same place —
+with the guard that makes healed days drop out becoming the thing that keeps the rest frozen. Skipping
+the steady-state walk properly wants a persisted cursor, which is a schema change; a hundred indexed
+row reads on a background refresh is not worth one.
+
+**A read that comes back empty must not blank a row that has something in it.** Past Health Connect's
+horizon every read is nothing, and writing that over a stale-but-real snapshot turns a wrong number
+into no number — strictly worse. `HealthDaySnapshot.isBlank` exists for that one rule and should not
+be reused as a general "is this day interesting" predicate. **The stamp still advances**: keeping the
+values and skipping the write outright would leave `syncedAt` where it was, so the date would qualify
+for ever and the catch-up would never converge past the horizon.
+
+`TodayViewModel.refresh` calls it after `resyncFinishedDays` — after, so the days the sweep heals have
+already dropped out of the walk — and adds the two counts into the one `daysRecovered` figure. The
+reader is being told one thing, how many past days moved under them, and which mechanism found each
+is not a distinction they have any use for.
+
 **The step count and the chart under it can no longer disagree, and that is by construction rather
 than by timing.** `syncHealthData` reads the day's merged slices, writes them to `StepBucket`, and
 sets `HealthDaySnapshot.steps` to the sum of what the table then holds — one read feeding both. It

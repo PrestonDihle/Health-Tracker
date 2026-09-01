@@ -422,6 +422,22 @@ interface TrackerDao {
     @Query("DELETE FROM StepBucket WHERE hourStartMillis >= :start AND hourStartMillis < :end")
     suspend fun deleteStepBucketsBetween(start: Long, end: Long)
 
+    // ----- Earliest evidence a day was lived -------------------------------
+    //
+    // The floor for the deep history catch-up. Returned as raw stored values --
+    // epoch day for the dated tables, epoch millis for the bucket -- rather than
+    // through the converters, because MIN() over an empty table is NULL and a
+    // nullable converted type is one more thing to be wrong about for no gain.
+    // The caller does the arithmetic it already owns.
+
+    @Query("SELECT MIN(date) FROM DailyLog") suspend fun earliestDailyLogEpochDay(): Long?
+
+    @Query("SELECT MIN(date) FROM HealthDaySnapshot")
+    suspend fun earliestHealthSnapshotEpochDay(): Long?
+
+    @Query("SELECT MIN(hourStartMillis) FROM StepBucket")
+    suspend fun earliestStepBucketMillis(): Long?
+
     // ----- Sleep -------------------------------------------------------------
 
     /**

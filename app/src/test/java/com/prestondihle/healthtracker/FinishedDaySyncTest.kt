@@ -238,6 +238,175 @@ class FinishedDaySyncTest {
         assertTrue(today !in read)
     }
 
+    // ----- The history older than the sweep --------------------------------
+
+    /** A snapshot frozen mid-afternoon on every date from [from] back to [to]. */
+    private suspend fun freezeHistory(
+        repository: TrackerRepository,
+        from: Long,
+        to: Long,
+    ) {
+        for (back in from..to) {
+            val date = today.minusDays(back)
+            repository.syncHealthData(
+                date,
+                now = date.atStartOfDay(zone).toInstant().plus(Duration.ofHours(15)),
+            )
+        }
+    }
+
+    @Test
+    fun `the deep resync spends its budget and no more`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        freezeHistory(repository, 8, 40)
+        source.reads.clear()
+
+        val recovered = repository.deepResyncStaleDays(today, thisMorning, budget = 10).getOrThrow()
+
+        assertEquals(10, recovered)
+        assertEquals(10, source.reads.size)
+    }
+
+    /**
+     * Successive refreshes converge, which is the whole reason a budget is
+     * acceptable: the first run does not have to finish the job.
+     */
+    @Test
+    fun `successive calls walk further back until the history is healed`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        freezeHistory(repository, 8, 20)
+
+        var recovered = 0
+        repeat(4) {
+            recovered += repository.deepResyncStaleDays(today, thisMorning, budget = 10).getOrThrow()
+        }
+
+        // Fourteen: the thirteen frozen dates (8 through 20) plus day 7, which
+        // the sweep would have covered and which has no row at all here. All
+        // healed, and nothing beyond them invented -- the walk stops at the
+        // oldest date there is evidence for.
+        assertEquals(14, recovered)
+        for (back in 8L..20L) {
+            assertEquals(2_000, repository.getHealthSnapshot(today.minusDays(back)).first()?.steps)
+        }
+    }
+
+    /**
+     * A converged history spends nothing.
+     *
+     * The walk still visits every date down to the floor -- an indexed row read
+     * each, deliberately, because the obvious "stop after a run of settled dates"
+     * shortcut cannot converge (see `deepResyncStaleDays`). What must be zero is
+     * the Health Connect round trips, and that is what this counts.
+     */
+    @Test
+    fun `a settled history costs no reads at all`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        freezeHistory(repository, 8, 40)
+        repeat(6) { repository.deepResyncStaleDays(today, thisMorning, budget = 10).getOrThrow() }
+
+        source.reads.clear()
+        val recovered = repository.deepResyncStaleDays(today, thisMorning, budget = 10).getOrThrow()
+
+        assertEquals(0, recovered)
+        assertEquals(0, source.reads.size)
+    }
+
+    /**
+     * The floor is the oldest date anything says was lived, and nothing is
+     * walked past it.
+     *
+     * Health Connect returns nothing from before thirty days prior to the first
+     * permission grant, so a walk into the void is round trips for guaranteed
+     * nulls.
+     */
+    @Test
+    fun `the walk stops at the oldest date there is evidence for`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        freezeHistory(repository, 8, 12)
+        source.reads.clear()
+
+        repeat(3) { repository.deepResyncStaleDays(today, thisMorning, budget = 10).getOrThrow() }
+
+        assertTrue(today.minusDays(12) in source.reads)
+        assertTrue(today.minusDays(13) !in source.reads)
+    }
+
+    @Test
+    fun `an empty database gives the walk nothing to do`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+
+        assertEquals(0, repository.deepResyncStaleDays(today, thisMorning).getOrThrow())
+        assertTrue(source.reads.isEmpty())
+    }
+
+    /**
+     * Past Health Connect's own horizon a frozen figure beats a hole.
+     *
+     * This is the one place the catch-up could actively destroy data: walk far
+     * enough back and every read comes back empty, and writing that emptiness
+     * over a stale-but-real snapshot would turn a wrong number into no number.
+     * The stamp still has to advance, or the date never settles and the walk
+     * never converges past the horizon.
+     */
+    @Test
+    fun `a read that comes back empty keeps the frozen row and settles it`() = runBlocking {
+        var silent = false
+        val source =
+            object : HealthDataSource by MockHealthDataSource(zone) {
+                override suspend fun readDay(date: LocalDate) = HealthDay(date = date)
+
+                override suspend fun readStepsByHour(
+                    from: Instant,
+                    to: Instant,
+                    preferredStepsPackage: String?,
+                ): List<HourlySteps> =
+                    if (silent) emptyList()
+                    else listOf(HourlySteps(from, 4_321))
+            }
+        val repository = repository(source)
+        val old = today.minusDays(40)
+        repository.syncHealthData(old, now = old.atStartOfDay(zone).toInstant().plus(Duration.ofHours(15)))
+        assertEquals(4_321, repository.getHealthSnapshot(old).first()?.steps)
+
+        silent = true
+        repository.deepResyncStaleDays(today, thisMorning, budget = 40).getOrThrow()
+
+        val healed = repository.getHealthSnapshot(old).first()
+        assertEquals(4_321, healed?.steps)
+        // Stamped anyway, so the date stops qualifying rather than being asked
+        // about on every refresh for the rest of the install's life.
+        assertTrue(healed!!.syncedAt.isAfter(old.plusDays(1).atStartOfDay(zone).toInstant()))
+        assertFalse(repository.syncFinishedDay(old, thisMorning))
+    }
+
+    /**
+     * The two mechanisms report one figure between them, since the reader is
+     * being told one thing: how many past days moved under them.
+     */
+    @Test
+    fun `the sweep's count and the deep walk's count add up`() = runBlocking {
+        val source = CountingSource(zone)
+        val repository = repository(source)
+        freezeHistory(repository, 1, 12)
+        source.reads.clear()
+
+        val swept = repository.resyncFinishedDays(today, thisMorning).getOrThrow()
+        val deep = repository.deepResyncStaleDays(today, thisMorning, budget = 10).getOrThrow()
+
+        // Seven from the sweep, five from the walk (dates 8 through 12), and
+        // each date read exactly once between the two -- no overlap, no gap.
+        assertEquals(7, swept)
+        assertEquals(5, deep)
+        assertEquals(12, source.reads.size)
+        assertEquals(12, source.reads.toSet().size)
+    }
+
     /**
      * The stamp that proves the re-read happened, and that the settle window is
      * then measured from.

@@ -106,6 +106,27 @@ private const val FINISHED_DAY_LOOKBACK = 7L
 private val FINISHED_DAY_SETTLE: Duration = Duration.ofHours(48)
 
 /**
+ * How many day reads [TrackerRepository.deepResyncStaleDays] will spend in one
+ * call.
+ *
+ * Ten keeps a first run on a long history to ten Health Connect round trips,
+ * with the rest healing over the refreshes after it. It bounds the *reads*, not
+ * the walk -- see that function for why bounding the walk cannot be done with a
+ * run of settled dates.
+ */
+private const val DEEP_RESYNC_BUDGET = 10
+
+/**
+ * The hard floor on how far back the deep catch-up will walk, whatever the data
+ * says was lived.
+ *
+ * Health Connect returns nothing from before thirty days prior to the first
+ * permission grant, so past some point this is round trips for guaranteed nulls.
+ * Ninety days is generous against that and still bounded.
+ */
+private const val DEEP_RESYNC_MAX_DAYS = 90L
+
+/**
  * Single entry point for data. Owns the conversion between the domain's
  * [Instant]/[LocalDate] vocabulary and the epoch-millisecond bounds the DAO
  * expects, so no caller has to repeat that arithmetic.
@@ -904,7 +925,7 @@ class TrackerRepository(
             val day = healthDataSource.readDay(date)
             val steps = syncStepBuckets(date)
 
-            dao.upsertHealthSnapshot(
+            val fresh =
                 HealthDaySnapshot(
                     date = date,
                     steps = steps,
@@ -926,7 +947,25 @@ class TrackerRepository(
                     sodiumMg = day.sodiumMg,
                     syncedAt = now,
                 )
-            )
+
+            // A read that came back with nothing must not blank a row that has
+            // something in it. Health Connect will not return data from before
+            // thirty days prior to the first permission grant, so the deep
+            // history catch-up eventually walks into a void -- and for a date
+            // out there, the figure frozen on disk is strictly better than a
+            // hole, even though it is stale.
+            //
+            // The stamp still advances. Skipping the write entirely would leave
+            // syncedAt where it was, so the date would go on qualifying for a
+            // re-read for ever and the catch-up would never converge past the
+            // horizon. Keeping the values and moving the stamp says both true
+            // things: this is what we know, and we have stopped asking.
+            val cached = dao.getHealthSnapshot(date).first()
+            if (fresh.isBlank && cached != null && !cached.isBlank) {
+                dao.upsertHealthSnapshot(cached.copy(syncedAt = now))
+            } else {
+                dao.upsertHealthSnapshot(fresh)
+            }
 
             day.restingHeartRateBpm?.let {
                 dao.upsertRestingHeartRate(RestingHeartRate(date, it, DataSourceEnum.HEALTH_CONNECT))
@@ -1091,6 +1130,89 @@ class TrackerRepository(
         now: Instant = Instant.now(),
     ): Result<Int> = runCatching {
         (1..FINISHED_DAY_LOOKBACK).count { back -> syncFinishedDay(today.minusDays(back), now) }
+    }
+
+    /**
+     * Heals the days older than the sweep will ever reach, a budget at a time.
+     *
+     * [resyncFinishedDays] walks a week. Everything before that holds whatever
+     * the last same-day sync happened to see, permanently, because nothing will
+     * ever ask about those dates again -- and every figure fed by the daily
+     * snapshot reads them: the steps trend, the step-goal streak, the records,
+     * the metabolic scatter, the compare card. On the author's phone the worst
+     * of them was 19 August at 2,043 against 11,083 in its own step buckets.
+     *
+     * Walks **dates rather than rows**, because the rows are half the problem: a
+     * day the app was never opened on has no row at all, and a row-driven walk
+     * would skip exactly the days that are missing. Each date goes through
+     * [syncFinishedDay], so the settle window and the absent-row branch decide
+     * what is stale rather than a second rule that could disagree with the
+     * first.
+     *
+     * **What is bounded is the reads, not the walk.** At most [budget] day reads
+     * are spent per call, so a first run on a long history costs ten Health
+     * Connect round trips rather than ninety and the rest heals over the
+     * refreshes after it -- the guard makes healed days drop out, so successive
+     * calls converge toward the floor. A date that is already settled costs one
+     * indexed row read and nothing else, and a fully converged history is at
+     * worst [DEEP_RESYNC_MAX_DAYS] of those.
+     *
+     * **Stopping early on a run of settled dates does not work, and it is worth
+     * knowing why before adding it back.** The obvious optimisation -- give up
+     * once a full budget's worth of consecutive dates is already settled -- looks
+     * right and cannot converge: the walk heals a *prefix* of exactly [budget]
+     * dates per call, so after the very first call the front of the walk is a
+     * settled run of precisely that length and every later call stops at the same
+     * place. The history past it would never be reached again, and the guard that
+     * makes healed days drop out would be the thing keeping them frozen.
+     * Skipping the steady-state walk properly needs a persisted cursor, which is
+     * a schema change and out of scope here; a hundred indexed row reads on a
+     * background refresh is not worth one.
+     *
+     * Returns how many reads were spent, which folds into the same recovered
+     * count the sweep reports for [backfillGlucoseGaps]' reason.
+     */
+    suspend fun deepResyncStaleDays(
+        today: LocalDate = LocalDate.now(zoneId),
+        now: Instant = Instant.now(),
+        budget: Int = DEEP_RESYNC_BUDGET,
+    ): Result<Int> = runCatching {
+        val floor = earliestLivedDate(today) ?: return@runCatching 0
+
+        var spent = 0
+        var date = today.minusDays(FINISHED_DAY_LOOKBACK)
+        while (!date.isBefore(floor) && spent < budget) {
+            if (syncFinishedDay(date, now)) spent++
+            date = date.minusDays(1)
+        }
+        spent
+    }
+
+    /**
+     * The oldest date there is any evidence was lived, capped at
+     * [DEEP_RESYNC_MAX_DAYS].
+     *
+     * Three tables, because each of them can be the only one that knows: a day
+     * with a hand-typed mood and no sync, a day whose chart was drawn from step
+     * buckets but whose snapshot was never written, and the ordinary case.
+     *
+     * The cap is not tidiness. Health Connect returns nothing from before thirty
+     * days prior to the first permission grant, so a walk into that stretch is
+     * round trips for guaranteed nulls -- and this walk is otherwise unbounded
+     * backwards, which on a long-lived install is the difference between a
+     * bounded catch-up and a crawl through a year.
+     */
+    private suspend fun earliestLivedDate(today: LocalDate): LocalDate? {
+        val evidence =
+            listOfNotNull(
+                dao.earliestDailyLogEpochDay()?.let(LocalDate::ofEpochDay),
+                dao.earliestHealthSnapshotEpochDay()?.let(LocalDate::ofEpochDay),
+                dao.earliestStepBucketMillis()?.let {
+                    Instant.ofEpochMilli(it).atZone(zoneId).toLocalDate()
+                },
+            )
+        val earliest = evidence.minOrNull() ?: return null
+        return maxOf(earliest, today.minusDays(DEEP_RESYNC_MAX_DAYS))
     }
 
     /**

@@ -970,6 +970,28 @@ asks "was this measured"; going back to the source asks "is it worth a query",
 and a reader taking three fingersticks a day has hours of genuine emptiness that
 no re-read will ever fill.
 
+### Finished days get a second look too
+
+A day's totals used to be whatever was true at the last moment the app happened
+to be open on it -- so a phone opened at breakfast reported a morning as a whole
+day, permanently, on every chart drawn from the daily cache. Now a finished day
+is re-read, and it stays open to re-reading for **two days after it ends** rather
+than being closed on the first look: a watch syncs its evening when it next has a
+phone and a charger, and under a read-it-once rule anything arriving after that
+one moment was invisible for good.
+
+Past that window a day is settled and costs nothing to skip, which is what keeps
+this affordable on every refresh. The days older than the last week -- which no
+sweep was ever going to reach -- are healed a few at a time in the background,
+walking back as far as there is any evidence you were using the app, and no
+further than ninety days. Where the source has genuinely forgotten a date, the
+figure already stored is kept rather than replaced with nothing.
+
+**The Activity card says how many past days changed**, for the same reason the
+glucose backfill does: a total that grew by four thousand between two glances,
+with nothing on screen to explain it, is harder to trust than one that says what
+happened.
+
 ## Light and dark
 
 Follows your phone by default, and **Settings → Theme** overrides it: *System*,

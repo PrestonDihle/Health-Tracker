@@ -175,7 +175,39 @@ data class HealthDaySnapshot(
     val saturatedFatGrams: Float? = null,
     val sodiumMg: Float? = null,
     val syncedAt: Instant,
-)
+) {
+    /**
+     * True when this row records no measurement at all — every field but the
+     * date and the stamp is null.
+     *
+     * Exists for one rule in [com.prestondihle.healthtracker.repository.TrackerRepository]:
+     * a read that comes back with nothing must not overwrite a row that has
+     * something in it. Health Connect will not return data from before thirty
+     * days prior to the first permission grant, so the deep history catch-up
+     * walks into a void at some point, and for those dates a frozen figure is
+     * strictly better than a hole. Not a general "is this day interesting"
+     * predicate — do not reuse it as one.
+     */
+    val isBlank: Boolean
+        get() =
+            steps == null &&
+                restingHeartRateBpm == null &&
+                averageHeartRateBpm == null &&
+                sleepMinutes == null &&
+                totalCalories == null &&
+                activeCalories == null &&
+                dietaryCalories == null &&
+                proteinGrams == null &&
+                carbGrams == null &&
+                fatGrams == null &&
+                bestMileSeconds == null &&
+                weightKg == null &&
+                spo2Percent == null &&
+                fiberGrams == null &&
+                sugarGrams == null &&
+                saturatedFatGrams == null &&
+                sodiumMg == null
+}
 
 @Entity(indices = [Index("timestamp")])
 data class BloodPressureReading(

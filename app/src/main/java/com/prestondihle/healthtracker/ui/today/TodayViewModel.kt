@@ -999,7 +999,17 @@ class TodayViewModel(
             // on every chart fed by the daily snapshot. Last of the three,
             // because it is the only part of a refresh about days the reader is
             // not currently looking at.
-            daysRecovered.value = repository.resyncFinishedDays(today, now).getOrDefault(0)
+            //
+            // Then the history the week-long sweep will never reach, a bounded
+            // budget at a time -- after the sweep, so the days it heals have
+            // already dropped out of the walk. Both counts fold into one figure
+            // because the
+            // reader is being told one thing -- how many past days changed under
+            // them -- and which of the two mechanisms found each is not a
+            // distinction they have any use for.
+            daysRecovered.value =
+                repository.resyncFinishedDays(today, now).getOrDefault(0) +
+                    repository.deepResyncStaleDays(today, now).getOrDefault(0)
             syncing.value = false
         }
     }
