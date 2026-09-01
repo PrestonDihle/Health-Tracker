@@ -1,14 +1,22 @@
 package com.prestondihle.healthtracker.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -19,6 +27,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -164,6 +173,175 @@ internal fun TrackerCard(
                 )
             }
             content()
+        }
+    }
+}
+
+
+/**
+ * Height of a range chip, and the reason these are not [androidx.compose.material3.FilterChip]s.
+ *
+ * A stock filter chip reserves 16dp inside each end of its label and stands 32dp
+ * tall, which puts six of them at about 360dp on a screen that has 344dp to give
+ * -- so the six windows on Today wrapped onto a second row that cost more of the
+ * fold than the graph under it gained. Squeezing a stock chip does not work: its
+ * padding is not a parameter, so a narrower box ellipsises the label instead, and
+ * "48h" becoming "4..." is worse than a second row.
+ */
+private val ChipHeight = 28.dp
+
+/**
+ * One button of a range picker: selected or not, and exactly as wide as it is
+ * given.
+ *
+ * Colours follow the filter chip it replaces -- filled with the secondary
+ * container when chosen, outlined when not -- so the two rows this is used on
+ * still read as the same control they always were.
+ */
+@Composable
+internal fun CompactChoiceChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // The `selected` overload rather than the plain `onClick` one, and the
+    // difference is not cosmetic: it is what puts `Selected` in the semantics
+    // tree. A filter chip carries that for free, and the Activity render test
+    // waits on `isSelected()` to know a range change has actually landed --
+    // without it that wait would time out on a screen behaving perfectly.
+    Surface(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier.height(ChipHeight),
+        shape = RoundedCornerShape(ChipHeight / 2),
+        color =
+            if (selected) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.surface,
+        contentColor =
+            if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        border =
+            if (selected) null
+            else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 2.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * A row -- or a small grid -- of equally wide range buttons.
+ *
+ * Every chip takes the same share of the width whatever its label says, which is
+ * what makes "7 days" and "365 days" sit under each other rather than staggered.
+ * The width comes from [perRow] rather than from the number of options, so a
+ * short last row keeps the same button size as a full one instead of stretching
+ * its chips across the gap.
+ *
+ * A wrapping row was what these replaced, and the reason is the same on both
+ * tabs: where the chips land then depends on how long the labels happen to be,
+ * and adding one option silently reflows the rest.
+ */
+@Composable
+internal fun <T> ChoiceChipRow(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+    perRow: Int,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.chunked(perRow).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                row.forEach { option ->
+                    CompactChoiceChip(
+                        label = label(option),
+                        selected = option == selected,
+                        onClick = { onSelect(option) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                // Holds the last row's chips to the width the full rows use. A
+                // grid whose bottom row is wider than the one above it is the
+                // untidiness this component exists to remove.
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/**
+ * Back one, forward one, with what is being looked at named in between.
+ *
+ * For the cards that show a single day or a single night. Those cards used to
+ * answer only for the newest one, which meant the app could draw a year of steps
+ * as a chart and could not say what Tuesday's had been -- and the figures are
+ * per-day figures, so a chart is not a substitute.
+ *
+ * Forward is disabled at the newest rather than hidden, because the pair is what
+ * says the control is a walk through time; a lone back arrow reads as a menu.
+ * The label is a button too, and it goes back to the newest -- the way out of a
+ * walk taken too far, without counting taps back.
+ */
+@Composable
+internal fun DayStepper(
+    label: String,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+    onReset: () -> Unit,
+    canGoBack: Boolean,
+    canGoForward: Boolean,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack, enabled = canGoBack, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = "Previous day",
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        TextButton(
+            onClick = onReset,
+            enabled = canGoForward,
+            contentPadding = CompactButtonPadding,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                // The colour of a label rather than of a link, because tapping it
+                // is a shortcut and not the thing to do next. Disabled on the
+                // newest, where it would do nothing.
+                color =
+                    if (canGoForward) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onForward, enabled = canGoForward, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Next day",
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }

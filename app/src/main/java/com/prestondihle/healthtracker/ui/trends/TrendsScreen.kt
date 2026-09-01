@@ -1,15 +1,12 @@
 ﻿package com.prestondihle.healthtracker.ui.trends
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prestondihle.healthtracker.data.MovementType
 import com.prestondihle.healthtracker.ui.components.BarChart
+import com.prestondihle.healthtracker.ui.components.ChoiceChipRow
 import com.prestondihle.healthtracker.ui.components.LineSeries
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
 import com.prestondihle.healthtracker.ui.components.LineStyle
@@ -26,7 +24,6 @@ import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -45,17 +42,18 @@ fun TrendsScreen(viewModel: TrendsViewModel, orderViewModel: CardOrderViewModel)
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
         item {
-            // Six spelled-out labels overrun a phone's width; wrapping keeps
-            // them all visible rather than clipping the longest.
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TrendsRange.entries.forEach { option ->
-                    FilterChip(
-                        selected = state.range == option,
-                        onClick = { viewModel.setRange(option) },
-                        label = { Text(option.label) },
-                    )
-                }
-            }
+            // Three to a row, two rows, every button the same width. Six
+            // spelled-out labels overrun a phone's width, and left to wrap they
+            // broke wherever the labels happened to end -- four on the first row
+            // and two on the second, with "7 days" a third of the width of
+            // "365 days" beside it. A fixed three keeps the grid square.
+            ChoiceChipRow(
+                options = TrendsRange.entries,
+                selected = state.range,
+                label = { it.label },
+                onSelect = viewModel::setRange,
+                perRow = 3,
+            )
         }
 
         // Activity carries the movement trends. Waist, weight, blood pressure,

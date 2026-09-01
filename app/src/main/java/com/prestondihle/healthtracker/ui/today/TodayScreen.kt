@@ -57,6 +57,7 @@ import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartMarker
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.ChartShade
+import com.prestondihle.healthtracker.ui.components.ChoiceChipRow
 import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.Metric
@@ -83,7 +84,6 @@ private val ChartHeight = 300.dp
  * are actually being absorbed over, drawn against the blood sugar, ketones,
  * heart rate and walking they are meant to explain.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TodayScreen(
     viewModel: TodayViewModel,
@@ -119,18 +119,18 @@ fun TodayScreen(
         }
 
         item {
-            // Six windows do not fit on one row of a phone, and a row that
-            // scrolls sideways hides the widest options behind a gesture nobody
-            // knows is there. Wrapping shows all six at once.
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MasterRange.entries.forEach { option ->
-                    FilterChip(
-                        selected = state.range == option,
-                        onClick = { viewModel.setRange(option) },
-                        label = { Text(option.label) },
-                    )
-                }
-            }
+            // All six on one row, which needed the chips shrinking to manage --
+            // see CompactChoiceChip. They wrapped onto a second row before, and
+            // the row above the graph is the most expensive row on the tab: the
+            // whole point of this screen is the plot, and it started below the
+            // fold on a phone because the range picker was two rows tall.
+            ChoiceChipRow(
+                options = MasterRange.entries,
+                selected = state.range,
+                label = { it.label },
+                onSelect = viewModel::setRange,
+                perRow = MasterRange.entries.size,
+            )
         }
 
         if (state.healthState != HealthPermissionState.GRANTED) {
