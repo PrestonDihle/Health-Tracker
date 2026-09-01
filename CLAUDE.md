@@ -1399,21 +1399,25 @@ already dropped out of the walk — and adds the two counts into the one `daysRe
 reader is being told one thing, how many past days moved under them, and which mechanism found each
 is not a distinction they have any use for.
 
-**Changing the step source does not re-open days that have already settled, and that was measured
-rather than reasoned about.** `setPreferredStepsPackage` re-syncs *today*, on the reasoning that the
-cached figure came from the old preference — but that reasoning covers every cached day equally, and
-the settle window is what stops it being acted on. On the phone this landed on, the sweep and the deep
-walk healed 15 August through 29 August while the Garmin pin was still set, so those days hold pinned
-figures permanently. Checked against Garmin Connect's own screen afterwards: every one of them matches
-it **exactly** except the two that carried a tracked activity, where the pinned read is 24% and 47%
+**Changing the step source does not re-open days that have already settled, and that is a decision,
+not an omission.** `setPreferredStepsPackage` re-syncs *today*, on the reasoning that the cached
+figure came from the old preference — but that reasoning covers every cached day equally, and the
+settle window is what stops it being acted on. On the phone this landed on, the sweep and the deep
+walk healed 15 August through 29 August while the Garmin pin was still set, so those days settled on
+pinned figures. Checked against Garmin Connect's own screen afterwards: every one of them matched it
+**exactly** except the two that carried a tracked activity, where the pinned read was 24% and 47%
 short (25 Aug 11,446 against 8,659; 24 Aug 6,762 against 3,559). The merged days either side sit
-within 3.5%.
+within 3.5% — which is the pattern that confirms the merge from outside: exact agreement wherever no
+activity ran, a small honest gap wherever one did.
 
-So a pin change arguably ought to invalidate the history rather than only today. It is **not
-implemented** — it makes one tap in Settings spend a bounded burst of Health Connect reads, which is a
-policy call rather than a bug fix. Widening `FINISHED_DAY_SETTLE` to cover it would be the wrong
-instrument: it would charge every refresh, for ever, for something that happens when a setting
-changes. The stopgap is the walk-back refresh, which re-reads the shown day unguarded.
+Invalidating history on a pin change was proposed and **the owner declined it (2026-09-01) — do not
+implement it without asking again.** The cost side of the call: one tap in Settings would spend a
+bounded burst of Health Connect reads, for an event that in practice hit one reader on exactly two
+days. The remedy is the walk-back refresh, which re-reads the shown day unguarded — it was applied to
+both days the same evening (24 Aug 3,643 → 6,846, 25 Aug 8,659 → 12,182, each equal to its bucket
+sum), so no settled day still carries a pinned undercount. Widening `FINISHED_DAY_SETTLE` to cover
+the case stays rejected for the reason above: it would charge every refresh, for ever, for something
+that happens when a setting changes.
 
 **The step count and the chart under it can no longer disagree, and that is by construction rather
 than by timing.** `syncHealthData` reads the day's merged slices, writes them to `StepBucket`, and
