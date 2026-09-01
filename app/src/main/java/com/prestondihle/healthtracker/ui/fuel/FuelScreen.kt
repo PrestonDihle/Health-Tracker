@@ -928,18 +928,36 @@ private fun HydrationCard(
             progress = { if (goalMl > 0) (state.hydrationMl.toFloat() / goalMl).coerceIn(0f, 1f) else 0f },
             modifier = Modifier.fillMaxWidth().height(BarHeight),
         )
-        // Two sizes only, one imperial and one metric, matching the two vessels
-        // actually drunk from. A row of five buttons was more choice than the
-        // decision deserves.
+        // Four sizes over two rows, imperial above metric. Two of them are new
+        // and the smallest is new twice over: a sip taken with a tablet is a real
+        // entry and had to be rounded up to four ounces or left out, and 500 ml
+        // is the bottle -- logging one used to cost five taps of a hundred.
+        //
+        // Two rows rather than one because four buttons across a phone leaves
+        // each of them too narrow to read and too narrow to hit, and this is the
+        // control most often used one-handed while holding the glass. The split
+        // is by unit rather than by size, so a reader looking for ounces is
+        // looking along one row rather than at alternate buttons.
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(
+                onClick = { onAdd(Units.flOzToMl(1f)) },
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("+1 oz")
+            }
             FilledTonalButton(
                 onClick = { onAdd(Units.flOzToMl(4f)) },
                 contentPadding = CompactButtonPadding,
             ) {
                 Text("+4 oz")
             }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilledTonalButton(onClick = { onAdd(100) }, contentPadding = CompactButtonPadding) {
                 Text("+100 ml")
+            }
+            FilledTonalButton(onClick = { onAdd(500) }, contentPadding = CompactButtonPadding) {
+                Text("+500 ml")
             }
         }
 
@@ -1023,6 +1041,15 @@ private fun HydrationCard(
 
 /** Starting amount for a new dose, matching the usual serving actually drunk. */
 private const val DEFAULT_CAFFEINE_MG = 70
+
+/**
+ * The dose behind the caffeine card's one quick-add button.
+ *
+ * A tablet, which is the only amount here that is genuinely fixed -- a cup
+ * varies with the cup, and [DEFAULT_CAFFEINE_MG] is a starting point for the
+ * dialog rather than a claim about what was drunk.
+ */
+private const val QUICK_CAFFEINE_MG = 35
 
 /** Null means the dialog is logging a new dose; a value means it is editing that one. */
 private sealed interface CaffeineDialog {
@@ -1316,6 +1343,21 @@ private fun CaffeineCard(
         )
 
         HorizontalDivider()
+
+        // A quick add, on its own row above the dialog button. The one dose that
+        // is always the same is the tablet -- 35 mg, taken without thinking about
+        // it -- and putting it behind the dialog meant dialling a stepper to a
+        // number that never varies. Anything else still goes through "Log
+        // caffeine", where the amount and the time can both be set: a row of
+        // guesses at cup sizes would be several buttons all of which are wrong.
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(
+                onClick = { onLog(QUICK_CAFFEINE_MG, Instant.now()) },
+                contentPadding = CompactButtonPadding,
+            ) {
+                Text("+$QUICK_CAFFEINE_MG mg")
+            }
+        }
 
         LogButton("Log caffeine", onClick = { dialog = CaffeineDialog.New })
 
