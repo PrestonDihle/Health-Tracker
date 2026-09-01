@@ -59,6 +59,7 @@ import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.ChartShade
 import com.prestondihle.healthtracker.ui.components.ChoiceChipRow
 import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
+import com.prestondihle.healthtracker.ui.components.DayStepper
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.Metric
 import com.prestondihle.healthtracker.ui.components.SeriesKind
@@ -152,7 +153,12 @@ fun TodayScreen(
             cards =
                 listOf(
                     ReorderableCard("activity") {
-                        ActivityCard(state = state, onRefresh = viewModel::refresh)
+                        ActivityCard(
+                            state = state,
+                            onRefresh = viewModel::refresh,
+                            onStepDay = viewModel::stepDay,
+                            onBackToToday = viewModel::backToToday,
+                        )
                     },
                     ReorderableCard("chart") {
                         CombinedChartCard(
@@ -185,7 +191,12 @@ fun TodayScreen(
  * displaying the very night it said it did not have.
  */
 @Composable
-private fun ActivityCard(state: TodayUiState, onRefresh: () -> Unit) {
+private fun ActivityCard(
+    state: TodayUiState,
+    onRefresh: () -> Unit,
+    onStepDay: (Long) -> Unit,
+    onBackToToday: () -> Unit,
+) {
     TrackerCard(
         title = "Activity",
         action = {
@@ -194,6 +205,19 @@ private fun ActivityCard(state: TodayUiState, onRefresh: () -> Unit) {
             }
         },
     ) {
+        // Above the figures rather than in the title row, where the refresh and
+        // the fold chevron already are: three controls squeezed against a title
+        // is where a mis-tap on the fold costs the reader the card they were
+        // reading. It is inside the fold, so a folded card takes its day with it.
+        DayStepper(
+            label = state.dayLabel(),
+            onBack = { onStepDay(1) },
+            onForward = { onStepDay(-1) },
+            onReset = onBackToToday,
+            canGoBack = state.dayOffset < MAX_DAY_OFFSET,
+            canGoForward = state.dayOffset > 0,
+        )
+
         val snapshot = state.snapshot
         Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
@@ -273,8 +297,40 @@ private fun ActivityCard(state: TodayUiState, onRefresh: () -> Unit) {
         // The same row Wellness shows, from the one copy: two screens printing
         // the day's macros must not disagree about what is in them.
         MacroDetailRow(snapshot)
+
+        // Said out loud, on the card whose figures just moved. A day that was
+        // only ever read at breakfast is corrected quietly the next time the app
+        // opens, and a step count that grew by four thousand between two glances
+        // with nothing on screen to explain it is indistinguishable from one that
+        // had been wrong all along.
+        if (state.daysRecovered > 0) {
+            Text(
+                "Filled in ${state.daysRecovered} earlier " +
+                    (if (state.daysRecovered == 1) "day" else "days") +
+                    " that had only been read part-way through.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
+
+/**
+ * What the day stepper prints between its arrows.
+ *
+ * Today and yesterday by name because that is what they are called; everything
+ * older by weekday and date, since "6 days ago" is a figure the reader would
+ * have to convert before it meant anything. The year is left off -- the walk
+ * stops at [MAX_DAY_OFFSET] days, so no two days it can reach share a date.
+ */
+private fun TodayUiState.dayLabel(): String =
+    when (dayOffset) {
+        0L -> "Today"
+        1L -> "Yesterday"
+        else -> STEPPED_DAY.format(selectedDay)
+    }
+
+private val STEPPED_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
 
 /**
  * The lines one unit is carried by.
@@ -792,7 +848,7 @@ private fun TodaySummaryStrip(
 ) {
     val goals = state.goals
     val chips = buildList {
-        state.snapshot?.steps?.let { steps ->
+        state.todaySnapshot?.steps?.let { steps ->
             add(
                 SummaryChip(
                     // A tenth of a thousand on the count and whole thousands on
@@ -813,7 +869,7 @@ private fun TodaySummaryStrip(
                 )
             )
         }
-        state.snapshot?.sleepMinutes?.let { minutes ->
+        state.todaySnapshot?.sleepMinutes?.let { minutes ->
             add(
                 SummaryChip(
                     text = Units.formatMinutes(minutes),
@@ -825,7 +881,7 @@ private fun TodaySummaryStrip(
         summary.timeInRange?.let {
             add(SummaryChip("${(it * 100).roundToInt()}% in range", route = "fuel"))
         }
-        state.netCalories?.let {
+        state.todayNetCalories?.let {
             // Signed, because the sign is the entire content: "-480" and "480"
             // are a deficit and a surplus, and the strip has no room to say which.
             add(SummaryChip(if (it < 0) "$it kcal" else "+$it kcal", route = "fuel"))

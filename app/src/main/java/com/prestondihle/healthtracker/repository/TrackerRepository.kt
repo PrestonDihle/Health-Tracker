@@ -72,6 +72,17 @@ import java.time.ZoneId
 private val HEART_RATE_SYNC_HORIZON: Duration = Duration.ofHours(48)
 
 /**
+ * How far back [TrackerRepository.resyncFinishedDays] looks for a day that was
+ * only ever read while it was still being lived.
+ *
+ * A week. Long enough to cover a phone left alone over a holiday, short enough
+ * that the one-off catch-up the first run performs is bounded -- and the steady
+ * state is one day, re-read once, the first time the app is opened after
+ * midnight.
+ */
+private const val FINISHED_DAY_LOOKBACK = 7L
+
+/**
  * Single entry point for data. Owns the conversion between the domain's
  * [Instant]/[LocalDate] vocabulary and the epoch-millisecond bounds the DAO
  * expects, so no caller has to repeat that arithmetic.
@@ -507,6 +518,17 @@ class TrackerRepository(
     fun getHeartRateSince(since: Instant): Flow<List<HeartRateBucket>> =
         dao.getHeartRateBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
 
+    /**
+     * Heart rate over a closed span, for a chart looking at a fixed stretch of
+     * the past rather than at now.
+     *
+     * [getHeartRateSince] is open-ended forward, which is right for a window
+     * anchored on this moment and wrong for one anchored on a night three weeks
+     * ago -- that read would load every bucket since, to draw eight hours.
+     */
+    fun getHeartRateBetween(from: Instant, to: Instant): Flow<List<HeartRateBucket>> =
+        dao.getHeartRateBucketsBetween(from.toEpochMilli(), to.toEpochMilli())
+
     fun getStepBucketsSince(since: Instant): Flow<List<StepBucket>> =
         dao.getStepBucketsBetween(since.toEpochMilli(), Long.MAX_VALUE)
 
@@ -539,16 +561,22 @@ class TrackerRepository(
         }
 
     /**
-     * The most recent night, for the Today card.
+     * One night, counted back from the most recent, for the card that draws a
+     * single night at a time.
      *
      * Its own query rather than the first of [getSleepNightsSince], so the card
      * still has something to show on a morning when the window it would have been
      * found in holds nothing -- a phone that did not sync for a day still knows
      * what the last night it saw was.
+     *
+     * [nightsBack] counts nights, not days, and that is the whole reason the
+     * stepper on the card works at all: nights the watch was not worn simply are
+     * not rows, so a walk by date would spend taps on blanks between the two
+     * nights the reader is comparing.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun getLatestSleepNight(): Flow<SleepNight?> =
-        dao.getLatestSleepSession().flatMapLatest { session ->
+    fun getSleepNight(nightsBack: Int = 0): Flow<SleepNight?> =
+        dao.getSleepSessionBack(nightsBack).flatMapLatest { session ->
             if (session == null) flowOf(null)
             else
                 dao.getSleepStagesFor(session.startMillis).map { stages ->
@@ -559,6 +587,9 @@ class TrackerRepository(
                     )
                 }
         }
+
+    /** How many nights are cached, so the stepper knows when it has run out. */
+    fun countSleepNights(): Flow<Int> = dao.countSleepSessions()
 
     /**
      * Moves a meal to when it was actually eaten.
@@ -831,54 +862,107 @@ class TrackerRepository(
      * they are a time series, not a daily total. Duplicate CGM samples are
      * rejected by the unique index on `externalId`.
      */
-    suspend fun syncHealthData(date: LocalDate): Result<Unit> = runCatching {
-        val preferredSteps = dao.getUserSettings().first()?.preferredStepsPackage
-        val day = healthDataSource.readDay(date, preferredSteps)
+    suspend fun syncHealthData(date: LocalDate, now: Instant = Instant.now()): Result<Unit> =
+        runCatching {
+            val preferredSteps = dao.getUserSettings().first()?.preferredStepsPackage
+            val day = healthDataSource.readDay(date, preferredSteps)
 
-        dao.upsertHealthSnapshot(
-            HealthDaySnapshot(
-                date = date,
-                steps = day.steps,
-                restingHeartRateBpm = day.restingHeartRateBpm,
-                averageHeartRateBpm = day.averageHeartRateBpm,
-                sleepMinutes = day.sleepMinutes,
-                totalCalories = day.totalCalories,
-                activeCalories = day.activeCalories,
-                dietaryCalories = day.dietaryCalories,
-                proteinGrams = day.proteinGrams,
-                carbGrams = day.carbGrams,
-                fatGrams = day.fatGrams,
-                bestMileSeconds = day.bestMileSeconds,
-                weightKg = day.weightKg,
-                spo2Percent = day.spo2Percent,
-                fiberGrams = day.fiberGrams,
-                sugarGrams = day.sugarGrams,
-                saturatedFatGrams = day.saturatedFatGrams,
-                sodiumMg = day.sodiumMg,
-                syncedAt = Instant.now(),
+            dao.upsertHealthSnapshot(
+                HealthDaySnapshot(
+                    date = date,
+                    steps = day.steps,
+                    restingHeartRateBpm = day.restingHeartRateBpm,
+                    averageHeartRateBpm = day.averageHeartRateBpm,
+                    sleepMinutes = day.sleepMinutes,
+                    totalCalories = day.totalCalories,
+                    activeCalories = day.activeCalories,
+                    dietaryCalories = day.dietaryCalories,
+                    proteinGrams = day.proteinGrams,
+                    carbGrams = day.carbGrams,
+                    fatGrams = day.fatGrams,
+                    bestMileSeconds = day.bestMileSeconds,
+                    weightKg = day.weightKg,
+                    spo2Percent = day.spo2Percent,
+                    fiberGrams = day.fiberGrams,
+                    sugarGrams = day.sugarGrams,
+                    saturatedFatGrams = day.saturatedFatGrams,
+                    sodiumMg = day.sodiumMg,
+                    syncedAt = now,
+                )
             )
-        )
 
-        day.restingHeartRateBpm?.let {
-            dao.upsertRestingHeartRate(RestingHeartRate(date, it, DataSourceEnum.HEALTH_CONNECT))
+            day.restingHeartRateBpm?.let {
+                dao.upsertRestingHeartRate(RestingHeartRate(date, it, DataSourceEnum.HEALTH_CONNECT))
+            }
+
+            if (day.glucoseSamples.isNotEmpty()) {
+                val known =
+                    dao.getKnownGlucoseExternalIds(startOfDayMillis(date), endOfDayMillis(date)).toSet()
+                val fresh =
+                    day.glucoseSamples
+                        .filter { it.externalId !in known }
+                        .map {
+                            BloodSugarReading(
+                                timestamp = it.time,
+                                mgDl = it.mgDl,
+                                source = DataSourceEnum.HEALTH_CONNECT,
+                                externalId = it.externalId,
+                            )
+                        }
+                if (fresh.isNotEmpty()) dao.insertBloodSugarReadings(fresh)
+            }
         }
 
-        if (day.glucoseSamples.isNotEmpty()) {
-            val known =
-                dao.getKnownGlucoseExternalIds(startOfDayMillis(date), endOfDayMillis(date)).toSet()
-            val fresh =
-                day.glucoseSamples
-                    .filter { it.externalId !in known }
-                    .map {
-                        BloodSugarReading(
-                            timestamp = it.time,
-                            mgDl = it.mgDl,
-                            source = DataSourceEnum.HEALTH_CONNECT,
-                            externalId = it.externalId,
-                        )
-                    }
-            if (fresh.isNotEmpty()) dao.insertBloodSugarReadings(fresh)
-        }
+    /**
+     * Re-reads [date] if what is cached for it was written before the day ended.
+     *
+     * The bug this exists for: [syncHealthData] was only ever called with *today*,
+     * so a day's snapshot froze at whatever the last sync of that day happened to
+     * see and was never corrected. Every figure on it -- steps, calories, sleep,
+     * macros, resting heart rate -- is a running total at the moment the app was
+     * last opened, which on a phone opened at breakfast is a morning being
+     * reported as a day. It can only ever undercount, and it never disagreed with
+     * itself loudly enough to be noticed: the *chart* under the card is drawn from
+     * the step buckets, which the rolling time-series sync does keep re-reading,
+     * so the two halves of one screen were quietly answering different questions.
+     *
+     * The guard is what makes this cheap rather than a second full sync on every
+     * refresh. A day is stale exactly while `syncedAt` predates its own end, and
+     * re-reading it stamps a time after that end -- so a day is re-read once,
+     * ever, and every later pass costs one indexed row read and stops.
+     *
+     * Returns whether a read was actually spent, so the caller can say what it
+     * changed rather than silently redrawing a chart the reader was looking at.
+     */
+    suspend fun syncFinishedDay(date: LocalDate, now: Instant = Instant.now()): Boolean {
+        val dayEnd = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+        // A day still running belongs to the ordinary sync. Re-reading it here
+        // would be a second read of the same figures a moment apart, and would
+        // never stop qualifying however many times it ran.
+        if (now.isBefore(dayEnd)) return false
+
+        val cached = dao.getHealthSnapshot(date).first()
+        // Absent counts as stale, deliberately: a day the app was never opened on
+        // has no row at all, which draws as a hole in every chart on Activity and
+        // Wellness rather than as the day it was.
+        if (cached != null && !cached.syncedAt.isBefore(dayEnd)) return false
+
+        return syncHealthData(date, now).isSuccess
+    }
+
+    /**
+     * Brings the last week of finished days up to date, and reports how many
+     * needed it.
+     *
+     * Called from the same refresh that syncs today, after it: today is the read
+     * the reader is waiting on, and making them wait behind a week of history the
+     * first time they open the update would be the wrong order.
+     */
+    suspend fun resyncFinishedDays(
+        today: LocalDate = LocalDate.now(zoneId),
+        now: Instant = Instant.now(),
+    ): Result<Int> = runCatching {
+        (1..FINISHED_DAY_LOOKBACK).count { back -> syncFinishedDay(today.minusDays(back), now) }
     }
 
     /**

@@ -685,7 +685,7 @@ class ScreenRenderTest {
     @Test
     fun `sleep card renders a staged night`() {
         val repository = seededRepository()
-        val night = runBlocking { repository.getLatestSleepNight().first() }
+        val night = runBlocking { repository.getSleepNight().first() }
         val heartRate = runBlocking {
             repository.getHeartRateSince(java.time.Instant.now().minus(java.time.Duration.ofHours(36)))
                 .first()

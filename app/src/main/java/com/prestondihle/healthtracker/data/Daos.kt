@@ -438,9 +438,22 @@ interface TrackerDao {
     )
     fun getSleepSessionsBetween(start: Long, end: Long): Flow<List<SleepSessionEntry>>
 
-    /** The most recently finished night, for the card that says "last night". */
-    @Query("SELECT * FROM SleepSessionEntry ORDER BY endMillis DESC LIMIT 1")
-    fun getLatestSleepSession(): Flow<SleepSessionEntry?>
+    /**
+     * The night [nightsBack] back from the most recent one -- zero being the
+     * night the card opens on -- for stepping back through them.
+     *
+     * `OFFSET` over the same ordering rather than a date lookup, because a night
+     * is not a date: it starts the evening before it ends, some nights are
+     * missing entirely, and a nap the watch scored as sleep is a row here too.
+     * Counting rows back is the only walk that always lands on a night that
+     * exists -- a date walk would hand back nulls for the days nothing was worn.
+     */
+    @Query("SELECT * FROM SleepSessionEntry ORDER BY endMillis DESC LIMIT 1 OFFSET :nightsBack")
+    fun getSleepSessionBack(nightsBack: Int): Flow<SleepSessionEntry?>
+
+    /** How many nights are held, so a walk back knows where to stop. */
+    @Query("SELECT COUNT(*) FROM SleepSessionEntry")
+    fun countSleepSessions(): Flow<Int>
 
     @Query(
         "SELECT * FROM SleepStageEntry " +

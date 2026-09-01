@@ -39,6 +39,8 @@ import com.prestondihle.healthtracker.domain.UsualIntake
 import com.prestondihle.healthtracker.health.HealthPermissionState
 import com.prestondihle.healthtracker.repository.TrackerRepository
 import com.prestondihle.healthtracker.ui.components.DayPoint
+import com.prestondihle.healthtracker.ui.today.MAX_DAY_OFFSET
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -122,6 +124,16 @@ private val CAFFEINE_EVENING_HOUR = java.time.LocalTime.of(21, 0)
  * so the surplus is never seen.
  */
 private val SLEEP_HEART_RATE_HISTORY: Duration = Duration.ofHours(36)
+
+/**
+ * How far either side of a night's own bounds the heart rate is fetched.
+ *
+ * A margin rather than an exact clip: the buckets are five minutes wide and are
+ * stamped at their start, so the one containing the moment the reader fell
+ * asleep begins before the night does and would be dropped by a read that
+ * matched the bounds exactly.
+ */
+private val SLEEP_HEART_RATE_MARGIN: Duration = Duration.ofMinutes(15)
 
 /** Used only when the plan has no fast scheduled near now. */
 private const val DEFAULT_GOAL_MINUTES = 16 * 60
@@ -263,6 +275,27 @@ data class WellnessUiState(
     val sleep: SleepNight? = null,
     /** Buckets spanning the night, for the trace drawn under the hypnogram. */
     val sleepHeartRate: List<HeartRateBucket> = emptyList(),
+    /**
+     * Which night the card is showing, counted back from the newest, and how
+     * many there are to walk through.
+     *
+     * The count is what tells the back arrow when it has run out. Without it the
+     * stepper would keep offering another night and hand back an empty card, and
+     * the reader would have no way to tell "nothing recorded" from "nothing
+     * left".
+     */
+    val nightOffset: Int = 0,
+    val nightCount: Int = 0,
+    /**
+     * Which day the activity card is reporting, and how far back that is.
+     *
+     * Only that card reads it -- [caloriesEaten] and [netCalories] are derived
+     * from the same snapshot and are printed nowhere else on this screen. Every
+     * other figure here is still today's, which is why this is a field on the
+     * state rather than a mode the whole screen is in.
+     */
+    val activityDay: LocalDate = LocalDate.now(),
+    val activityDayOffset: Long = 0L,
     val dailyLog: DailyLog = DailyLog(LocalDate.now()),
     /** Recent daily logs for the mood and reading trends shown next to their inputs. */
     val logHistory: List<DailyLog> = emptyList(),
@@ -616,6 +649,10 @@ private data class HealthBundle(
     val bestMileSeconds: Int?,
     val sleep: SleepNight?,
     val heartRate: List<HeartRateBucket>,
+    val nightOffset: Int,
+    val nightCount: Int,
+    val day: LocalDate,
+    val dayOffset: Long,
 )
 
 private data class MetabolicBundle(
@@ -646,6 +683,27 @@ class WellnessViewModel(
      */
     private val glucoseRecovered = MutableStateFlow(0)
     private val glucoseWindow = MutableStateFlow(GlucoseWindow.DAY)
+
+    /**
+     * How many nights back the sleep card is showing, zero being the newest.
+     *
+     * Nights, not days. The card walks the rows the watch actually wrote, so a
+     * weekend the watch was on the charger costs no taps -- where a walk by date
+     * would spend two of them on empty cards to get past it.
+     */
+    private val nightOffset = MutableStateFlow(0)
+
+    /**
+     * How many days back the activity card is showing, zero being today.
+     *
+     * Its own, and not shared with the Today tab's: the two are separate cards on
+     * separate screens, and a tab switch that silently moved the other one is a
+     * card whose heading changed while nobody was looking at it.
+     */
+    private val dayOffset = MutableStateFlow(0L)
+
+    /** The read fired by a tap on the day stepper, cancelled by the next tap. */
+    private var daySyncJob: Job? = null
 
     /**
      * Drives the fast timer. One second is fine for a clock read-out; adherence
@@ -749,20 +807,44 @@ class WellnessViewModel(
             }
         }
 
-    private val healthData: Flow<HealthBundle>
-        get() {
-            // Wide enough to hold the whole of last night however late this
-            // morning it is read, and no wider: these buckets exist only to be
-            // clipped to the night's own bounds by the chart, and a week of them
-            // would be fetched to draw eight hours.
-            val heartRateSince = Instant.now().minus(SLEEP_HEART_RATE_HISTORY)
-            return combine(
-                repository.getHealthSnapshot(today),
-                repository.getBestMileSecondsAllTime(),
-                repository.getLatestSleepNight(),
-                repository.getHeartRateSince(heartRateSince),
-            ) { snapshot, bestMile, sleep, heartRate ->
-                HealthBundle(snapshot, bestMile, sleep, heartRate)
+    /**
+     * The night on screen, the day on screen, and the heart rate drawn under the
+     * hypnogram.
+     *
+     * Nested rather than one `combine` because the heart-rate window depends on
+     * which night was found: a fixed span back from now is right for last night
+     * and useless for one three weeks ago, where it would fetch every bucket
+     * since to draw eight hours of them and clip the rest away.
+     *
+     * The two offsets are separate and stay that way. A night is not a day here
+     * -- the sleep card walks the rows the watch wrote and the activity card
+     * walks the calendar -- and one control moving both would leave the reader
+     * with no way to compare a night against the day that followed it.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val healthData: Flow<HealthBundle> =
+        combine(nightOffset, dayOffset, ::Pair).flatMapLatest { (back, daysBack) ->
+            repository.getSleepNight(back).flatMapLatest { night ->
+                // A night's own bounds, padded, when there is a night; otherwise
+                // the old fixed span, which is what an empty card asks for.
+                val heartRate =
+                    if (night == null) {
+                        repository.getHeartRateSince(Instant.now().minus(SLEEP_HEART_RATE_HISTORY))
+                    } else {
+                        repository.getHeartRateBetween(
+                            night.start.minus(SLEEP_HEART_RATE_MARGIN),
+                            night.end.plus(SLEEP_HEART_RATE_MARGIN),
+                        )
+                    }
+                val day = today.minusDays(daysBack)
+                combine(
+                    repository.getHealthSnapshot(day),
+                    repository.getBestMileSecondsAllTime(),
+                    heartRate,
+                    repository.countSleepNights(),
+                ) { snapshot, bestMile, buckets, nights ->
+                    HealthBundle(snapshot, bestMile, night, buckets, back, nights, day, daysBack)
+                }
             }
         }
 
@@ -807,6 +889,10 @@ class WellnessViewModel(
                     bestMileSeconds = health.bestMileSeconds,
                     sleep = health.sleep,
                     sleepHeartRate = health.heartRate,
+                    nightOffset = health.nightOffset,
+                    nightCount = health.nightCount,
+                    activityDay = health.day,
+                    activityDayOffset = health.dayOffset,
                     dailyLog = todayBundle.log ?: DailyLog(date),
                     logHistory = todayBundle.logHistory,
                     historyStart = date.minusDays(LOG_HISTORY_DAYS - 1),
@@ -1039,15 +1125,76 @@ class WellnessViewModel(
                     Instant.now().minus(SLEEP_HEART_RATE_HISTORY),
                     Instant.now(),
                 )
-                // After the day sync rather than before it: today's hole is the
-                // one the ordinary sync is most likely to have just filled, and
-                // going first would spend a query rediscovering that.
                 glucoseRecovered.value =
                     repository.backfillGlucoseGaps().getOrDefault(0)
+                // The days that ended while nobody was looking. Wellness plots
+                // more of the daily snapshot than any other tab -- weight,
+                // waist, resting heart rate, sleep hours, blood oxygen -- so a
+                // day frozen at the last moment the app was open on it is a
+                // wrong point on five charts here. Reported on Today's Activity
+                // card rather than twice.
+                repository.resyncFinishedDays(today)
                 syncing.value = false
             }
         }
     }
+
+    /**
+     * Walks the sleep card back a night, or forward when [delta] is negative.
+     *
+     * No sync of its own, unlike the Activity card's stepper: nights come from
+     * the time-series cache rather than a per-day read, so there is no "read that
+     * one night" to spend -- what is held is what the last [syncTimeSeries] over
+     * that stretch left, and a night older than that window is not fetchable one
+     * at a time.
+     */
+    fun stepNight(delta: Int) {
+        val furthest = (nightCount() - 1).coerceAtLeast(0)
+        nightOffset.value = (nightOffset.value + delta).coerceIn(0, furthest)
+    }
+
+    /**
+     * Walks the activity card back a day, or forward when [delta] is negative.
+     *
+     * The same bounds as Today's, and for the same reasons: forward stops at
+     * today because there is nothing after it to report, back stops at a year
+     * because that is the widest range any chart in the app draws.
+     */
+    fun stepActivityDay(delta: Long) {
+        val next = (dayOffset.value + delta).coerceIn(0L, MAX_DAY_OFFSET)
+        if (next == dayOffset.value) return
+        dayOffset.value = next
+        daySyncJob?.cancel()
+        daySyncJob =
+            viewModelScope.launch {
+                if (healthState.value != HealthPermissionState.GRANTED) return@launch
+                val day = today.minusDays(dayOffset.value)
+                // Today belongs to refreshHealth, which syncs the series with it.
+                if (day == today) return@launch
+                repository.syncFinishedDay(day)
+            }
+    }
+
+    /** Puts the activity card back on today. */
+    fun backToToday() {
+        dayOffset.value = 0L
+    }
+
+    /** Puts the card back on the newest night. */
+    fun backToLastNight() {
+        nightOffset.value = 0
+    }
+
+    /**
+     * How many nights are held, read off the state the card is already showing.
+     *
+     * Off [uiState] rather than a second query: the count is already assembled
+     * there for the card to disable its arrow with, and a second read would be a
+     * second answer to keep in step. Only reachable from a tap, which cannot
+     * happen while nothing is subscribed.
+     */
+    private fun nightCount(): Int = uiState.value.nightCount
+
 
     /** Adds to today's running total rather than replacing it, so several sittings accumulate. */
     fun logPages(pages: Int) {

@@ -63,6 +63,7 @@ import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.ChartAxis
 import com.prestondihle.healthtracker.ui.components.ChartSeries
 import com.prestondihle.healthtracker.ui.components.CompactButtonPadding
+import com.prestondihle.healthtracker.ui.components.DayStepper
 import com.prestondihle.healthtracker.ui.components.DualAxisTimeChart
 import com.prestondihle.healthtracker.ui.components.EntryList
 import com.prestondihle.healthtracker.ui.components.InlineLogButton
@@ -82,6 +83,7 @@ import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
 import com.prestondihle.healthtracker.ui.theme.LocalChartColors
+import com.prestondihle.healthtracker.ui.today.MAX_DAY_OFFSET
 import com.prestondihle.healthtracker.ui.theme.Pine
 import com.prestondihle.healthtracker.ui.trends.BloodPressureTrendCard
 import com.prestondihle.healthtracker.ui.trends.CompareCard
@@ -166,9 +168,20 @@ fun WellnessScreen(
             cards =
                 listOf(
                     ReorderableCard("activity") {
-                        ActivityCard(state = state, onRefresh = viewModel::refreshHealth)
+                        ActivityCard(
+                            state = state,
+                            onRefresh = viewModel::refreshHealth,
+                            onStepDay = viewModel::stepActivityDay,
+                            onBackToToday = viewModel::backToToday,
+                        )
                     },
-                    ReorderableCard("sleep") { SleepCard(state = state) },
+                    ReorderableCard("sleep") {
+                        SleepCard(
+                            state = state,
+                            onStepNight = viewModel::stepNight,
+                            onBackToLastNight = viewModel::backToLastNight,
+                        )
+                    },
                     ReorderableCard("metabolic") {
                         MetabolicCard(
                             state = state,
@@ -281,7 +294,12 @@ private fun MissingPermissionsPrompt(missing: Set<String>, onGrant: () -> Unit) 
 }
 
 @Composable
-private fun ActivityCard(state: WellnessUiState, onRefresh: () -> Unit) {
+private fun ActivityCard(
+    state: WellnessUiState,
+    onRefresh: () -> Unit,
+    onStepDay: (Long) -> Unit,
+    onBackToToday: () -> Unit,
+) {
     TrackerCard(
         title = "Activity",
         action = {
@@ -290,6 +308,18 @@ private fun ActivityCard(state: WellnessUiState, onRefresh: () -> Unit) {
             }
         },
     ) {
+        // The same stepper the copy of this card on Today carries, and the same
+        // reasoning: these are per-day figures, and a chart of the year is not a
+        // substitute for being able to ask what Tuesday's were.
+        DayStepper(
+            label = state.activityDayLabel(),
+            onBack = { onStepDay(1) },
+            onForward = { onStepDay(-1) },
+            onReset = onBackToToday,
+            canGoBack = state.activityDayOffset < MAX_DAY_OFFSET,
+            canGoForward = state.activityDayOffset > 0,
+        )
+
         val snapshot = state.snapshot
         Row(modifier = Modifier.fillMaxWidth()) {
             Metric(
@@ -445,14 +475,35 @@ internal fun MacroDetailRow(snapshot: HealthDaySnapshot?) {
 // only runs under a real layout pass, which is exactly the code no pure-JVM test
 // can reach.
 @Composable
-internal fun SleepCard(state: WellnessUiState) {
+internal fun SleepCard(
+    state: WellnessUiState,
+    onStepNight: (Int) -> Unit = {},
+    onBackToLastNight: () -> Unit = {},
+) {
     val chartColors = LocalChartColors.current
     val night = state.sleep
 
     TrackerCard(title = "Sleep") {
+        // Above the emptiness check, deliberately: a reader who has walked back
+        // to a night the watch missed still needs the arrow that brings them
+        // forward again, and a card that swapped its controls for a sentence
+        // would strand them there.
+        DayStepper(
+            label = state.nightLabel(),
+            onBack = { onStepNight(1) },
+            onForward = { onStepNight(-1) },
+            onReset = onBackToLastNight,
+            canGoBack = state.nightOffset < state.nightCount - 1,
+            canGoForward = state.nightOffset > 0,
+        )
+
         if (night == null) {
             Text(
-                "No sleep recorded yet. Nights arrive with the next Health Connect sync.",
+                if (state.nightCount == 0) {
+                    "No sleep recorded yet. Nights arrive with the next Health Connect sync."
+                } else {
+                    "Nothing recorded for this night."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -577,7 +628,42 @@ internal fun SleepCard(state: WellnessUiState) {
     }
 }
 
-/** `23:40`. The date is carried by the card, which is always about last night. */
+/**
+ * What the sleep card's stepper prints between its arrows.
+ *
+ * The morning a night ended on, because that is the day a reader files it under
+ * -- "Saturday's sleep" is the night that finished on Saturday, not the one that
+ * began on it. The newest is called *Last night* whatever date it carries: on a
+ * phone that has not synced for two days, "Thu 28 Aug" under the newest night is
+ * the more honest of the two labels and the one that reads as a bug.
+ */
+private fun WellnessUiState.nightLabel(): String {
+    if (nightOffset == 0) return "Last night"
+    val night = sleep ?: return "No night here"
+    return NIGHT_ENDING.format(night.end.atZone(zoneId).toLocalDate())
+}
+
+private val NIGHT_ENDING: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
+
+
+/**
+ * What the activity card's stepper prints between its arrows.
+ *
+ * Duplicated from Today's rather than shared, because the two cards read
+ * different states and a shared helper would have to take a date and an offset
+ * as loose arguments -- which is where a heading and its figures start being
+ * able to disagree.
+ */
+private fun WellnessUiState.activityDayLabel(): String =
+    when (activityDayOffset) {
+        0L -> "Today"
+        1L -> "Yesterday"
+        else -> STEPPED_DAY.format(activityDay)
+    }
+
+private val STEPPED_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
+
+/** `23:40`. The date is carried by the stepper above, not repeated on every row. */
 private fun Instant.asClockTime(state: WellnessUiState): String =
     DateTimeFormatter.ofPattern("h:mm a").format(atZone(state.zoneId))
 

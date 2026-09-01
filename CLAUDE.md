@@ -164,6 +164,7 @@ than by convention — see *Drawing weight, and what gets read as data* for why 
 | **legend** / **key** | the named swatches under the plot |
 | **crosshair** | the hairline a tap on the plot leaves |
 | **chips** | the range buttons — 3h/6h/12h/24h/48h/7d |
+| **stepper** | the back/forward pair on a card that shows one day or one night |
 | **switches** | the per-series on/off row on Master (`SeriesToggles`) |
 
 **Band and shade are the pair most easily confused**, and confusing them builds the wrong thing: a
@@ -209,8 +210,14 @@ injectable `ZoneId` defaulting to `systemDefault()`, which is what makes the tim
 (7/14/30/90/180/365 days) each drive both the chips and the query, so adding an entry widens the
 fetch with no second edit — `GLUCOSE_WINDOW_HOURS` is derived as the maximum, and Wellness queries
 once at that width so switching windows is a redraw rather than a round trip. Six chips no longer fit
-one row of a phone, so all three chip rows are `FlowRow`; a sideways-scrolling row would hide the
-widest options behind a gesture nobody knows is there.
+one row of a phone at stock size, and a sideways-scrolling row would hide the widest options behind a
+gesture nobody knows is there — so `ChoiceChipRow` in `CardKit.kt` lays them out at a fixed number
+per row, every button the same width, over its own `CompactChoiceChip` rather than `FilterChip`.
+Master takes all six on one row; `TrendsRange` takes three and three. A stock filter chip reserves
+16dp inside each end of its label and that padding is not a parameter, so squeezing one ellipsises
+the label instead of shrinking it — `48h` rendering as `4…` is worse than the second row it was
+meant to avoid. `GlucoseWindow` is the one still on `FlowRow`, since Wellness's chips sit inside a
+card rather than across the screen.
 
 **"No second edit" held for the cached day-indexed charts and for nothing else**, which is worth
 knowing before adding a seventh entry. Two cards on `TrendsRange` are not fed by a Room flow over
@@ -1056,6 +1063,18 @@ which stage — and they exist for the same reason `StepBucket` sits beside the 
 total: **a daily figure cannot say when.** Adding stage columns to the snapshot would have been the
 wrong shape twice over, since a night is not a day and does not belong to one.
 
+**The card walks nights, not dates, and that is why `getSleepNight` takes a count rather than a
+date.** `SleepSessionEntry` holds the nights the watch actually wrote, and a weekend on the charger
+is simply not rows — so a stepper keyed to dates would spend taps on blank cards to get between the
+two nights being compared. `DayStepper` on the Activity card is the other way round for the same
+reason: a *date* always exists, whether or not anything was recorded on it, and stepping by rows
+there would skip the days the reader is asking about. The two look identical and are indexed
+differently on purpose.
+
+The heart rate under the hypnogram follows the night rather than the clock (`getHeartRateBetween`,
+padded by a bucket either side). The open-ended `getHeartRateSince` is right for a window anchored
+on now and would, on a night three weeks back, fetch every bucket since to draw eight hours of them.
+
 **`SLEEP_DURATION_TOTAL` is the only aggregate `SleepSessionRecord` offers.** There is no per-stage
 aggregate, so stage detail can only come from a raw `readRecords`. That is the whole reason this is
 a cache of sessions rather than four more numbers on the snapshot.
@@ -1250,6 +1269,35 @@ Health Connect has no mile-split concept. `bestMileSeconds` is elapsed time divi
 normalised to a mile, over runs of at least a mile — so it is *average pace*, not a PR, and is
 labelled as such in the UI.
 
+**A finished day is read again once, and until it was the app undercounted every past day it had.**
+`syncHealthData` is keyed to a calendar day and was only ever called with *today*, from the two
+screens that sync — so a day's snapshot held whatever Health Connect had at the last moment the app
+happened to be open on it, and nothing asked again. On the author's phone that was every one of
+thirty-one cached days, written on average **two hours before its own midnight**, with step counts
+thousands under what Garmin Connect reported for the same dates. It can only undercount, and it is
+silent: a frozen figure looks exactly like a figure.
+
+It was also **half-visible on one screen**. The Activity card reads the snapshot; the chart under it
+is drawn from `StepBucket`, which `syncTimeSeries` re-reads over its rolling window — so the two
+halves of Today were answering the same question with different numbers, and the backup bears it out
+(29 Aug: snapshot 1,819, buckets 9,319).
+
+`TrackerRepository.syncFinishedDay` re-reads a date **only when what is cached for it was written
+before that date ended**, or when nothing is cached at all — a day nobody opened the app on has no
+row, which draws as a hole rather than as the day it was. `resyncFinishedDays` walks the last seven.
+The guard is the whole design: a re-read stamps `syncedAt` past the day's own end, so a day is read
+again once, ever, and every later refresh costs one indexed row read and stops. Without it this
+would be a week of Health Connect round trips on every refresh. `FinishedDaySyncTest` pins both
+halves, and the count is reported on the Activity card for `backfillGlucoseGaps`' reason — a figure
+that grew by four thousand between two glances, with nothing on screen to say why, is
+indistinguishable from one that had been wrong all along.
+
+**The steps figure has a second way to disagree with Garmin, and it is not this one.** `readSteps`
+falls through to the *combined* aggregate when the pinned source wrote nothing for the window —
+deliberately, so a watch that has not synced yet does not report a flat zero. On a day the pinned app
+genuinely wrote nothing, that silently reports the sum of every app instead, which double-counts a
+walk two apps both recorded. Check `preferredStepsPackage` before reading a mismatch as this one.
+
 **Runs are the one Activity chart read live rather than cached.** The Runs card stacks each running
 session by the minutes it spent in each heart-rate zone — Easy below 60% of max, Moderate to 75%,
 Hard to 90%, Intense at or above it (`domain/RunZones.kt`, boundaries closed at the bottom so a
@@ -1298,10 +1346,12 @@ figure is withheld.
 Rows are sorted by time and types with no sessions are absent, because the question is "where did
 this week go" and eight rows of nothing would bury the three that happened.
 
-**Glucose is cached a calendar day at a time and only *today* is ever re-read**, which is right for a
-finished day and wrong for one that was never finished properly: a monitor out of Bluetooth range
-writes its readings to Health Connect hours late, by which time nothing asks about the day they
-belong to and the hole is permanent. `domain/GlucoseGaps.kt` turns the holes themselves into the
+**Glucose is cached a calendar day at a time, and the day sync mostly asks about today**, which is
+right for a finished day and wrong for one that was never finished properly: a monitor out of
+Bluetooth range writes its readings to Health Connect hours late, by which time nothing asks about
+the day they belong to and the hole is permanent. (`resyncFinishedDays` re-reads a finished day once,
+which fills a week of these for free — but only once each, and a late write can arrive after it.)
+`domain/GlucoseGaps.kt` turns the holes themselves into the
 query — `TrackerRepository.backfillGlucoseGaps` finds the stretches of the last 72 hours with nothing
 in them and re-reads only those, with the `externalId` index throwing away what came back already
 known. **The window end counts as an edge**: a monitor that stopped an hour ago leaves its gap where
@@ -2176,7 +2226,8 @@ than special-cased. `MasterSeries.color` is the single source for all three uses
 `CaffeineLastCallTest` are the pure-JVM suites. `CsvBackupTest`, `SupplementsTest`, `HydrationEditTest`, `AftAttemptTest`, `RunProjectionTest`, `CardFoldTest` and `SleepSyncTest`
 are Robolectric
 repository suites alongside
-`MealDeletionTest`, pinning the behaviour that lives between two tables with no foreign key: the same
+`MealDeletionTest` and `FinishedDaySyncTest`, pinning the behaviour that lives between two tables
+with no foreign key: the same
 thing added twice is one entry, the same thing in two slots is two, a tick belongs to one day only,
 and removing a supplement takes its ticks with it. Adherence
 covers the midnight-wrapping window,

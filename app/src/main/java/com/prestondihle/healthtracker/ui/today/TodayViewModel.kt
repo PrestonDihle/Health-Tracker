@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -229,6 +230,38 @@ data class TodayUiState(
      * *when*. Null until the first sync of the day lands.
      */
     val snapshot: HealthDaySnapshot? = null,
+    /**
+     * Today's own rolled-up figures, whatever day the Activity card has been
+     * walked to.
+     *
+     * The summary strip is the only reader, and it needs its own copy for the
+     * reason it exists at all: it answers "how is today going". Reading
+     * [snapshot] left the strip stepping backwards with the card underneath it,
+     * so last Tuesday's step count sat above a graph of this afternoon --
+     * caught on the phone, invisible in every test, because at offset zero the
+     * two are the same row.
+     */
+    val todaySnapshot: HealthDaySnapshot? = null,
+    /**
+     * Which day the Activity card is reporting, and how far back that is.
+     *
+     * The card is the one thing on this screen that is a *day* rather than a
+     * window, and until it could be stepped it could only ever be today: the app
+     * would draw a year of steps as a chart and had no way to say what Tuesday's
+     * had been. The offset is carried alongside so the card knows whether forward
+     * is available without comparing dates against a clock it does not hold.
+     */
+    val selectedDay: LocalDate = LocalDate.now(),
+    val dayOffset: Long = 0L,
+    /**
+     * How many finished days the last refresh had to go back and read again.
+     *
+     * Reported rather than absorbed, for [TrackerRepository.backfillGlucoseGaps]'s
+     * reason: a figure the reader was looking at has just changed, and a chart
+     * that silently redraws itself is one nobody can tell from a chart that was
+     * wrong.
+     */
+    val daysRecovered: Int = 0,
     /** Average pace over runs of at least a mile, all-time. Not a personal best. */
     val bestMileSeconds: Int? = null,
     val goals: UserGoals = UserGoals(),
@@ -451,7 +484,8 @@ data class TodayUiState(
             )
 
     /**
-     * Calories eaten so far today. Nothing logged means nothing eaten.
+     * Calories eaten on the day the card is showing. Nothing logged means
+     * nothing eaten.
      *
      * Unlike the burn figures this is not a measurement that might simply not
      * have synced yet -- food reaches Health Connect only by being entered by
@@ -469,6 +503,11 @@ data class TodayUiState(
      */
     val netCalories: Int?
         get() = snapshot?.totalCalories?.let { caloriesEaten - it }
+
+    /** The same figure for today, for the strip. See [todaySnapshot]. */
+    val todayNetCalories: Int?
+        get() =
+            todaySnapshot?.totalCalories?.let { (todaySnapshot.dietaryCalories ?: 0) - it }
 
     val hasAnything: Boolean
         get() =
@@ -498,17 +537,31 @@ private data class PreferenceBundle(
     val smoothGlucose: Boolean,
     val labelledAxes: List<AxisMetric>,
     val snapshot: HealthDaySnapshot?,
+    val todaySnapshot: HealthDaySnapshot?,
     val bestMileSeconds: Int?,
+    val selectedDay: LocalDate,
+    val dayOffset: Long,
+    val daysRecovered: Int,
 )
 
 /**
  * The day rolled up, which no series on the plot can answer.
  *
  * Bundled separately and folded in below because `combine` takes five sources at
- * a time, and these two are the only ones here asked for as a *day* rather than
- * as a span.
+ * a time, and these are the only ones here asked for as a *day* rather than as a
+ * span. [day] rides along because it is what the snapshot is a snapshot *of*: the
+ * card names the day it is showing, and deriving that name separately would let
+ * the heading and the figures disagree across a midnight.
  */
-private data class DailyBundle(val snapshot: HealthDaySnapshot?, val bestMileSeconds: Int?)
+private data class DailyBundle(
+    val snapshot: HealthDaySnapshot?,
+    /** Always today, whatever day the card has been walked to. */
+    val todaySnapshot: HealthDaySnapshot?,
+    val bestMileSeconds: Int?,
+    val day: LocalDate,
+    val offset: Long,
+    val daysRecovered: Int,
+)
 
 /** Which slice of the timeline is on screen: how wide, and how far back. */
 private data class WindowBundle(val range: MasterRange, val panOffset: Duration)
@@ -521,6 +574,15 @@ private data class WindowBundle(val range: MasterRange, val panOffset: Duration)
  * somewhere worth being or returns it to following the clock.
  */
 internal val PAN_SNAP: Duration = Duration.ofMinutes(2)
+
+/**
+ * How far back the Activity card's day stepper will walk.
+ *
+ * A year, matching the widest range on Activity: a card that could be stepped
+ * past the oldest chart on the tab would be offering days no other screen admits
+ * to having, and every one of them would draw as dashes.
+ */
+internal const val MAX_DAY_OFFSET = 365L
 
 /**
  * Where a drag of [delta] leaves a window currently offset by [current].
@@ -628,12 +690,40 @@ class TodayViewModel(
     private val today: LocalDate
         get() = LocalDate.now(zoneId)
 
+    /**
+     * How many days back the Activity card is looking, zero being today.
+     *
+     * An offset rather than a date, like [panOffset] beside it, so a phone left
+     * open past midnight rolls the card onto the new day instead of pinning it to
+     * yesterday under a heading that says "Today".
+     */
+    private val dayOffset = MutableStateFlow(0L)
+
+    /** How many finished days the last refresh had to go back and read again. */
+    private val daysRecovered = MutableStateFlow(0)
+
+    /** The read fired by a tap on the day stepper, cancelled by the next tap. */
+    private var daySyncJob: Job? = null
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     private val daily: Flow<DailyBundle> =
-        combine(
-            repository.getHealthSnapshot(today),
-            repository.getBestMileSecondsAllTime(),
-            ::DailyBundle,
-        )
+        combine(dayOffset, daysRecovered, ::Pair).flatMapLatest { (offset, recovered) ->
+            val day = today.minusDays(offset)
+            combine(
+                repository.getHealthSnapshot(day),
+                // Today's as well, and separately. The summary strip is about
+                // *today* by definition -- it is the answer to "how is today
+                // going" -- and reading the card's snapshot left the strip
+                // walking backwards with the card, so a step count from last
+                // Tuesday appeared above a graph of this afternoon. At offset
+                // zero this is the same query twice, which is a subscription to
+                // spend rather than a branch to maintain.
+                repository.getHealthSnapshot(today),
+                repository.getBestMileSecondsAllTime(),
+            ) { snapshot, todaySnapshot, bestMile ->
+                DailyBundle(snapshot, todaySnapshot, bestMile, day, offset, recovered)
+            }
+        }
 
     private val preferences: Flow<PreferenceBundle> =
         combine(
@@ -650,7 +740,11 @@ class TodayViewModel(
                 smoothGlucose = settings?.smoothGlucose ?: false,
                 labelledAxes = axes,
                 snapshot = day.snapshot,
+                todaySnapshot = day.todaySnapshot,
                 bestMileSeconds = day.bestMileSeconds,
+                selectedDay = day.day,
+                dayOffset = day.offset,
+                daysRecovered = day.daysRecovered,
             )
         }
 
@@ -673,7 +767,11 @@ class TodayViewModel(
                 caffeine = series.caffeine,
                 sleep = series.sleep,
                 snapshot = prefs.snapshot,
+                todaySnapshot = prefs.todaySnapshot,
                 bestMileSeconds = prefs.bestMileSeconds,
+                selectedDay = prefs.selectedDay,
+                dayOffset = prefs.dayOffset,
+                daysRecovered = prefs.daysRecovered,
                 goals = prefs.goals,
                 smoothGlucose = prefs.smoothGlucose,
                 healthState = permission,
@@ -760,6 +858,53 @@ class TodayViewModel(
     }
 
     /**
+     * Walks the Activity card back a day, or forward when [delta] is negative.
+     *
+     * Forward stops at today, because there is nothing after it to report -- a
+     * card offering tomorrow would be a row of dashes with a working button
+     * beside it. Back stops at [MAX_DAY_OFFSET], which is as far as the health
+     * cache is kept for anything.
+     *
+     * Each step asks for that day, once. The read is guarded on whether the
+     * cached row was written before its own day ended, so walking back over a
+     * fortnight already brought up to date costs a local query per tap and
+     * nothing more.
+     */
+    fun stepDay(delta: Long) {
+        val next = (dayOffset.value + delta).coerceIn(0L, MAX_DAY_OFFSET)
+        if (next == dayOffset.value) return
+        dayOffset.value = next
+        syncSelectedDay()
+    }
+
+    /** Puts the card back on today, however far back it has been walked. */
+    fun backToToday() {
+        if (dayOffset.value == 0L) return
+        dayOffset.value = 0L
+    }
+
+    /**
+     * Fills in the day just stepped to, if nothing complete is held for it.
+     *
+     * Cancels the previous one rather than queueing: a reader holding the back
+     * arrow crosses a week in a couple of seconds, and every day but the one they
+     * stop on is a read whose result nobody sees.
+     */
+    private fun syncSelectedDay() {
+        daySyncJob?.cancel()
+        daySyncJob =
+            viewModelScope.launch {
+                if (healthState.value != HealthPermissionState.GRANTED) return@launch
+                val day = today.minusDays(dayOffset.value)
+                // Today belongs to `refresh`, which syncs the series alongside it.
+                if (day == today) return@launch
+                syncing.value = true
+                repository.syncFinishedDay(day)
+                syncing.value = false
+            }
+    }
+
+    /**
      * Moves `now` on, leaving a panned window where it was put.
      *
      * The clock advancing is what makes a live window follow the day, and it must
@@ -833,12 +978,28 @@ class TodayViewModel(
             // drawn from the very walk it could not report -- which is the shape
             // the sleep card already shipped in once, the other way round.
             repository.syncHealthData(today)
+            // And the day the Activity card is showing, when that is not today.
+            // The same rule the window above follows: a refresh press means
+            // "read what is on screen", and pressing it on Tuesday's figures to
+            // watch today's re-read would look exactly like a dead button.
+            // Unguarded, unlike the sweep below -- an explicit press is the one
+            // place a re-read should happen because it was asked for.
+            val shown = today.minusDays(dayOffset.value)
+            if (shown != today) repository.syncHealthData(shown, now)
             // Glucose is not part of either sync -- it is cached a calendar
             // day at a time -- so a hole in the trace this chart is drawing is
             // only ever filled by going back for it deliberately. Anchored at now
             // rather than at the window: the backfill covers a fixed 72 hours,
             // which is as far back as a monitor's late writes are worth chasing.
             repository.backfillGlucoseGaps(now)
+            // And the days that ended while nobody was looking. Until this ran,
+            // `syncHealthData` was only ever called with *today*, so every past
+            // day held whatever was true at the last moment the app happened to
+            // be open on it -- a morning reported as a whole day, permanently,
+            // on every chart fed by the daily snapshot. Last of the three,
+            // because it is the only part of a refresh about days the reader is
+            // not currently looking at.
+            daysRecovered.value = repository.resyncFinishedDays(today, now).getOrDefault(0)
             syncing.value = false
         }
     }

@@ -39,6 +39,7 @@ $classes = @(
   "AftAttemptTest", "RunProjectionTest", "CardFoldTest", "SleepSyncTest",
   "MealDeletionTest", "MealTimeStampTest", "MigrationSchemaTest", "PlotRangeTest",
   "FoodLogConfidenceTest", "PlankTest", "EnergyBalanceTest", "MetabolicScatterTest",
+  "FinishedDaySyncTest",
   "ExampleUnitTest", "ExampleRobolectricTest"
 )
 

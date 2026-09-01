@@ -91,7 +91,7 @@ class SleepSyncTest {
             val (from, to) = window
             repository.syncTimeSeries(from, to)
 
-            val night = repository.getLatestSleepNight().first()
+            val night = repository.getSleepNight().first()
             assertNotNull(night)
             assertEquals(bedtime, night!!.start)
             assertEquals(3, night.stages.size)
@@ -110,7 +110,7 @@ class SleepSyncTest {
             repository.syncTimeSeries(from, to)
             repository.syncTimeSeries(from, to)
 
-            val night = repository.getLatestSleepNight().first()
+            val night = repository.getSleepNight().first()
             assertEquals(2, night!!.stages.size)
             // The figure that would give a doubled table away on the card.
             assertEquals(Duration.ofMinutes(105), night.totalAsleep)
@@ -136,13 +136,13 @@ class SleepSyncTest {
         runBlocking {
             val (from, to) = window
             repository.syncTimeSeries(from, to)
-            assertEquals(4, repository.getLatestSleepNight().first()!!.stages.size)
+            assertEquals(4, repository.getSleepNight().first()!!.stages.size)
 
             // Re-scored: the waking is gone and the light sleep is one stretch.
             source.night = sessionOf(stages(SleepStage.LIGHT to 60L, SleepStage.DEEP to 60L))
             repository.syncTimeSeries(from, to)
 
-            val night = repository.getLatestSleepNight().first()!!
+            val night = repository.getSleepNight().first()!!
             assertEquals(2, night.stages.size)
             assertEquals(Duration.ZERO, night.awake)
             assertEquals(Duration.ofMinutes(60), night.light)
