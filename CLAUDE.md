@@ -58,6 +58,13 @@ adb exec-out run-as com.prestondihle.healthtracker cat databases/tracker_databas
 The `-wal` and `-shm` files go with it; a backup of the main file alone can be missing the most
 recent writes.
 
+**Take that pull through a POSIX shell, never PowerShell.** `>` in PowerShell is `Out-File`, which
+applies text encoding — so `adb exec-out ... > tracker_database` writes a UTF-8 BOM in front of
+`SQLite format 3` and mangles what follows. The file is still 1.1 MB and still looks like a backup;
+`sqlite3` simply refuses to open it. A corrupted backup discovered at restore time is the worst
+possible moment, so **check the header magic before trusting a copy** — `head -c 16 … | xxd` should
+start `5351 4c69`, not `efbb bf53`. `PRAGMA integrity_check` on the pulled file is the other half.
+
 **Then reading that backup with `sqlite3` makes the two companions disappear, and that is fine.**
 Opening a database that has a `-wal` beside it checkpoints the log into the main file and removes
 both companions on a clean close — so a backup directory inspected once ends up holding a single
@@ -1391,6 +1398,22 @@ for ever and the catch-up would never converge past the horizon.
 already dropped out of the walk — and adds the two counts into the one `daysRecovered` figure. The
 reader is being told one thing, how many past days moved under them, and which mechanism found each
 is not a distinction they have any use for.
+
+**Changing the step source does not re-open days that have already settled, and that was measured
+rather than reasoned about.** `setPreferredStepsPackage` re-syncs *today*, on the reasoning that the
+cached figure came from the old preference — but that reasoning covers every cached day equally, and
+the settle window is what stops it being acted on. On the phone this landed on, the sweep and the deep
+walk healed 15 August through 29 August while the Garmin pin was still set, so those days hold pinned
+figures permanently. Checked against Garmin Connect's own screen afterwards: every one of them matches
+it **exactly** except the two that carried a tracked activity, where the pinned read is 24% and 47%
+short (25 Aug 11,446 against 8,659; 24 Aug 6,762 against 3,559). The merged days either side sit
+within 3.5%.
+
+So a pin change arguably ought to invalidate the history rather than only today. It is **not
+implemented** — it makes one tap in Settings spend a bounded burst of Health Connect reads, which is a
+policy call rather than a bug fix. Widening `FINISHED_DAY_SETTLE` to cover it would be the wrong
+instrument: it would charge every refresh, for ever, for something that happens when a setting
+changes. The stopgap is the walk-back refresh, which re-reads the shown day unguarded.
 
 **The step count and the chart under it can no longer disagree, and that is by construction rather
 than by timing.** `syncHealthData` reads the day's merged slices, writes them to `StepBucket`, and
