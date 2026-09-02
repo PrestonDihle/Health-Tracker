@@ -229,21 +229,21 @@ each other.
 
 ## The usual, in one tap
 
-At the top of Log: a chip for your usual glass of water, one for your last
-caffeine dose, and one for whatever is left of the current supplement slot. The
-widget made the case — water, caffeine and the stack are the things logged while
-doing something else, and Log should not be slower than a home screen for them.
+At the top of Log, three rows of chips: four water sizes, your caffeine, and
+whatever is left of the current supplement slot. The widget made the case —
+water, caffeine and the stack are the things logged while doing something else,
+and Log should not be slower than a home screen for them.
 
-Nothing is set up and nothing is stored. The chips are read from what you have
-actually been logging over the last month, so they follow your habits without
-being told about them, and a chip with no habit behind it simply is not there.
+Water offers **1 oz, 4 oz, 100 ml and 500 ml**, the same four the Fuel screen
+gives you, so the glass you have just poured is one tap away from whichever tab
+you happen to have open. Caffeine offers the **35 mg** tablet next to **your last
+dose** — change cup and that second chip changes with you the next day, and on a
+day your last dose was already the tablet you get one chip rather than the same
+number twice.
 
-The two are guessed differently on purpose. **Caffeine repeats your last dose**,
-because coffee is drunk in whatever the current cup is — change cup and the chip
-changes with you the next day. **Water offers the volume you log most often**,
-because a bottle is a bottle and one odd glass should not become the suggestion
-just for being the most recent. Neither ever offers an average: the average of a
-bottle and a glass is a quantity you own no container for.
+Nothing is set up and nothing is stored. Labels are short — `4 oz H2O`,
+`35 mg CAF` — because this one card writes three different things, and an amount
+on its own would not tell you which of them a tap lands on.
 
 The supplement chip follows the clock rather than always offering the morning,
 and says how many it will tick — it is the one button here that writes several

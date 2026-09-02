@@ -1048,8 +1048,12 @@ private const val DEFAULT_CAFFEINE_MG = 70
  * A tablet, which is the only amount here that is genuinely fixed -- a cup
  * varies with the cup, and [DEFAULT_CAFFEINE_MG] is a starting point for the
  * dialog rather than a claim about what was drunk.
+ *
+ * Internal rather than private because the Log screen's "Usual" row offers the
+ * same tablet, and two copies of the number would be one number to change and
+ * one to forget.
  */
-private const val QUICK_CAFFEINE_MG = 35
+internal const val QUICK_CAFFEINE_MG = 35
 
 /** Null means the dialog is logging a new dose; a value means it is editing that one. */
 private sealed interface CaffeineDialog {

@@ -429,18 +429,36 @@ from the axis the series is read against, so spelling the unit into the label re
 
 ### The usual row on Log
 
-`domain/UsualIntake.kt` derives Log's one-tap shortcuts — repeat the last caffeine dose, log the usual
-water volume, take what is left of the current supplement slot. **Nothing is stored**: no favourite to
-set up, none to go stale, and the row fills itself in from rows already on disk.
+Log's one-tap shortcuts, three rows of chips: four fixed water sizes, then caffeine, then whatever is
+left of the current supplement slot. **Nothing is stored** — no favourite to set up and none to go
+stale — but only the caffeine row is still *derived*, and that split is the thing to hold on to.
 
-**The two intakes read their history differently and that is the substance of it.** Caffeine takes the
-*last* dose, because it is drunk in whatever the current cup is — somebody who has moved from a 95 mg
-cup to a 150 mg one wants the new one on the second day, not once the tally catches up. Water takes
-the *mode*, because a bottle is a bottle and one odd glass should not become the suggestion just for
-being most recent. A mean is never offered either way: the mean of a 500 ml bottle and a 250 ml glass
-is 375 ml, a quantity with no container behind it, and the point is a button that matches something
-real. Ties on the mode go to whichever volume was used more recently, since two volumes used equally
-often are a habit mid-change.
+**The fixed sizes are what make the row work on an empty day.** Water offers 1 oz, 4 oz, 100 ml and
+500 ml, the same four the Hydration card writes; caffeine offers the 35 mg tablet, read from
+`QUICK_CAFFEINE_MG`, which is `internal` in `ui/fuel/FuelScreen.kt` precisely so the two cards cannot
+drift apart. None of them need history, so the card has no empty state left to show. It used to have
+one — a sentence saying there was nothing to repeat yet — and that sentence is gone because the case
+it covered can no longer happen.
+
+**Caffeine is the one chip still read from disk.** It takes the *last* dose, because it is drunk in
+whatever the current cup is — somebody who has moved from a 95 mg cup to a 150 mg one wants the new
+one on the second day, not once the tally catches up. It sits before the tablet and drops out when it
+*is* the tablet, so the row never offers 35 mg twice.
+
+**A row per substance, and the labels abbreviated to fit.** Chips read `4 oz H2O` and `35 mg CAF`
+rather than naming the substance in full: this one card writes three different things, so an amount
+alone would not say which a tap lands on, and the whole word cost more width than four chips had to
+spare. Water is split ounces-then-millilitres, the same split the Hydration card makes — left as one
+wrapping row of four, the phone put three on the first line and stranded the fourth on a line of its
+own looking like a bug.
+
+**`UsualIntake.usualVolume` is still here, still tested, and no longer displayed.** Water took the
+*mode* of the last month — a bottle is a bottle, and one odd glass should not become the suggestion
+just for being most recent; a mean was never offered, since the mean of a 500 ml bottle and a 250 ml
+glass is 375 ml, a quantity with no container behind it. The fixed sizes replaced it, but
+`usualWaterMl` is still computed on every `usual` emission and read by nobody. Either delete it with
+`usualVolume` and its tests, or put the derived chip back beside the fixed four; what is there now is
+a month of hydration scanned for a number nothing shows.
 
 `slotAt` follows the clock rather than always offering the morning — a row proposing the morning's
 pills at nine at night is a row nobody taps. Boundaries are noon and five, where the words stop being
@@ -2436,8 +2454,10 @@ winter's rate. It also pins that the segment leaves from the fitted value rather
 that happened to be high.
 `UsualIntakeTest` pins the asymmetry between the two intakes in both directions — caffeine following
 the newer cup while the count still favours the old one, water holding to the bottle when the last
-entry was a glass — because either rule looks reasonable applied to the wrong one, and a wrong
-suggestion here writes into live data on a single tap with no dialog in between.
+entry was a glass — because either rule looks reasonable applied to the wrong one. Only the caffeine
+half still reaches a chip, and it is the half where a wrong suggestion writes into live data on a
+single tap with no dialog in between; the water half now guards a function no screen calls, and is
+listed under *The usual row on Log* as something to settle rather than to keep testing forever.
 `SleepTest` pins the two ways a night can be reported wrongly while looking entirely plausible on the
 card: counting waking time as sleep, which flatters every night by however long was spent staring at
 the ceiling, and drawing an unstaged stretch at a named stage's height, which reports a measurement
@@ -2589,7 +2609,7 @@ When the render suites cannot be trusted, the other classes run in well under a 
 unaffected — they render no Compose, so `AppNotIdleException` cannot reach them. **`tools/fast-gate.ps1`
 is that gate**, and it names every class explicitly because Gradle has no "exclude these two". It
 prints its own class and test counts at the end, so the figure quoted in a commit is one the run
-produced rather than one remembered — currently **50 classes, 430 tests**. Keep the list in step when
+produced rather than one remembered — currently **50 classes, 439 tests**. Keep the list in step when
 a test class is added: a class missing from it silently stops being gated on. Say plainly in the
 commit which of the two was verified; a test count that quietly means something narrower than usual
 is worse than no count.

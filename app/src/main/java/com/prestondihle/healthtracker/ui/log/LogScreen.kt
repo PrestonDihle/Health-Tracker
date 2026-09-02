@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import com.prestondihle.healthtracker.domain.Units
 import com.prestondihle.healthtracker.ui.components.CardGap
 import com.prestondihle.healthtracker.ui.components.MealListCard
 import com.prestondihle.healthtracker.ui.components.TrackerCard
+import com.prestondihle.healthtracker.ui.fuel.QUICK_CAFFEINE_MG
 import com.prestondihle.healthtracker.ui.reorder.CardOrderViewModel
 import com.prestondihle.healthtracker.ui.reorder.ReorderableCard
 import com.prestondihle.healthtracker.ui.reorder.reorderableCards
@@ -90,7 +90,12 @@ fun LogScreen(
                 usual = usual,
                 onWater = {
                     viewModel.logHydration(it)
-                    toast("Logged ${Units.mlToWholeOz(it)} oz")
+                    // Both units, for the same reason the Hydration list carries
+                    // both: half the chips above are labelled in millilitres now,
+                    // and an ounces-only confirmation answered a tap on "100 ml"
+                    // with "Logged 3 oz", which reads as having logged the wrong
+                    // thing rather than as the same drink in the other unit.
+                    toast("Logged $it ml · ${Units.mlToWholeOz(it)} oz")
                 },
                 onCaffeine = {
                     viewModel.logCaffeine(it)
@@ -253,15 +258,20 @@ fun LogScreen(
 }
 
 /**
- * One tap for each of the things done most often, or nothing where there is no
- * habit to repeat.
+ * One tap for each of the things logged most often.
  *
- * Every chip here is derived from rows already on disk -- no favourite is stored,
- * so there is nothing to set up and nothing to go stale. A chip whose suggestion
- * cannot be read simply does not appear, and when none of them can the card says
- * so in a sentence rather than showing an empty row. That matters on a first run:
- * a strip of dead buttons is a feature that looks broken, where a sentence is a
- * feature that has not started yet.
+ * Two kinds of shortcut share the card. The fixed sizes -- the same four drinks
+ * the Hydration card offers and the same tablet the Caffeine card offers -- do
+ * not depend on history, so they work on a first run and on a day nothing has
+ * been logged yet, which is what makes this row worth pinning above everything
+ * else. The last caffeine dose is the one chip still read from disk, because a
+ * cup is whatever the current cup is and no fixed button can guess it; it drops
+ * out when it is already the tablet, so the row never offers 35 mg twice.
+ *
+ * A row per substance rather than one strip of everything. Mixed together the
+ * unit was left doing all the separating -- "500 ml" beside "35 mg" reads as a
+ * list of amounts rather than as two different things -- and a reader after
+ * water now looks along one line instead of at alternate chips.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -274,29 +284,36 @@ private fun UsualCard(
 ) {
     val outstanding = state.outstandingInSlot
     TrackerCard(title = "Usual", subtitle = "one tap for what you log most") {
-        if (usual.usualWaterMl == null && usual.lastCaffeineMg == null && outstanding.isEmpty()) {
-            Text(
-                // Three separate reasons collapse into one sentence deliberately:
-                // the reader does not need to be told which of them applies, only
-                // that the row fills itself in.
-                "Nothing to repeat yet. Log a drink, a coffee or a supplement and " +
-                    "the shortcuts appear here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            return@TrackerCard
+        QUICK_WATER.forEach { row ->
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (amount, ml) ->
+                    // Every chip still names its substance, unlike the Hydration
+                    // card's bare "+4 oz": that card's title said water, where
+                    // three different things are logged from this one and an
+                    // amount alone would not say which a tap writes. Abbreviated
+                    // because naming it four times over cost more width than the
+                    // chips had to spare, and H2O against mg is as easy to tell
+                    // apart at a glance as the whole word was.
+                    AssistChip(onClick = { onWater(ml) }, label = { Text("$amount H2O") })
+                }
+            }
         }
+
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            usual.usualWaterMl?.let { ml ->
-                AssistChip(
-                    onClick = { onWater(ml) },
-                    label = { Text("${Units.mlToWholeOz(ml)} oz water") },
-                )
+            // The habit first, the tablet after it: the dose actually drunk last
+            // is the likelier tap, and appending rather than inserting leaves the
+            // tablet in the same place whether or not there is a history to read.
+            usual.lastCaffeineMg?.takeIf { it != QUICK_CAFFEINE_MG }?.let { mg ->
+                AssistChip(onClick = { onCaffeine(mg) }, label = { Text("$mg mg CAF") })
             }
-            usual.lastCaffeineMg?.let { mg ->
-                AssistChip(onClick = { onCaffeine(mg) }, label = { Text("$mg mg caffeine") })
-            }
-            if (outstanding.isNotEmpty()) {
+            AssistChip(
+                onClick = { onCaffeine(QUICK_CAFFEINE_MG) },
+                label = { Text("$QUICK_CAFFEINE_MG mg CAF") },
+            )
+        }
+
+        if (outstanding.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(
                     onClick = { onSlot(outstanding) },
                     // Names the slot and the count, because this is the one chip
@@ -313,3 +330,33 @@ private fun UsualCard(
         }
     }
 }
+
+/**
+ * The drinks offered as one tap: a row of ounces, then a row of millilitres.
+ *
+ * The same four sizes the Hydration card writes, chosen there for reasons that
+ * hold just as well a tab away: a sip taken with a tablet is a real entry that
+ * used to be rounded up to four ounces or left out, and 500 ml is the bottle,
+ * which used to cost five taps of a hundred.
+ *
+ * Grouped into rows here rather than left to wrap. Splitting by unit is the
+ * split the Hydration card already makes, and for the same reason: a reader
+ * after ounces reads along one row instead of at alternate chips. The phone is
+ * what made it a rule rather than a preference -- left as one list of four, and
+ * before the labels were shortened, these came out three-and-one with the last
+ * chip stranded on a line of its own looking like a mistake. Shorter labels
+ * would fit four across now, but the grouping is the point and the pairing
+ * survives a longer word being put back. Each row is still a [FlowRow], so a
+ * screen too narrow for two chips wraps rather than squeezing them past the
+ * point of being readable or hittable.
+ *
+ * The label is carried beside the amount rather than derived from it, because
+ * these are stored as millilitres either way and rendering 1 oz back out of 30
+ * ml would print "1 oz" only by luck of the rounding. Which unit a chip shows is
+ * a question of the number the reader has in mind, not of what lands on disk.
+ */
+private val QUICK_WATER: List<List<Pair<String, Int>>> =
+    listOf(
+        listOf("1 oz" to Units.flOzToMl(1f), "4 oz" to Units.flOzToMl(4f)),
+        listOf("100 ml" to 100, "500 ml" to 500),
+    )
